@@ -150,6 +150,7 @@ def roll_assignments(
     doors_to_change: Iterable[str],
     change_doors_to: Iterable[str],
     mode: str = "individual_doors",
+    start_counts: Optional[Dict[str, int]] = None,
 ) -> Dict[PhysicalKey, str]:
     """Return { (scenario, actor): weakness_name }. Empty when vanilla."""
     if mode in ("vanilla", "off", None) or mode == 0:
@@ -164,7 +165,9 @@ def roll_assignments(
         return {}
 
     groups = collect_physical_doors(logic.parser)
-    start_inv = logic.inventory_from_counts({})
+    # Include any guaranteed starting items, otherwise the frontier we keep
+    # vanilla is smaller than what the player actually opens with.
+    start_inv = logic.inventory_from_counts(dict(start_counts or {}))
     protected = start_frontier_keys(logic, start_inv)
 
     # Per-scenario shield budget (each shielded door costs 2 ids).

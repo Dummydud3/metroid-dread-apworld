@@ -19,6 +19,7 @@ from .Rules import set_rules
 from .dread_logic import DreadLogic
 from .starting_locations import get_by_option_key, get_default, load_starting_locations
 from . import DoorRando
+from . import StartKit
 from . import TransportRando
 
 # Register launcher component
@@ -28,6 +29,17 @@ except ImportError:
     pass
 
 DREAD_PATCH_EXTRAS_MARKER = "DREAD_PATCH_EXTRAS_JSON:"
+
+_GOAL_NODE = ("Itorash", "Raven Beak Arena", "Boss - Raven Beak")
+
+# Share of the world a start has to reach with a full inventory to be usable.
+_MIN_START_COVERAGE = 0.8
+
+# Checks that have to be in logic on the starting kit alone. The assumed fill
+# needs somewhere to put the very first progression item, and a single check
+# leaves it no room to manoeuvre. Starts the kit cannot lift this high get
+# relocated rather than handed an ever-growing pile of items.
+_MIN_START_CHECKS = StartKit.MIN_START_LOCATIONS
 
 # Boss / EMMI defeat-style pickups (for DNA placement + include_boss_pickups).
 _BOSS_EMMI_LOCATION_SUBSTR = (
@@ -101,15 +113,24 @@ class MetroidDreadWorld(World):
     transport_matching: dict
     elevator_patches: list
     patch_extras: dict
+    start_kit: list
 
     def generate_early(self):
         self.logic = DreadLogic(self)
-        self._resolve_starting_location()
         self.door_assignments = {}
         self.door_patches = []
         self.transport_matching = {}
         self.elevator_patches = []
         self.patch_extras = {}
+        self.start_kit = []
+
+        self._resolve_starting_location()
+
+        # Most valid_starting_location nodes have no pickup in logic on an empty
+        # inventory, which the assumed fill cannot work with. Roll the kit that
+        # reopens the start (see StartKit) before door rando, so the doors it
+        # needs are part of the frontier that stays vanilla.
+        self._roll_start_kit()
 
         # Door lock rando (mutate graph, then rebuild adjacency).
         if self.options.door_lock_rando.value == 1:
@@ -119,6 +140,7 @@ class MetroidDreadWorld(World):
                 doors_to_change=self.options.doors_to_change.value,
                 change_doors_to=self.options.change_doors_to.value,
                 mode="individual_doors",
+                start_counts=StartKit.kit_counts(self.start_kit),
             )
             DoorRando.apply_assignments(self.logic.parser, self.door_assignments)
             self.door_patches = DoorRando.assignments_to_door_patches(self.door_assignments)
@@ -136,7 +158,13 @@ class MetroidDreadWorld(World):
                 )
 
         if self.door_assignments or self.transport_matching:
+            vanilla_kit = self.start_kit
             self.logic.rebuild_graph()
+            # Rando can still cost the start a few checks; top the kit back up,
+            # and if that is not enough, go back to the graph we validated.
+            self.start_kit = StartKit.build_start_kit(self, base_kit=vanilla_kit)
+            if self._start_checks() < _MIN_START_CHECKS:
+                self._revert_randomizers(vanilla_kit)
 
         self._build_patch_extras_base()
 
@@ -173,30 +201,126 @@ class MetroidDreadWorld(World):
             "flash_shift_upgrade_amount": int(self.options.flash_shift_upgrade_amount.value),
             "flash_shift_included_ammo": int(self.options.flash_shift_included_ammo.value),
             "start_with_pulse_radar": bool(self.options.start_with_pulse_radar.value),
+            "starting_items": StartKit.odr_starting_items(self.start_kit),
         }
+
+    def _start_checks(self) -> int:
+        return StartKit.start_checks(self, StartKit.kit_counts(self.start_kit))
+
+    def _roll_start_kit(self) -> None:
+        """Pick the starting kit, relocating if this start cannot be opened.
+
+        A handful of save rooms — Burenia's south room is the worst, sitting
+        underwater behind a four-item gate — need more handed to the player
+        than is reasonable. Moving the start is much better than shipping a
+        seed the fill cannot complete.
+        """
+        self.start_kit = StartKit.build_start_kit(self)
+        if self._start_checks() >= _MIN_START_CHECKS:
+            return
+
+        original = self.logic.starting_node
+        original_kit = self.start_kit
+        candidates = list(load_starting_locations())
+        self.random.shuffle(candidates)
+        for info in candidates:
+            if info.node_id == original or not self._start_is_viable(info.node_id):
+                continue
+            self.logic.set_starting_node(info.node_id)
+            self.start_kit = StartKit.build_start_kit(self)
+            if self._start_checks() >= _MIN_START_CHECKS:
+                print(
+                    f"[Metroid Dread Player {self.player}] starting location "
+                    f"{'/'.join(original)} has too little in logic to fill from; "
+                    f"moved to {info.path}"
+                )
+                return
+
+        self.logic.set_starting_node(original)
+        self.start_kit = original_kit
+
+    def _revert_randomizers(self, vanilla_kit: list) -> None:
+        """Drop door / transport rando and go back to the vanilla graph."""
+        node = self.logic.starting_node
+        self.logic = DreadLogic(self)
+        self.logic.set_starting_node(node)
+        self.door_assignments = {}
+        self.door_patches = []
+        self.transport_matching = {}
+        self.elevator_patches = []
+        self.start_kit = vanilla_kit
+        print(
+            f"[Metroid Dread Player {self.player}] door / transport rando left "
+            f"{'/'.join(node)} with too little in logic; reverted to vanilla"
+        )
+
+    def _full_inventory_counts(self) -> dict:
+        """Every real item, in quantities past any progressive / DNA threshold."""
+        return {name: 12 for name, data in item_table.items() if data.id is not None}
+
+    def start_coverage(self, node) -> float:
+        """Fraction of active checks in logic from `node` with everything collected.
+
+        Returns 0.0 when Raven Beak is unreachable. A few RDV
+        valid_starting_location nodes (Elun, Cataris Save Station East, the
+        Itorash elevator) sit behind one-way transitions, so a seed started
+        there can never be completed no matter how the items fall.
+        """
+        previous = self.logic.starting_node
+        try:
+            self.logic.set_starting_node(node)
+            nodes = self.logic.get_reachable_nodes(
+                self.logic.inventory_from_counts(self._full_inventory_counts())
+            )
+        finally:
+            self.logic.set_starting_node(previous)
+        if _GOAL_NODE not in nodes:
+            return 0.0
+        active = set(self.active_location_names())
+        if not active:
+            return 0.0
+        in_logic = sum(
+            1 for name, pickup in self.logic.pickup_nodes.items()
+            if pickup in nodes and name in active
+        )
+        return in_logic / len(active)
+
+    def _start_is_viable(self, node) -> bool:
+        return self.start_coverage(node) >= _MIN_START_COVERAGE
 
     def _resolve_starting_location(self) -> None:
         """Apply YAML starting_location: default | random_save_station | specific."""
         key = self.options.starting_location.current_key
-        if key == "default":
-            info = get_default()
-            self.logic.set_starting_node(info.node_id)
-            return
+        starts = load_starting_locations()
+
         if key == "random_save_station":
-            starts = load_starting_locations()
             if not starts:
-                starts_nodes = self.logic.parser.get_starting_nodes()
-                if starts_nodes:
-                    self.logic.set_starting_node(self.random.choice(starts_nodes))
+                start_nodes = self.logic.parser.get_starting_nodes()
+                if start_nodes:
+                    self.logic.set_starting_node(self.random.choice(start_nodes))
                 return
-            chosen = self.random.choice(starts)
-            self.logic.set_starting_node(chosen.node_id)
-            return
-        info = get_by_option_key(key)
-        if info is None:
-            raise Exception(
-                f"Unknown Metroid Dread starting_location option: {key!r}"
+            shuffled = list(starts)
+            self.random.shuffle(shuffled)
+            info = next((s for s in shuffled if self._start_is_viable(s.node_id)), shuffled[0])
+        elif key == "default":
+            info = get_default()
+        else:
+            info = get_by_option_key(key)
+            if info is None:
+                raise Exception(
+                    f"Unknown Metroid Dread starting_location option: {key!r}"
+                )
+
+        if not self._start_is_viable(info.node_id):
+            fallback = next(
+                (s for s in starts if self._start_is_viable(s.node_id)), None
+            ) or get_default()
+            print(
+                f"[Metroid Dread Player {self.player}] starting location "
+                f"{info.path} cannot reach Raven Beak; falling back to {fallback.path}"
             )
+            info = fallback
+
         self.logic.set_starting_node(info.node_id)
 
     def create_regions(self):
@@ -274,15 +398,27 @@ class MetroidDreadWorld(World):
         if required_dna > 0:
             items_to_create["Metroid DNA"] = required_dna
 
+        # The start kit is handed to the player instead of being shuffled; the
+        # filler top-up below refills the freed locations.
+        granted = []
+        for pool_item in self.start_kit:
+            if items_to_create.get(pool_item, 0) <= 0:
+                continue
+            items_to_create[pool_item] -= 1
+            self.multiworld.push_precollected(self.create_item(pool_item))
+            granted.append(pool_item)
+        self.start_kit = granted
+        self.patch_extras["starting_items"] = StartKit.odr_starting_items(granted)
+
         for item_name, count in items_to_create.items():
             for _ in range(count):
                 itempool.append(self.create_item(item_name))
 
-        if self.options.early_morph_ball:
+        if self.options.early_morph_ball and items_to_create.get("Morph Ball", 0) > 0:
             self.multiworld.local_early_items[self.player]["Morph Ball"] = 1
 
         # Exclude boss/EMMI checks → fewer locations, trim filler accordingly.
-        active_locations = self._active_location_names()
+        active_locations = self.active_location_names()
         total_locations = len(active_locations)
         items_created = len(itempool)
 
@@ -307,7 +443,7 @@ class MetroidDreadWorld(World):
 
         self.multiworld.itempool += itempool
 
-    def _active_location_names(self) -> List[str]:
+    def active_location_names(self) -> List[str]:
         names = list(location_table.keys())
         if self.options.include_boss_pickups:
             return names
@@ -340,7 +476,7 @@ class MetroidDreadWorld(World):
 
     def _dna_candidate_locations(self) -> List[str]:
         mode = int(self.options.dna_placement.value)
-        active = set(self._active_location_names())
+        active = set(self.active_location_names())
         if mode == 0:  # prefer_emmi
             substrs = _EMMI_DNA_SUBSTR
         elif mode == 1:  # prefer_bosses
@@ -375,11 +511,12 @@ class MetroidDreadWorld(World):
             self.multiworld.itempool.remove(item)
 
     def generate_basic(self):
+        kit = ", ".join(StartKit.logical_names(self.start_kit)) or "none"
         print(
             f"[Metroid Dread Player {self.player}] "
             f"RDV logic graph active (start={self.logic.starting_node}); "
             f"doors={len(self.door_patches)} elevators={len(self.elevator_patches)} "
-            f"dna={self.options.required_dna.value}"
+            f"dna={self.options.required_dna.value} start_kit={kit}"
         )
 
     def fill_slot_data(self):
@@ -420,6 +557,9 @@ class MetroidDreadWorld(World):
         spoiler_handle.write(
             f"Starting Location ({player}): {region}/{area}/{node}\n"
         )
+        if self.start_kit:
+            kit = ", ".join(StartKit.logical_names(self.start_kit))
+            spoiler_handle.write(f"Starting Items ({player}): {kit}\n")
         extras = dict(self.patch_extras or {})
         # Record DNA locations for hint_all_dna after fill — filled in write_spoiler.
         spoiler_handle.write(

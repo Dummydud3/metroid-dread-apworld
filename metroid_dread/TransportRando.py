@@ -142,6 +142,11 @@ def roll_connected_matching(
         "Speed Booster": 1, "Spider Magnet": 1, "Spin Boost": 1, "Space Jump": 1,
         "Screw Attack": 1, "Energy Tank": 12, "Missile Tank": 20, "Power Bomb Tank": 5,
     }
+    def refresh() -> None:
+        # Dock targets are baked into the adjacency cache, so a plain cache
+        # clear would leave the reachability check looking at the old graph.
+        logic.rebuild_graph()
+
     baseline_inv = logic.inventory_from_counts(full_counts)
     baseline = logic.get_reachable_nodes(baseline_inv)
     baseline_pickups = {
@@ -158,8 +163,7 @@ def roll_connected_matching(
         ok = False
         try:
             inv = logic.inventory_from_counts(full_counts)
-            if hasattr(logic, "clear_cache"):
-                logic.clear_cache()
+            refresh()
             reach = logic.get_reachable_nodes(inv)
             pickups = {name for name, node in logic.pickup_nodes.items() if node in reach}
             ok = baseline_pickups <= pickups
@@ -167,8 +171,7 @@ def roll_connected_matching(
             if not ok:
                 for sid, conn in backups.items():
                     transports[sid]["node"]["default_connection"] = conn
-                if hasattr(logic, "clear_cache"):
-                    logic.clear_cache()
+                refresh()
         if ok:
             return matching, transports
 

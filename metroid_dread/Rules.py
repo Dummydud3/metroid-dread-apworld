@@ -1,6 +1,3 @@
-"""
-Metroid Dread access rules — live Randovania graph evaluation.
-"""
 
 from worlds.generic.Rules import set_rule
 from BaseClasses import MultiWorld, CollectionState
@@ -8,7 +5,6 @@ from BaseClasses import MultiWorld, CollectionState
 from .Options import MetroidDreadOptions
 from .Events import event_locations
 from .Locations import location_table
-
 
 def set_rules(multiworld: MultiWorld, player: int, options: MetroidDreadOptions):
     world = multiworld.worlds[player]
@@ -36,7 +32,6 @@ def set_rules(multiworld: MultiWorld, player: int, options: MetroidDreadOptions)
     except KeyError:
         pass
 
-    # Goal is always defeat Raven Beak (DNA is a gate, not a separate win).
     multiworld.completion_condition[player] = lambda state: (
         state.has("Raven Beak Defeated", player)
     )

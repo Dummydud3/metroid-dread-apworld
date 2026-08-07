@@ -1,9 +1,3 @@
-"""
-Live Randovania logic bridge for Metroid Dread Archipelago.
-
-Evaluates the logic_database node graph against CollectionState so assumed fill
-respects one-ways, events, and lock-ins (e.g. ElunReleaseX / frozen Artaria).
-"""
 
 from __future__ import annotations
 
@@ -19,9 +13,8 @@ from .Events import EVENT_RESOURCE_TO_ITEM
 if TYPE_CHECKING:
     from . import MetroidDreadWorld
 
-NodeId = Tuple[str, str, str]  # region, area, node
+NodeId = Tuple[str, str, str]
 
-# RDV trick short name -> MetroidDreadOptions field
 TRICK_TO_OPTION: Dict[str, str] = {
     "Knowledge": "knowledge_tricks",
     "Movement": "movement_tricks",
@@ -51,7 +44,6 @@ TRICK_TO_OPTION: Dict[str, str] = {
     "SlopeClimb": "climb_sloped_surfaces",
 }
 
-# Individual AP names implied by progressive counts
 PROGRESSIVE_EXPAND: Dict[str, Tuple[str, ...]] = {
     "Progressive Beam": ("Wide Beam", "Plasma Beam", "Wave Beam"),
     "Progressive Charge Beam": ("Charge Beam", "Diffusion Beam"),
@@ -61,8 +53,6 @@ PROGRESSIVE_EXPAND: Dict[str, Tuple[str, ...]] = {
     "Progressive Spin": ("Spin Boost", "Space Jump"),
 }
 
-# RDV item short name -> AP item (None = always owned / not an item)
-# Keys must match logic_database/header.json resource_database.items
 ITEM_SHORT_TO_AP: Dict[str, Optional[str]] = {
     "Nothing": None,
     "Power": None,
@@ -73,7 +63,7 @@ ITEM_SHORT_TO_AP: Dict[str, Optional[str]] = {
     "Charge": "Charge Beam",
     "Diffusion": "Diffusion Beam",
     "Grapple": "Grapple Beam",
-    "MissileLauncher": None,  # always available in Dread
+    "MissileLauncher": None,
     "Supers": "Super Missile",
     "Ice": "Ice Missile",
     "Storm": "Storm Missile",
@@ -95,13 +85,12 @@ ITEM_SHORT_TO_AP: Dict[str, Optional[str]] = {
     "Screw": "Screw Attack",
     "ETank": "Energy Tank",
     "EFragment": "Energy Part",
-    "MissileAmmo": None,  # capacity; base missiles always usable
+    "MissileAmmo": None,
     "PBAmmo": "__pb_ammo__",
-    "Slide": None,  # default ability
+    "Slide": None,
     "Metroidnization": None,
     "FlashUpgrade": "Flash Shift Upgrade",
     "SpeedBoostUpgrade": "Speed Booster Upgrade",
-    # DNA artifacts
     "Artifact1": "Metroid DNA",
     "Artifact2": "Metroid DNA",
     "Artifact3": "Metroid DNA",
@@ -114,7 +103,6 @@ ITEM_SHORT_TO_AP: Dict[str, Optional[str]] = {
     "Artifact10": "Metroid DNA",
     "Artifact11": "Metroid DNA",
     "Artifact12": "Metroid DNA",
-    # Legacy aliases (older mapper / docs)
     "Radar": "Pulse Radar",
     "VariaSuit": "Varia Suit",
     "GravitySuit": "Gravity Suit",
@@ -136,9 +124,7 @@ ITEM_SHORT_TO_AP: Dict[str, Optional[str]] = {
     "OmegaStream": "Omega Stream Beam",
 }
 
-
 class DreadLogic:
-    """Per-player Randovania graph evaluator."""
 
     def __init__(self, world: "MetroidDreadWorld"):
         self.world = world
@@ -148,18 +134,15 @@ class DreadLogic:
         self.parser.load_database()
 
         starts = self.parser.get_starting_nodes()
-        # Prefer Artaria intro-style starts when present
         artaria_starts = [s for s in starts if s[0] == "Artaria"]
         self.starting_node: NodeId = (
             artaria_starts[0] if artaria_starts else (starts[0] if starts else ("Artaria", "Intro Room", "Start Point"))
         )
 
         self._reachable_cache: Dict[FrozenSet[str], Set[NodeId]] = {}
-        # node -> list of (target, requirement)
         self._adj: Dict[NodeId, list] = {}
         self._build_adjacency()
 
-        # Event nodes grant logical event items during BFS (RDV-style).
         from .Events import event_locations
         self._event_items: Dict[NodeId, str] = {
             (ev.game_region, ev.area, ev.node): ev.event_item
@@ -187,18 +170,13 @@ class DreadLogic:
         self._reachable_cache.clear()
 
     def rebuild_graph(self) -> None:
-        """Call after DoorRando / TransportRando mutate the parser graph."""
         self._adj.clear()
         self._build_adjacency()
         self._reachable_cache.clear()
 
-    # ----- inventory -----
-
     def inventory_from_counts(self, counts: Dict[str, int]) -> FrozenSet[str]:
-        """Build BFS inventory from item-name → count (tracker / client use)."""
         owned: Set[str] = set()
 
-        # Expand progressive stacks into individual logical items
         for prog, parts in PROGRESSIVE_EXPAND.items():
             count = int(counts.get(prog, 0) or 0)
             for i, part in enumerate(parts):
@@ -217,14 +195,11 @@ class DreadLogic:
             if int(counts.get(name, 0) or 0) > 0:
                 owned.add(name)
 
-        # Progressive Flash Shift Upgrades: first unlocks logical Flash Shift
         if int(counts.get("Flash Shift Upgrade", 0) or 0) >= 1 or int(counts.get("Flash Shift", 0) or 0) > 0:
             owned.add("Flash Shift")
             owned.add("Flash Shift Upgrade")
 
-        # Synthetic capacity tokens — base missiles always available in Dread
         owned.add("__missiles__")
-        # Main Power Bomb includes starting PB ammo; tanks add per-tank yield.
         start_pb = 0
         try:
             start_pb = int(self.world.options.starting_power_bombs.value)
@@ -261,7 +236,6 @@ class DreadLogic:
         return frozenset(owned)
 
     def inventory_from_state(self, state: CollectionState) -> FrozenSet[str]:
-        """Normalized set of logical capability / event names for BFS caching."""
         player = self.player
         from .Items import item_table
         from .Events import event_item_table
@@ -280,16 +254,11 @@ class DreadLogic:
         return self.inventory_from_counts(counts)
 
     def reachable_pickup_names(self, counts: Dict[str, int]) -> list[str]:
-        """Location names currently in-logic for the given inventory counts."""
         inv = self.inventory_from_counts(counts)
         nodes = self.get_reachable_nodes(inv)
         return sorted(name for name, node in self.pickup_nodes.items() if node in nodes)
 
     def reachable_areas(self, counts: Dict[str, int]) -> Set[Tuple[str, str]]:
-        """
-        Unique (region, area) pairs reachable with the given inventory.
-        Always includes the starting area.
-        """
         inv = self.inventory_from_counts(counts)
         nodes = self.get_reachable_nodes(inv)
         areas: Set[Tuple[str, str]] = {
@@ -307,8 +276,6 @@ class DreadLogic:
         if opt is None:
             return 0
         return int(opt.value)
-
-    # ----- requirement eval -----
 
     def evaluate_requirement(self, req, inventory: FrozenSet[str]) -> bool:
         if not req:
@@ -365,7 +332,6 @@ class DreadLogic:
                     art_index = int(rname.replace("Artifact", ""))
                 except ValueError:
                     art_index = amount
-                # Artifacts beyond required_dna are pre-granted in the ROM.
                 if art_index > required:
                     return True
                 dna_count = 0
@@ -408,7 +374,6 @@ class DreadLogic:
             return self._damage_ok(rname, amount, inventory)
 
         if rtype == "misc":
-            # Flags like NerfPowerBombs are off by default
             return False
 
         return False
@@ -422,15 +387,12 @@ class DreadLogic:
         if name in ("Cold", "Lava"):
             return has_grav or suitless >= 2
         if name == "Damage":
-            # Combat chip damage — allow if Combat trick or enough energy
             if self.trick_level("Combat") >= 1:
                 return True
             return self._resource_ok("items", "Energy", amount, inventory)
         if name == "OOB":
             return self.trick_level("FloorClip") >= 1
         return True
-
-    # ----- reachability -----
 
     def _bfs_once(self, inventory: FrozenSet[str], start: NodeId) -> Set[NodeId]:
         reachable: Set[NodeId] = set()
@@ -453,7 +415,6 @@ class DreadLogic:
         start: Optional[NodeId] = None,
         collect_events: bool = True,
     ) -> Set[NodeId]:
-        """BFS from start, optionally granting event items as their nodes become reachable."""
         start = start or self.starting_node
         cache_ok = collect_events and start == self.starting_node
         if cache_ok and inventory in self._reachable_cache:
@@ -487,7 +448,6 @@ class DreadLogic:
     def can_reach_location_name(self, location_name: str, state: CollectionState) -> bool:
         node = self.pickup_nodes.get(location_name)
         if node is None:
-            # Event location naming
             parts = location_name.split(" - ", 2)
             if len(parts) == 3:
                 node = (parts[0], parts[1], parts[2])

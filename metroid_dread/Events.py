@@ -1,14 +1,8 @@
-"""
-Metroid Dread event items and locked event locations
-AUTO-GENERATED from logic_database — do not hand-edit.
-Regenerate: python -m worlds.metroid_dread._gen_events
-"""
 
 from typing import Dict, List, NamedTuple, Tuple
 from BaseClasses import ItemClassification
 from .Items import ItemData
 
-# RDV event resource name -> AP event item name
 EVENT_RESOURCE_TO_ITEM: Dict[str, str] = {
     'ArtariaCU': 'Event - Artaria - Central Unit',
     'ArtariaEmmiMagnetDoorLock': 'Event - Artaria - EMMI Magnet Door Lock',
@@ -196,7 +190,6 @@ EVENT_RESOURCE_TO_ITEM: Dict[str, str] = {
     's090_skybase:default:block_pbcolumn_000': 'Event - Itorash - Destroy Generator',
 }
 
-# Event items (id=None — not networked)
 event_item_table: Dict[str, ItemData] = {
     'Event - Artaria - Central Unit': ItemData(None, ItemClassification.filler),
     'Event - Artaria - EMMI Magnet Door Lock': ItemData(None, ItemClassification.filler),
@@ -386,7 +379,7 @@ event_item_table: Dict[str, ItemData] = {
 
 class EventLocationData(NamedTuple):
     name: str
-    region: str  # AP area region key: "GameRegion/Area"
+    region: str
     game_region: str
     area: str
     node: str
@@ -628,7 +621,6 @@ event_locations: List[EventLocationData] = [
     EventLocationData('Itorash - Raven Beak Arena - Event - Escape Sequence', 'Itorash/Raven Beak Arena', 'Itorash', 'Raven Beak Arena', 'Event - Escape Sequence', 'Ship', 'Event - Ship'),
 ]
 
-# (game_region, area, node) -> event location name
 EVENT_NODE_TO_LOCATION: Dict[Tuple[str, str, str], str] = {
     ('Artaria', 'First Tutorial', 'Event - First Tutorial Blob'): 'Artaria - First Tutorial - Event - First Tutorial Blob',
     ('Artaria', 'Melee Tutorial Room', 'Event - Proto EMMI Blob (East Side)'): 'Artaria - Melee Tutorial Room - Event - Proto EMMI Blob (East Side)',

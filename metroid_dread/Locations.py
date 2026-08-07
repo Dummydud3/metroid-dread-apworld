@@ -1,22 +1,14 @@
-"""
-Metroid Dread locations for Archipelago
-Extracted from Randovania's logic database
-"""
 
 from BaseClasses import Location
 from typing import Dict, NamedTuple
-
 
 class LocationData(NamedTuple):
     id: int
     region: str
 
-
 class MetroidDreadLocation(Location):
     game: str = "Metroid Dread"
 
-
-# All 149 pickup locations from Metroid Dread
 location_table: Dict[str, LocationData] = {
     "Artaria - Charge Tutorial - Pickup (Energy Tank)": LocationData(84000, "Artaria"),
     "Artaria - Melee Tutorial Room - Pickup (Missile Tank 1)": LocationData(84001, "Artaria"),
@@ -169,7 +161,6 @@ location_table: Dict[str, LocationData] = {
     "Elun - Horizontal Bomb Maze - Pickup (Missile Tank)": LocationData(84148, "Elun"),
 }
 
-# Location name groups for player convenience
 location_name_groups: Dict[str, set[str]] = {
     "Artaria": {
         "Artaria - Charge Tutorial - Pickup (Energy Tank)",
@@ -338,5 +329,4 @@ location_name_groups: Dict[str, set[str]] = {
     },
 }
 
-# Lookup table for reverse mapping
 lookup_id_to_name: Dict[int, str] = {data.id: loc_name for loc_name, data in location_table.items()}

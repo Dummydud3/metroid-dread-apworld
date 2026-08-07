@@ -1,9 +1,3 @@
-"""
-Valid Metroid Dread starting locations (Randovania valid_starting_location).
-
-Default spawn is Artaria Intro Room Start Point (StartPoint0).
-Random mode picks among all RDV-valid starts (save/map/nav platforms + intro).
-"""
 
 from __future__ import annotations
 
@@ -17,12 +11,9 @@ from .logic_parser import REGION_FILES, read_database_bytes
 
 NodeId = Tuple[str, str, str]
 
-# Only used as a fallback path for standalone dev tooling; see
-# logic_parser.read_database_bytes for the zip-safe path used at runtime.
 LOGIC_DB = Path(__file__).parent / "logic_database"
 DEFAULT_START: NodeId = ("Artaria", "Intro Room", "Start Point")
 DEFAULT_PATCHER_REF = {"scenario": "s010_cave", "actor": "StartPoint0"}
-
 
 @dataclass(frozen=True)
 class StartingLocationInfo:
@@ -58,11 +49,9 @@ class StartingLocationInfo:
     def is_default(self) -> bool:
         return self.node_id == DEFAULT_START
 
-
 _CACHE: Optional[List[StartingLocationInfo]] = None
 _BY_PATH: Optional[Dict[str, StartingLocationInfo]] = None
 _BY_OPTION: Optional[Dict[str, StartingLocationInfo]] = None
-
 
 def load_starting_locations() -> List[StartingLocationInfo]:
     global _CACHE, _BY_PATH, _BY_OPTION
@@ -97,25 +86,21 @@ def load_starting_locations() -> List[StartingLocationInfo]:
                     )
                 )
 
-    # Stable order: default first, then alphabetical path
     starts.sort(key=lambda s: (not s.is_default, s.path))
     _CACHE = starts
     _BY_PATH = {s.path: s for s in starts}
     _BY_OPTION = {s.option_key: s for s in starts}
     return starts
 
-
 def get_by_path(path: str) -> Optional[StartingLocationInfo]:
     load_starting_locations()
     assert _BY_PATH is not None
     return _BY_PATH.get(path)
 
-
 def get_by_option_key(key: str) -> Optional[StartingLocationInfo]:
     load_starting_locations()
     assert _BY_OPTION is not None
     return _BY_OPTION.get(key)
-
 
 def get_default() -> StartingLocationInfo:
     info = get_by_path(f"{DEFAULT_START[0]}/{DEFAULT_START[1]}/{DEFAULT_START[2]}")
@@ -128,7 +113,6 @@ def get_default() -> StartingLocationInfo:
         scenario=DEFAULT_PATCHER_REF["scenario"],
         actor=DEFAULT_PATCHER_REF["actor"],
     )
-
 
 def patcher_ref_for_node(node: NodeId) -> Dict[str, str]:
     path = f"{node[0]}/{node[1]}/{node[2]}"
