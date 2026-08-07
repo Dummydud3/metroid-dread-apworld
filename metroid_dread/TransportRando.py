@@ -101,12 +101,15 @@ def matching_to_elevators(
         seen.add(dest_id)
         src = transports[src_id]
         dest = transports[dest_id]
+        dest_region, dest_area, _dest_node = dest["node_id"]
+        src_region, src_area, _src_node = src["node_id"]
         elevators.append({
             "teleporter": {"scenario": src["scenario"], "actor": src["actor"]},
             "destination": {
                 "scenario": dest["scenario"],
                 "actor": dest.get("target_spawn") or dest["actor"],
             },
+            "connection_name": f"{dest_region} - {dest_area}",
         })
         elevators.append({
             "teleporter": {"scenario": dest["scenario"], "actor": dest["actor"]},
@@ -114,6 +117,7 @@ def matching_to_elevators(
                 "scenario": src["scenario"],
                 "actor": src.get("target_spawn") or src["actor"],
             },
+            "connection_name": f"{src_region} - {src_area}",
         })
     return elevators
 
