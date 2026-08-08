@@ -76,6 +76,57 @@ class TestPatchExtrasMerge(unittest.TestCase):
         self.assertEqual(patcher["starting_items"]["ITEM_WEAPON_MISSILE_MAX"], 20)
         self.assertEqual(patcher["starting_items"]["ITEM_SONAR"], 1)
 
+    def test_show_dna_in_hud_omitted_for_old_odr_schema(self):
+        """ODR ≤2.18 rejects show_dna_in_hud (additionalProperties: false)."""
+        import ap_to_patcher as ap
+
+        patcher = {"cosmetic_patches": {}, "objective": {}, "starting_items": {}}
+        extras = {
+            "cosmetic_combat": {
+                "enable_death_counter": True,
+                "enable_room_name_display": "WITH_FADE",
+                "show_dna_in_hud": True,
+            }
+        }
+        old_schema_keys = frozenset(
+            {"enable_death_counter", "enable_room_name_display"}
+        )
+        with mock.patch.object(
+            ap, "_load_odr_custom_init_properties", return_value=old_schema_keys
+        ):
+            ap.apply_dread_patch_extras(patcher, extras, our_player="Samus")
+        custom_init = patcher["cosmetic_patches"]["lua"]["custom_init"]
+        self.assertTrue(custom_init.get("enable_death_counter"))
+        self.assertEqual(custom_init.get("enable_room_name_display"), "WITH_FADE")
+        self.assertNotIn("show_dna_in_hud", custom_init)
+
+    def test_sanitize_custom_init_strips_show_dna_for_old_odr(self):
+        import ap_to_patcher as ap
+
+        patcher = {
+            "cosmetic_patches": {
+                "lua": {
+                    "custom_init": {
+                        "enable_death_counter": True,
+                        "enable_room_name_display": "WITH_FADE",
+                        "show_dna_in_hud": True,
+                    }
+                }
+            }
+        }
+        old_schema_keys = frozenset(
+            {"enable_death_counter", "enable_room_name_display"}
+        )
+        with mock.patch.object(
+            ap, "_load_odr_custom_init_properties", return_value=old_schema_keys
+        ):
+            removed = ap.sanitize_custom_init_for_odr(patcher)
+        self.assertEqual(removed, ["show_dna_in_hud"])
+        self.assertNotIn(
+            "show_dna_in_hud",
+            patcher["cosmetic_patches"]["lua"]["custom_init"],
+        )
+
     def test_apply_disabled_lights(self):
         import ap_to_patcher as ap
 

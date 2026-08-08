@@ -32,32 +32,48 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 # Runtime extracts live at custom_worlds/_metroid_dread_runtime (parents[1] is NOT AP root).
 _WORLD_DIR = Path(__file__).resolve().parent
 
+# Script dir is on sys.path when launched as a file; prefer shared resolver.
+if str(_WORLD_DIR) not in sys.path:
+    sys.path.insert(0, str(_WORLD_DIR))
+try:
+    import dread_paths as _dread_paths
 
-def _resolve_ap_root(world_dir: Path) -> Path:
-    for key in ("DREAD_HUB_AP_ROOT", "ARCHIPELAGO_ROOT"):
-        raw = (os.environ.get(key) or "").strip()
-        if raw:
-            candidate = Path(raw).expanduser()
-            if (candidate / "CommonClient.py").is_file():
-                return candidate.resolve()
-    for parent in (world_dir, *world_dir.parents):
-        if (parent / "CommonClient.py").is_file():
-            return parent.resolve()
-    # Legacy layout: worlds/metroid_dread → repo root (may be wrong for runtime extracts).
-    try:
-        return world_dir.parents[1].resolve()
-    except IndexError:
-        return world_dir.resolve()
+    _dread_paths.ensure_import_paths()
+    _AP_ROOT = _dread_paths.AP_ROOT
+except Exception:
+    def _resolve_ap_root(world_dir: Path) -> Path:
+        for key in ("DREAD_HUB_AP_ROOT", "ARCHIPELAGO_ROOT"):
+            raw = (os.environ.get(key) or "").strip()
+            if raw:
+                candidate = Path(raw).expanduser()
+                if (candidate / "CommonClient.py").is_file():
+                    return candidate.resolve()
+        for parent in (world_dir, *world_dir.parents):
+            if (parent / "CommonClient.py").is_file() and parent.name.lower() != "ap_core":
+                return parent.resolve()
+        bundled = world_dir / "ap_core"
+        if (bundled / "CommonClient.py").is_file():
+            return bundled.resolve()
+        try:
+            return world_dir.parents[1].resolve()
+        except IndexError:
+            return world_dir.resolve()
 
+    _AP_ROOT = _resolve_ap_root(_WORLD_DIR)
+    for _p in (_WORLD_DIR, _AP_ROOT):
+        _s = str(_p)
+        if _s in sys.path:
+            sys.path.remove(_s)
+    sys.path.insert(0, str(_WORLD_DIR))
+    sys.path.insert(0, str(_AP_ROOT))
+    _install = (os.environ.get("DREAD_HUB_INSTALL_ROOT") or "").strip()
+    if _install:
+        try:
+            import Utils as _Utils_early
 
-_AP_ROOT = _resolve_ap_root(_WORLD_DIR)
-for _p in (_WORLD_DIR, _AP_ROOT):
-    _s = str(_p)
-    if _s in sys.path:
-        sys.path.remove(_s)
-# Insert world first, then AP root at 0 so AP wins for Options/CommonClient.
-sys.path.insert(0, str(_WORLD_DIR))
-sys.path.insert(0, str(_AP_ROOT))
+            _Utils_early.local_path.cached_path = str(Path(_install).resolve())
+        except Exception:
+            pass
 
 from CommonClient import (
     ClientCommandProcessor,

@@ -12,13 +12,47 @@ const {
 
 // Hub lives at worlds/metroid_dread/dread-client-app — world package is parent.
 const WORLD_DIR = path.resolve(__dirname, "..");
+const AP_CORE_DIRNAME = "ap_core";
 
-function climbForCommonClient(startDir) {
+function hasCommonClient(dir) {
+  return Boolean(dir && fs.existsSync(path.join(dir, "CommonClient.py")));
+}
+
+function isFrozenApInstall(dir) {
+  if (!dir || hasCommonClient(dir)) return false;
+  if (!fs.existsSync(path.join(dir, "lib", "library.zip"))) return false;
+  const markers = [
+    "ArchipelagoLauncher.exe",
+    "ArchipelagoGenerate.exe",
+    "ArchipelagoServer.exe",
+    "python313.dll",
+    "python312.dll",
+    "python311.dll",
+    "manifest.json",
+  ];
+  return markers.some((name) => fs.existsSync(path.join(dir, name)));
+}
+
+function climbForCommonClient(startDir, { allowApCore = false } = {}) {
   let cur = path.resolve(startDir || "");
   for (let i = 0; i < 8; i++) {
-    if (cur && fs.existsSync(path.join(cur, "CommonClient.py"))) {
-      return cur;
+    if (hasCommonClient(cur)) {
+      const base = path.basename(cur).toLowerCase();
+      if (allowApCore || base !== AP_CORE_DIRNAME) {
+        return cur;
+      }
     }
+    const parent = path.dirname(cur);
+    if (!parent || parent === cur) break;
+    cur = parent;
+  }
+  return "";
+}
+
+function climbForFrozenInstall(startDir) {
+  let cur = path.resolve(startDir || "");
+  for (let i = 0; i < 8; i++) {
+    if (isFrozenApInstall(cur)) return cur;
     const parent = path.dirname(cur);
     if (!parent || parent === cur) break;
     cur = parent;
@@ -45,33 +79,70 @@ function inferApRootFromWorldConfig(worldDir) {
   return "";
 }
 
-function findApRoot(worldDir) {
+function bundledApCore(worldDir) {
+  const core = path.join(worldDir, AP_CORE_DIRNAME);
+  return hasCommonClient(core) ? core : "";
+}
+
+/**
+ * Resolve import root (CommonClient.py) + install root (Players/output/host.yaml).
+ * Frozen ProgramData installs use world/ap_core for imports.
+ */
+function resolveApRoots(worldDir) {
   const envRoot = (
     process.env.DREAD_HUB_AP_ROOT ||
     process.env.ARCHIPELAGO_ROOT ||
     ""
   ).trim();
-  if (envRoot && fs.existsSync(path.join(envRoot, "CommonClient.py"))) {
-    return path.resolve(envRoot);
+  if (envRoot && hasCommonClient(envRoot)) {
+    const resolved = path.resolve(envRoot);
+    if (path.basename(resolved).toLowerCase() === AP_CORE_DIRNAME) {
+      const frozen =
+        (process.env.DREAD_HUB_INSTALL_ROOT || "").trim() ||
+        climbForFrozenInstall(worldDir);
+      return {
+        importRoot: resolved,
+        installRoot: frozen ? path.resolve(frozen) : resolved,
+      };
+    }
+    return { importRoot: resolved, installRoot: resolved };
   }
+
   const climbed = climbForCommonClient(worldDir);
-  if (climbed) return climbed;
+  if (climbed) {
+    return { importRoot: climbed, installRoot: climbed };
+  }
   const inferred = inferApRootFromWorldConfig(worldDir);
-  if (inferred) return inferred;
+  if (inferred) {
+    return { importRoot: inferred, installRoot: inferred };
+  }
+
+  const core = bundledApCore(worldDir);
+  const frozen =
+    (process.env.DREAD_HUB_INSTALL_ROOT || "").trim() ||
+    climbForFrozenInstall(worldDir);
+  if (core) {
+    return {
+      importRoot: core,
+      installRoot: frozen ? path.resolve(frozen) : core,
+    };
+  }
+
   // Conventional checkout: worlds/metroid_dread → repo root (may lack CommonClient
   // when Hub runs from custom_worlds/_metroid_dread_runtime next to a frozen install).
-  return path.resolve(worldDir, "..", "..");
+  const legacy = path.resolve(worldDir, "..", "..");
+  return { importRoot: legacy, installRoot: frozen ? path.resolve(frozen) : legacy };
 }
 
-const AP_ROOT = findApRoot(WORLD_DIR);
+const { importRoot: AP_ROOT, installRoot: INSTALL_ROOT } = resolveApRoots(WORLD_DIR);
 const CONFIG_PATH = path.join(WORLD_DIR, "dread_client_ui_config.json");
 const PATCH_CONFIG_PATH = path.join(WORLD_DIR, "dread_direct_patch_config.json");
 const CLIENT_SCRIPT = path.join(WORLD_DIR, "MetroidDreadClient.py");
 const PATCHER_SCRIPT = path.join(WORLD_DIR, "dread_direct_patch.py");
 const CATALOG_PATH = path.join(__dirname, "tracker", "catalog.json");
-const DEFAULT_OUTPUT_SCAN = path.join(AP_ROOT, "output");
-const EXTRACT_ROOT = path.join(AP_ROOT, "output", "_patcher_extract");
-const PLAYERS_DIR = path.join(AP_ROOT, "Players");
+const DEFAULT_OUTPUT_SCAN = path.join(INSTALL_ROOT, "output");
+const EXTRACT_ROOT = path.join(INSTALL_ROOT, "output", "_patcher_extract");
+const PLAYERS_DIR = path.join(INSTALL_ROOT, "Players");
 const UI_PREFIX = "@@APUI@@";
 const DREAD_TITLE_ID = "010093801237c000";
 
@@ -97,6 +168,22 @@ const DEFAULT_CONFIG = {
   yaml_path: path.join(PLAYERS_DIR, "dread_player.yaml"),
   hub_stage: "connect",
 };
+
+function pythonSpawnEnv(extra = {}) {
+  return {
+    ...process.env,
+    PYTHONUNBUFFERED: "1",
+    SKIP_REQUIREMENTS_UPDATE: "1",
+    DREAD_HUB_AP_ROOT: AP_ROOT,
+    DREAD_HUB_INSTALL_ROOT: INSTALL_ROOT,
+    DREAD_HUB_WORLD_DIR: WORLD_DIR,
+    // AP import root must precede WORLD_DIR — world Options.py would shadow AP Options.
+    PYTHONPATH: [AP_ROOT, WORLD_DIR, process.env.PYTHONPATH || ""]
+      .filter(Boolean)
+      .join(path.delimiter),
+    ...extra,
+  };
+}
 
 let mainWindow = null;
 let trackerWindow = null;
@@ -583,14 +670,19 @@ function startClient(opts) {
   if (!fs.existsSync(CLIENT_SCRIPT)) {
     return { ok: false, error: `Client script not found:\n${CLIENT_SCRIPT}` };
   }
-  if (!fs.existsSync(path.join(AP_ROOT, "CommonClient.py"))) {
+  if (!hasCommonClient(AP_ROOT)) {
+    const frozenHint = isFrozenApInstall(INSTALL_ROOT)
+      ? `\nDetected frozen Archipelago install:\n${INSTALL_ROOT}\n` +
+        `Expected bundled import root at:\n${path.join(WORLD_DIR, AP_CORE_DIRNAME)}\n\n` +
+        `Reinstall/update metroid_dread.apworld (includes ap_core), or set ` +
+        `DREAD_HUB_AP_ROOT to an Archipelago source/portable folder with CommonClient.py.`
+      : `\nSet DREAD_HUB_AP_ROOT to your Archipelago source/portable folder, or launch ` +
+        `from a checkout that contains CommonClient.py.`;
     return {
       ok: false,
       error:
-        `Archipelago core not found (CommonClient.py) under:\n${AP_ROOT}\n\n` +
-        `The Hub runtime extract cannot use a frozen-only install with system Python.\n` +
-        `Set DREAD_HUB_AP_ROOT to your Archipelago source/portable folder, or launch ` +
-        `from a checkout that contains CommonClient.py.`,
+        `Archipelago core not found (CommonClient.py) under:\n${AP_ROOT}\n` +
+        frozenHint,
     };
   }
 
@@ -638,16 +730,8 @@ function startClient(opts) {
   let stderrBuf = "";
   try {
     clientProcess = spawn(cmd, args, {
-      cwd: AP_ROOT,
-      env: {
-        ...process.env,
-        PYTHONUNBUFFERED: "1",
-        DREAD_HUB_AP_ROOT: AP_ROOT,
-        // AP_ROOT must precede WORLD_DIR — world Options.py would shadow AP Options.
-        PYTHONPATH: [AP_ROOT, WORLD_DIR, process.env.PYTHONPATH || ""]
-          .filter(Boolean)
-          .join(path.delimiter),
-      },
+      cwd: INSTALL_ROOT,
+      env: pythonSpawnEnv(),
       stdio: ["pipe", "pipe", "pipe"],
     });
   } catch (err) {
@@ -704,7 +788,8 @@ function startClient(opts) {
     `[app] Connecting to Archipelago…\n` +
       `      Server: ${normalized.server}\n` +
       `      Slot:   ${normalized.slot}\n` +
-      `      AP root: ${AP_ROOT}\n`
+      `      AP import: ${AP_ROOT}\n` +
+      `      AP install: ${INSTALL_ROOT}\n`
   );
   return { ok: true, roomId: normalized.roomId || "" };
 }
@@ -1245,17 +1330,9 @@ function runPatch(opts) {
 
     try {
       patchProcess = spawn(cmd, args, {
-        cwd: AP_ROOT,
+        cwd: WORLD_DIR,
         windowsHide: true,
-        env: {
-          ...process.env,
-          PYTHONUNBUFFERED: "1",
-          DREAD_HUB_AP_ROOT: AP_ROOT,
-          // AP_ROOT must precede WORLD_DIR — world Options.py would shadow AP Options.
-          PYTHONPATH: [AP_ROOT, WORLD_DIR, process.env.PYTHONPATH || ""]
-            .filter(Boolean)
-            .join(path.delimiter),
-        },
+        env: pythonSpawnEnv(),
       });
     } catch (err) {
       finish({ ok: false, error: String(err.message || err) });

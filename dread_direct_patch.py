@@ -16,8 +16,9 @@ Archipelago Metroid Dread — Direct Patcher (bypasses Randovania Export UI)
 3. Call open_dread_rando the same way Randovania does
 4. Copy patcher.json + map_icon_keys.json + randomizer_powerup.lua + reachable
    minimap data into the mod
-5. finalize_mod() strips any leftover HK autosave bootstrap, installs ApWarp
-   hotkeys, then ships reachable-map data into RomFS
+5. finalize_mod() brands credits.txt (Metroid Bread + Archipelago Implementation /
+   Dummydude before Major Item Locations), strips leftover HK autosave bootstrap,
+   installs ApWarp hotkeys, then ships reachable-map data into RomFS
 6. Save-file dim reveal is OFF by default (reveal_minimap_save: false).
    Bright paint uses VisitBoundsSafe in-game; the offline tool remains under tools/.
 7. map_icon_keys.json maps pickup_index / location_id / actor → MAP_ICON_ItemCustom{n}
@@ -746,6 +747,80 @@ def _patch_scenario_for_ap_warp(romfs: Path) -> None:
     log(f"[OK] patched scenario.lc with ApWarp.Install at EOF ({len(data)} bytes)")
 
 
+def apply_ap_credits_branding(romfs: Path) -> None:
+    """
+    Post-process ODR credits.txt:
+      - Title: Metroid Dread → Metroid Bread
+      - Insert "Archipelago Implementation" / Dummydude just before Major Item Locations
+    Keeps the full Randomizer Credits block intact.
+    """
+    credits_path = romfs / "system" / "localization" / "credits.txt"
+    if not credits_path.is_file():
+        log(f"[WARN] credits.txt not found at {credits_path} — skipping AP credits branding")
+        return
+
+    try:
+        from mercury_engine_data_structures.formats.txt import Txt
+        from mercury_engine_data_structures.game_check import Game
+    except ImportError as exc:
+        log(f"[WARN] cannot edit credits.txt (mercury missing): {exc}")
+        return
+
+    title_key = "CREDIT_0_000_TITLE"
+    ap_subtitle_key = "CREDIT_AP_000_SUBTITLE"
+    ap_name_key = "CREDIT_AP_001"
+    ap_subtitle = "Archipelago Implementation"
+    ap_name = "Dummydude"
+    major_title = "Major Item Locations"
+
+    txt = Txt.parse(credits_path.read_bytes(), target_game=Game.DREAD)
+    ordered = list(txt.strings.items())
+
+    # 1) Rename game title
+    changed_title = False
+    for i, (key, value) in enumerate(ordered):
+        if key == title_key or (i == 0 and value == "Metroid Dread"):
+            if value != "Metroid Bread":
+                ordered[i] = (key if key == title_key else title_key, "Metroid Bread")
+                changed_title = True
+            break
+
+    # 2) Insert AP credit block before Major Item Locations (idempotent)
+    already = any(k == ap_subtitle_key or v == ap_subtitle for k, v in ordered)
+    inserted = False
+    if not already:
+        insert_at = None
+        for i, (key, value) in enumerate(ordered):
+            if value == major_title and key.endswith("_TITLE"):
+                insert_at = i
+                break
+        if insert_at is None:
+            log("[WARN] Major Item Locations not found in credits.txt — AP block not inserted")
+        else:
+            ordered[insert_at:insert_at] = [
+                (ap_subtitle_key, ap_subtitle),
+                (ap_name_key, ap_name),
+            ]
+            inserted = True
+
+    if not changed_title and not inserted and already:
+        # Still rewrite if title was wrong somehow but AP block exists
+        if any(k == title_key and v == "Metroid Bread" for k, v in ordered):
+            log("[OK] credits.txt already has AP branding")
+            return
+
+    txt.strings = {k: v for k, v in ordered}
+    credits_path.write_bytes(txt.build())
+    bits = []
+    if changed_title:
+        bits.append("title→Metroid Bread")
+    if inserted:
+        bits.append(f"+{ap_subtitle}/{ap_name}")
+    if already and not inserted:
+        bits.append("AP block kept")
+    log(f"[OK] credits.txt branded ({', '.join(bits) or 'rewritten'}) -> {credits_path}")
+
+
 def finalize_mod(
     output: Path,
     patcher_json: Path,
@@ -841,6 +916,9 @@ def finalize_mod(
 
     romfs = romfs_parent / "romfs"
 
+    # Title + AP implementer credit (keeps ODR Randomizer Credits intact).
+    apply_ap_credits_branding(romfs)
+
     # Remove leftover ProgressKeeper bootstrap (was wiping items on load).
     strip_hk_autosave_from_scenario(romfs)
 
@@ -933,6 +1011,20 @@ def patch_from_spoiler(
     ensure_remote_lua(patcher_data)
     apply_freesink(patcher_data, freesink)
 
+    py = find_python_with_odr()
+    log(f"Using Python with open-dread-rando: {' '.join(py)}")
+
+    # Match cosmetic_patches.lua.custom_init to the validating ODR schema
+    # (show_dna_in_hud is ODR ≥2.19-only; older schemas reject it).
+    from ap_to_patcher import sanitize_custom_init_for_odr
+
+    stripped = sanitize_custom_init_for_odr(patcher_data, py_cmd=py)
+    if stripped:
+        log(
+            "[INFO] Stripped custom_init keys unsupported by patch ODR: "
+            + ", ".join(stripped)
+        )
+
     out_json = spoiler.parent / f"AP_{player}_patcher.json"
     with open(out_json, "w", encoding="utf-8") as f:
         json.dump(patcher_data, f, indent=2)
@@ -957,9 +1049,6 @@ def patch_from_spoiler(
         f"[OK] Wrote {out_keys} "
         f"({keys_data.get('custom_icon_count', 0)} MAP_ICON_ItemCustom* keys)"
     )
-
-    py = find_python_with_odr()
-    log(f"Using Python with open-dread-rando: {' '.join(py)}")
 
     # Validate with the same interpreter that will run ODR
     val = subprocess.run(

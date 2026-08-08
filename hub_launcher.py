@@ -39,7 +39,7 @@ CLIENT_SCRIPT_NAME = "MetroidDreadClient.py"
 RUNTIME_WORLD_DIRNAME = "_metroid_dread_runtime"
 APWORLD_STAMP_NAME = ".apworld_hub_source"
 # Bump when extract layout changes so stale runtime trees are refreshed.
-APWORLD_EXTRACT_LAYOUT = "world-pkg-v5"
+APWORLD_EXTRACT_LAYOUT = "world-pkg-v7"
 WORLD_ZIP_PREFIX = "metroid_dread/"
 HUB_ZIP_PREFIX = "metroid_dread/dread-client-app/"
 # Paths inside the apworld that must never be extracted (bloat / not usable from zip).
@@ -488,12 +488,20 @@ def find_world_dir_for_hub(hub_dir: Path) -> Path:
 
 def find_ap_root_for_hub(hub_dir: Path) -> Path:
     """
-    Archipelago / portable package root (contains CommonClient.py).
+    Archipelago import root (contains CommonClient.py + Options.py).
 
-    Hub itself lives under worlds/metroid_dread/; climb until CommonClient is found.
-    Runtime extracts under custom_worlds/_metroid_dread_runtime need env/config help
-    when the nearby install is frozen-only (no loose CommonClient.py).
+    Hub itself lives under worlds/metroid_dread/; climb until a real filesystem root
+    is found. Runtime extracts under custom_worlds/_metroid_dread_runtime fall back
+    to the bundled ``ap_core/`` when the nearby install is frozen-only.
     """
+    world = find_world_dir_for_hub(hub_dir)
+    try:
+        import dread_paths
+
+        return dread_paths.resolve_ap_root(world)
+    except Exception:
+        pass
+
     for key in ("DREAD_HUB_AP_ROOT", "ARCHIPELAGO_ROOT"):
         raw = (os.environ.get(key) or "").strip()
         if raw:
@@ -501,9 +509,8 @@ def find_ap_root_for_hub(hub_dir: Path) -> Path:
             if (candidate / "CommonClient.py").is_file():
                 return candidate.resolve()
 
-    world = find_world_dir_for_hub(hub_dir)
     for parent in [world, *world.parents]:
-        if (parent / "CommonClient.py").is_file():
+        if (parent / "CommonClient.py").is_file() and parent.name.lower() != "ap_core":
             return parent.resolve()
 
     # Infer from saved Hub config paths (games_folder / yaml often point at source).
@@ -519,8 +526,12 @@ def find_ap_root_for_hub(hub_dir: Path) -> Path:
                 continue
             cur = Path(str(raw)).expanduser()
             for parent in [cur, *cur.parents]:
-                if (parent / "CommonClient.py").is_file():
+                if (parent / "CommonClient.py").is_file() and parent.name.lower() != "ap_core":
                     return parent.resolve()
+
+    bundled = world / "ap_core"
+    if (bundled / "CommonClient.py").is_file():
+        return bundled.resolve()
 
     try:
         from Utils import local_path
@@ -729,11 +740,30 @@ def hub_env_from_connect(
         env["DREAD_HUB_GAME"] = str(connect["game"])
     if connect.get("auto_connect"):
         env["DREAD_HUB_AUTO_CONNECT"] = "1"
-    # Point Electron/system Python at a filesystem Archipelago root (CommonClient.py).
+    # Point Electron/system Python at a filesystem Archipelago import root.
     try:
-        root = find_ap_root_for_hub(Path(hub_dir) if hub_dir else find_hub_dir() or Path.cwd())
-        if root is not None and (Path(root) / "CommonClient.py").is_file():
-            env["DREAD_HUB_AP_ROOT"] = str(Path(root).resolve())
+        hub_path = Path(hub_dir) if hub_dir else find_hub_dir() or Path.cwd()
+        world = find_world_dir_for_hub(hub_path)
+        try:
+            import dread_paths
+
+            import_root, install_root = dread_paths.resolve_ap_roots(world)
+        except Exception:
+            import_root = find_ap_root_for_hub(hub_path)
+            install_root = import_root
+            try:
+                import dread_paths as _dp
+
+                frozen = _dp.resolve_frozen_install_root(world)
+                if frozen is not None:
+                    install_root = frozen
+            except Exception:
+                pass
+        if import_root is not None and (Path(import_root) / "CommonClient.py").is_file():
+            env["DREAD_HUB_AP_ROOT"] = str(Path(import_root).resolve())
+        if install_root is not None:
+            env["DREAD_HUB_INSTALL_ROOT"] = str(Path(install_root).resolve())
+        env["DREAD_HUB_WORLD_DIR"] = str(world.resolve())
     except Exception as exc:
         logger.debug("Could not resolve DREAD_HUB_AP_ROOT: %s", exc)
     return env
@@ -958,19 +988,35 @@ def launch_python_client(args: Sequence[str]) -> None:
     """Fallback: run MetroidDreadClient in-process (used inside launcher subprocess)."""
     import asyncio
 
-    # Allow ModuleUpdate to fetch Python deps when missing (non-frozen source installs).
-    os.environ.pop("SKIP_REQUIREMENTS_UPDATE", None)
-    try:
-        import ModuleUpdate
-        ModuleUpdate.update(yes=True)
-    except Exception as exc:
-        logger.warning("ModuleUpdate skipped/failed: %s", exc)
-
     world = world_package_dir()
-    ap_root = world.parents[1] if len(world.parents) >= 2 else world
-    for path in (str(world), str(ap_root)):
-        if path not in sys.path:
+    # Prefer env / CommonClient climb — runtime parents[1] is often a frozen install
+    # and must not put world Options.py ahead of Archipelago Options.
+    using_ap_core = False
+    try:
+        import dread_paths
+
+        dread_paths.ensure_import_paths()
+        ap_root = dread_paths.AP_ROOT
+        using_ap_core = ap_root.name.lower() == "ap_core"
+    except Exception:
+        ap_root = find_ap_root_for_hub(world / HUB_DIR_NAME)
+        using_ap_core = Path(ap_root).name.lower() == "ap_core"
+        for path in (str(world), str(ap_root)):
+            if path in sys.path:
+                sys.path.remove(path)
             sys.path.insert(0, path)
+
+    # Source installs may fetch deps; ap_core ships for frozen Hub and must not
+    # trigger ModuleUpdate against the full AP requirements (kivy/kivymd git, etc.).
+    if using_ap_core:
+        os.environ.setdefault("SKIP_REQUIREMENTS_UPDATE", "1")
+    else:
+        os.environ.pop("SKIP_REQUIREMENTS_UPDATE", None)
+        try:
+            import ModuleUpdate
+            ModuleUpdate.update(yes=True)
+        except Exception as exc:
+            logger.warning("ModuleUpdate skipped/failed: %s", exc)
 
     # Prefer filesystem load; fall back to zipimport when inside a .apworld.
     mdc = _load_metroid_dread_client_module()
@@ -1022,12 +1068,15 @@ def launch_hub_or_fallback(args: Sequence[str] = (), *, wait: bool = True) -> st
             apply_connect_prefills(world_dir, connect)
             env = hub_env_from_connect(connect, hub_dir=hub)
             ap_root = env.get("DREAD_HUB_AP_ROOT")
+            install_root = env.get("DREAD_HUB_INSTALL_ROOT")
             if ap_root:
-                logger.info("Hub Archipelago root (CommonClient): %s", ap_root)
+                logger.info("Hub Archipelago import root (CommonClient): %s", ap_root)
+                if install_root and install_root != ap_root:
+                    logger.info("Hub Archipelago install root: %s", install_root)
             else:
                 logger.warning(
-                    "No filesystem CommonClient.py found for Hub — Python client spawn "
-                    "may fail under a frozen-only install. Set DREAD_HUB_AP_ROOT."
+                    "No filesystem CommonClient.py found for Hub — ensure "
+                    "metroid_dread/ap_core is present, or set DREAD_HUB_AP_ROOT."
                 )
             logger.info("Launching Dread Client Hub from %s", hub)
             # After a successful start, do not fall back to Python just because

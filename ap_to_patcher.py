@@ -16,10 +16,29 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 _ROOT = Path(__file__).resolve().parent
-_AP_ROOT = _ROOT.parents[1]  # Archipelago / portable package root
-for _p in (_ROOT, _AP_ROOT):
-    _s = str(_p)
-    if _s not in sys.path:
+# Prefer dread_paths so AP root (Options/CommonClient) wins over this world dir's Options.py.
+# Runtime extracts at custom_worlds/_metroid_dread_runtime must not shadow via parents[1].
+try:
+    import dread_paths
+
+    dread_paths.ensure_import_paths()
+    _AP_ROOT = dread_paths.AP_ROOT
+except Exception:
+    # Minimal fallback when dread_paths is unavailable (keep AP ahead of world).
+    import os
+
+    _AP_ROOT = _ROOT.parents[1] if len(_ROOT.parents) >= 2 else _ROOT
+    for key in ("DREAD_HUB_AP_ROOT", "ARCHIPELAGO_ROOT"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            candidate = Path(raw).expanduser()
+            if (candidate / "Options.py").is_file() and (candidate / "CommonClient.py").is_file():
+                _AP_ROOT = candidate.resolve()
+                break
+    for _p in (_ROOT, _AP_ROOT):
+        _s = str(_p)
+        if _s in sys.path:
+            sys.path.remove(_s)
         sys.path.insert(0, _s)
 
 # Load pickup actor mapping (always from this script's directory)
@@ -53,7 +72,8 @@ STARTING_LOCATION_RE = re.compile(
 DREAD_PATCH_EXTRAS_PREFIX = "DREAD_PATCH_EXTRAS_JSON:"
 DREAD_DNA_LOCS_PREFIX = "DREAD_DNA_LOCATIONS:"
 
-# Load AP → Randovania location mapping (from rdvgame_export.py)
+# Load AP → Randovania location mapping.
+# Under frozen installs, dread_paths registers WORLD_DIR as worlds.metroid_dread.
 from worlds.metroid_dread.rdvgame_export import AP_TO_RANDOVANIA_LOCATION_MAP
 from worlds.metroid_dread.starting_locations import (
     DEFAULT_PATCHER_REF,
@@ -546,6 +566,7 @@ COSMETIC_COMBAT_PATHS: dict[str, tuple[str, ...]] = {
     "bShowEnemyDamage": ("cosmetic_patches", "config", "AIManager", "bShowEnemyDamage"),
     "bShowPlayerDamage": ("cosmetic_patches", "config", "AIManager", "bShowPlayerDamage"),
     "enable_death_counter": ("cosmetic_patches", "lua", "custom_init", "enable_death_counter"),
+    # ODR ≥2.19 only — gated at emit/sanitize time against installed schema.
     "show_dna_in_hud": ("cosmetic_patches", "lua", "custom_init", "show_dna_in_hud"),
     "enable_room_name_display": ("cosmetic_patches", "lua", "custom_init", "enable_room_name_display"),
     "raven_beak_damage_table_handling": ("game_patches", "raven_beak_damage_table_handling"),
@@ -553,6 +574,102 @@ COSMETIC_COMBAT_PATHS: dict[str, tuple[str, ...]] = {
     "default_x_released": ("game_patches", "default_x_released"),
     "energy_per_tank": ("energy_per_tank",),
 }
+
+# Fields under cosmetic_patches.lua.custom_init that older ODR schemas reject
+# (additionalProperties: false). show_dna_in_hud landed in open-dread-rando 2.19.0.
+_CUSTOM_INIT_OPTIONAL_KEYS = frozenset({"show_dna_in_hud"})
+
+
+def _load_odr_custom_init_properties(
+    py_cmd: Optional[List[str]] = None,
+) -> Optional[frozenset]:
+    """Return allowed custom_init property names from an installed ODR schema.
+
+    When *py_cmd* is given (e.g. find_python_with_odr()), probe that interpreter —
+    the one that will validate/patch — rather than this process's import.
+    Returns None if the schema cannot be read.
+    """
+    if py_cmd:
+        import subprocess
+
+        probe = (
+            "import json,os,sys;"
+            "import open_dread_rando;"
+            "p=os.path.join(os.path.dirname(open_dread_rando.__file__),'files','schema.json');"
+            "s=json.load(open(p,encoding='utf-8'));"
+            "props=s['properties']['cosmetic_patches']['properties']['lua']"
+            "['properties']['custom_init']['properties'];"
+            "print(json.dumps(sorted(props)))"
+        )
+        try:
+            r = subprocess.run(
+                list(py_cmd) + ["-c", probe],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if r.returncode == 0 and (r.stdout or "").strip():
+                keys = json.loads(r.stdout.strip().splitlines()[-1])
+                if isinstance(keys, list):
+                    return frozenset(str(k) for k in keys)
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
+            pass
+        return None
+
+    try:
+        import open_dread_rando
+
+        schema_path = (
+            Path(open_dread_rando.__file__).resolve().parent / "files" / "schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        props = (
+            schema["properties"]["cosmetic_patches"]["properties"]["lua"]["properties"][
+                "custom_init"
+            ]["properties"]
+        )
+        return frozenset(props)
+    except Exception:
+        return None
+
+
+def _cosmetic_custom_init_field_supported(field: str) -> bool:
+    """Whether *field* may be written under cosmetic_patches.lua.custom_init."""
+    allowed = _load_odr_custom_init_properties()
+    if allowed is not None:
+        return field in allowed
+    # Unknown ODR: omit keys that older schemas (≤2.18) reject.
+    return field not in _CUSTOM_INIT_OPTIONAL_KEYS
+
+
+def sanitize_custom_init_for_odr(
+    patcher_data: dict,
+    *,
+    py_cmd: Optional[List[str]] = None,
+) -> list[str]:
+    """Drop custom_init keys the target ODR schema does not allow.
+
+    Returns the list of removed keys (empty if nothing changed).
+    """
+    try:
+        custom_init = patcher_data["cosmetic_patches"]["lua"]["custom_init"]
+    except (KeyError, TypeError):
+        return []
+    if not isinstance(custom_init, dict):
+        return []
+
+    allowed = _load_odr_custom_init_properties(py_cmd)
+    removed: list[str] = []
+    if allowed is None:
+        # Conservative fallback when schema cannot be probed.
+        drop = [k for k in list(custom_init) if k in _CUSTOM_INIT_OPTIONAL_KEYS]
+    else:
+        drop = [k for k in list(custom_init) if k not in allowed]
+
+    for key in drop:
+        custom_init.pop(key, None)
+        removed.append(key)
+    return removed
 
 LIGHT_REGION_TO_SCENARIO: dict[str, str] = {
     "artaria": "s010_cave",
@@ -756,8 +873,22 @@ def apply_dread_patch_extras(patcher_data: dict, extras: dict, *, our_player: st
 
     cosmetic = extras.get("cosmetic_combat") or {}
     for field, path in COSMETIC_COMBAT_PATHS.items():
-        if field in cosmetic:
-            _set_nested(patcher_data, path, cosmetic[field])
+        if field not in cosmetic:
+            continue
+        # Skip custom_init keys the installed ODR schema rejects (e.g. show_dna_in_hud
+        # on open-dread-rando ≤2.18 — additionalProperties: false).
+        if (
+            len(path) >= 4
+            and path[:3] == ("cosmetic_patches", "lua", "custom_init")
+            and not _cosmetic_custom_init_field_supported(field)
+        ):
+            print(
+                f"[INFO] Omitting cosmetic_patches.lua.custom_init.{field} - "
+                f"not in installed open-dread-rando schema "
+                f"(upgrade to open-dread-rando>=2.19 for DNA HUD)"
+            )
+            continue
+        _set_nested(patcher_data, path, cosmetic[field])
 
     # After cosmetic_combat (which may set enable_room_name_display), overlay
     # transporter destination names and optionally force display for elevator rando.
@@ -1007,6 +1138,15 @@ def create_patcher_json(
     print(f"[OK] Generated {len(patcher_data['hints'])} Adam Nav Station hints")
 
     apply_dread_patch_extras(patcher_data, extras, our_player=our_player_name)
+
+    # Belt-and-suspenders: strip any custom_init keys this process's ODR rejects
+    # (template leftovers, or extras applied before a schema probe succeeded).
+    removed = sanitize_custom_init_for_odr(patcher_data)
+    if removed:
+        print(
+            f"[INFO] Stripped unsupported custom_init keys for ODR schema: "
+            f"{', '.join(removed)}"
+        )
 
     # Legacy spoilers without extras: keep vanilla X and no DNA gate.
     if not extras:
