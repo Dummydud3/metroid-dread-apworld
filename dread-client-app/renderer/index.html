@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dread Client Hub</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand-block">
+          <p class="brand">Metroid Bread</p>
+          <h1>Client Hub</h1>
+        </div>
+        <nav class="menu" aria-label="Hub sections">
+          <div class="menu-dropdown">
+            <button type="button" id="btn-menu" class="menu-trigger" aria-haspopup="true" aria-expanded="false">
+              Menu
+              <span class="chev" aria-hidden="true">▾</span>
+            </button>
+            <div class="menu-panel" id="menu-panel" hidden>
+              <button type="button" class="menu-item" data-view="yaml">YAML Editor</button>
+              <button type="button" class="menu-item" data-view="client">Client</button>
+            </div>
+          </div>
+          <span class="view-label" id="view-label">Client</span>
+        </nav>
+      </header>
+
+      <!-- ========== YAML EDITOR ========== -->
+      <section id="view-yaml" class="view" hidden>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>YAML Editor</h2>
+            <div class="row-actions">
+              <button type="button" id="yaml-open" class="ghost">Open…</button>
+              <button type="button" id="yaml-save" class="primary">Save YAML</button>
+            </div>
+          </div>
+          <p class="hint">Build a Metroid Dread player YAML for Archipelago. Save it into your Players folder, then generate a seed.</p>
+
+          <div class="row2">
+            <label>
+              Player / slot name
+              <input id="yaml-name" type="text" autocomplete="off" />
+            </label>
+            <label>
+              Game goal
+              <select id="yaml-goal">
+                <option value="defeat_raven_beak">Defeat Raven Beak</option>
+                <option value="dna_hunt">DNA Hunt</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="row2">
+            <label>
+              Starting location
+              <select id="yaml-start">
+                <option value="default">Default (Artaria Intro)</option>
+                <option value="random_save_station">Random save / map / nav</option>
+              </select>
+            </label>
+            <label class="check inline">
+              <input id="yaml-deathlink" type="checkbox" />
+              <span>Death Link</span>
+            </label>
+          </div>
+
+          <div class="row2 dna-row" id="yaml-dna-row" hidden>
+            <label>
+              DNA count
+              <input id="yaml-dna-count" type="number" min="4" max="12" />
+            </label>
+            <label>
+              DNA required (%)
+              <input id="yaml-dna-req" type="number" min="50" max="100" />
+            </label>
+          </div>
+
+          <h3 class="subhead">Progressive items</h3>
+          <div class="check-grid" id="yaml-progressive"></div>
+
+          <h3 class="subhead">Item pool</h3>
+          <div class="row2" id="yaml-pool"></div>
+
+          <h3 class="subhead">Logic &amp; tricks</h3>
+          <div class="check-grid">
+            <label class="check">
+              <input id="yaml-early-morph" type="checkbox" />
+              <span>Early Morph Ball</span>
+            </label>
+          </div>
+          <div class="trick-grid" id="yaml-tricks"></div>
+
+          <p class="hint" id="yaml-status">Ready.</p>
+        </div>
+      </section>
+
+      <!-- ========== CLIENT FLOW ========== -->
+      <section id="view-client" class="view">
+        <!-- Step: Connect -->
+        <div id="stage-connect" class="stage">
+          <section class="panel">
+            <h2>Connect to Archipelago</h2>
+            <p class="hint">
+              This part is easy, dont mess it up. 
+            </p>
+            <label>
+              Server IP / address
+              <input
+                id="server"
+                type="text"
+                placeholder="archipelago.gg:38281  or  archipelago://Slot@host:port"
+                autocomplete="off"
+              />
+            </label>
+            <div class="row2">
+              <label>
+                Slot name
+                <input id="slot" type="text" placeholder="YourYAMLName" autocomplete="off" />
+              </label>
+              <label>
+                Password
+                <input id="password" type="password" placeholder="room password if set" autocomplete="off" />
+              </label>
+            </div>
+            <div class="actions">
+              <button id="btn-connect" class="primary" type="button">Connect</button>
+            </div>
+            <p class="hint status-msg" id="connect-status"></p>
+          </section>
+
+          <!-- Visibility controlled by SHOW_SINGLEPLAYER_DROPZONE in app.js (currently hidden). -->
+          <section class="panel" id="singleplayer-panel">
+            <h2>Singleplayer</h2>
+            <p class="hint">
+              Playing solo? Skip the server — drop the Archipelago output .zip you generated for this seed.
+            </p>
+            <div
+              id="singleplayer-drop"
+              class="dropzone"
+              tabindex="0"
+              role="button"
+              aria-label="Select or drop your generated Archipelago output zip file"
+            >
+              <span class="dropzone-label">Click to select or drop your generated output .ZIP</span>
+              <span class="dropzone-sub">Accepts the .zip Archipelago generated when you created this seed.</span>
+            </div>
+            <p class="hint status-msg" id="singleplayer-status"></p>
+          </section>
+        </div>
+
+        <!-- Step: Patch -->
+        <div id="stage-patch" class="stage" hidden>
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Patch game</h2>
+              <span class="pill muted" id="patch-seed-pill">Seed: —</span>
+            </div>
+            <p class="hint" id="patch-hint">
+              Seed data comes from the Archipelago server (multiworld) or from the singleplayer .zip you dropped — no manual downloading needed.
+            </p>
+
+            <label>
+              Source path (decompiled RomFS)
+              <div class="path-row">
+                <input id="base-rom" type="text" spellcheck="false" />
+                <button type="button" id="btn-browse-rom" class="ghost">Browse</button>
+              </div>
+            </label>
+
+            <label>
+              Ryujinx output folder
+              <div class="path-row">
+                <input id="output-path" type="text" spellcheck="false" />
+                <button type="button" id="btn-browse-output" class="ghost">Browse</button>
+              </div>
+            </label>
+
+            <label class="check">
+              <input id="freesink" type="checkbox" />
+              <span>Freesink (no kill when out of bounds)</span>
+            </label>
+
+            <div class="progress-block">
+              <div class="progress-meta">
+                <span id="progress-label">Idle</span>
+                <span id="progress-pct">0%</span>
+                <span id="progress-eta"></span>
+              </div>
+              <div class="progress-track" aria-hidden="true">
+                <div class="progress-fill" id="progress-fill"></div>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button id="btn-patch" class="primary" type="button">Patch!</button>
+              <button id="btn-cancel-patch" type="button" disabled>Cancel</button>
+              <button id="btn-redownload" type="button" class="ghost">Re-download seed</button>
+              <button id="btn-skip-patch" type="button" class="ghost">Already patched — continue</button>
+            </div>
+          </section>
+
+          <details class="panel log-collapse" id="patch-log-wrap">
+            <summary>Log <span class="muted-inline">(click to expand)</span></summary>
+            <pre id="patch-log" class="log compact" aria-live="polite"></pre>
+          </details>
+        </div>
+
+        <!-- Step: Main client -->
+        <div id="stage-client" class="stage" hidden>
+          <section class="panel status-panel">
+            <div class="status-row">
+              <div class="pill" id="pill-ap" data-state="off">
+                <span class="dot"></span>
+                <span>Archipelago</span>
+              </div>
+              <div class="pill" id="pill-game" data-state="off">
+                <span class="dot"></span>
+                <span>Dread / Ryujinx</span>
+              </div>
+              <div class="pill muted" id="pill-scenario">Scenario: —</div>
+            </div>
+            <div class="death-row">
+              <div class="stat">
+                <span class="stat-label">Deaths</span>
+                <span class="stat-value" id="deaths-total">0</span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">Self</span>
+                <span class="stat-value" id="deaths-self">0</span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">DeathLink</span>
+                <span class="stat-value" id="deaths-dl">0</span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">Items</span>
+                <span class="stat-value" id="items-recv">0</span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">Checks</span>
+                <span class="stat-value" id="checks-done">0</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Play</h2>
+            <div class="row2">
+              <label>
+                Ryujinx path
+                <div class="path-row">
+                  <input id="ryujinx-path" type="text" spellcheck="false" />
+                  <button type="button" id="btn-browse-ryujinx" class="ghost">Browse</button>
+                </div>
+              </label>
+              <label>
+                Dread ROM (.nsp / .xci)
+                <div class="path-row">
+                  <input id="dread-rom" type="text" spellcheck="false" />
+                  <button type="button" id="btn-browse-rom-file" class="ghost">Browse</button>
+                </div>
+              </label>
+            </div>
+            <div class="row2">
+              <label>
+                Dread IP (Remote Lua)
+                <input id="dread-ip" type="text" placeholder="127.0.0.1" autocomplete="off" />
+              </label>
+              <div class="actions play-actions">
+                <button id="btn-launch" class="primary" type="button">Launch Ryujinx + Play</button>
+              </div>
+            </div>
+            <div class="actions">
+              <button id="btn-connect-game" type="button">Connect Game</button>
+              <button id="btn-deathlink" type="button" disabled>DeathLink: —</button>
+              <button id="btn-tracker" type="button">Map Tracker</button>
+              <button id="btn-disconnect" type="button">Disconnect</button>
+              <button id="btn-back-patch" type="button" class="ghost">Re-patch</button>
+            </div>
+          </section>
+
+          <section class="panel log-panel">
+            <div class="log-head">
+              <h2>Log</h2>
+              <button id="btn-clear-log" class="ghost" type="button">Clear</button>
+            </div>
+            <div id="log" class="log" aria-live="polite"></div>
+            <form id="cmd-form" class="cmd-form">
+              <input
+                id="cmd"
+                type="text"
+                placeholder="!hint Charge Beam  ·  /connect_dread  ·  chat"
+                autocomplete="off"
+              />
+              <button type="submit" class="primary">Send</button>
+            </form>
+          </section>
+        </div>
+      </section>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

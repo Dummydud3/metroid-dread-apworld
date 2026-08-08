@@ -1,0 +1,33 @@
+# Keep dread-client-app Hub sources in the apworld for Launcher users,
+# but never ship npm/Electron install trees or build/cache junk.
+# Hub runs `npm install` on first launch when node_modules is missing.
+
+# npm / Electron (primary bloat — ~110MB compressed)
+node_modules/
+**/node_modules/
+
+# Nested git history (world may be its own repo)
+.git/
+**/.git/
+
+# Local caches / outputs / logs
+output/
+logs/
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vite/
+.cache/
+
+# Electron / frontend build artifacts (if produced locally)
+dread-client-app/dist/
+dread-client-app/out/
+dread-client-app/release/
+dread-client-app/.vite/
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+Thumbs.db

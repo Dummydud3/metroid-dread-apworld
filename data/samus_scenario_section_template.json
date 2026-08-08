@@ -1,0 +1,9 @@
+{
+  "source_scenario": "s020_magma",
+  "source_profile": "Ryujinx save 0000000000000007 profile1 (Artaria+Cataris)",
+  "captured": "2026-08-03",
+  "section_bytes": 26644,
+  "property_count": 211,
+  "vis_rows_in_source": 18,
+  "notes": "Full CBlackboard scenario section for cloning missing regions. VIS-only stubs crashed Ryujinx because sibling props (MINIMAP_TILES, NAVMESH_OCCLUDERS, actor flags, etc.) were absent. Clone by renaming scenario id in the header, then replace MINIMAP_VISIBILITY with dim rows 0:299."
+}

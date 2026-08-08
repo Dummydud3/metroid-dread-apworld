@@ -1,0 +1,193 @@
+{
+ "version": 1,
+ "comment": "Vanilla Metroid Dread minimap categories. `items` drives ODR's ItemCustom{n} numbering: a pickup whose map actor is absent from its scenario's `items` list gets no custom icon.",
+ "items": {
+  "s010_cave": [
+   "Item_EnergyTank001",
+   "Item_MissileTank001",
+   "Item_MissileTank002",
+   "Item_MissileTank003",
+   "Item_MissileTank003_1",
+   "Item_MissileTank004",
+   "Item_MissileTank005",
+   "Item_MissileTank006",
+   "Item_MissileTank007",
+   "Item_MissileTank009",
+   "Item_MissileTank010",
+   "Item_MissileTank011",
+   "Item_MissileTank012",
+   "Item_MissileTank014",
+   "Item_MissileTank015",
+   "Item_MissileTank016",
+   "SG_Scorpius_ItemCube",
+   "item_energyfragment_000",
+   "item_energyfragment_001",
+   "item_energytank_000",
+   "item_missiletank_000",
+   "item_missiletank_001",
+   "item_missiletank_002",
+   "item_missiletank_003",
+   "item_missiletank_004",
+   "item_missiletank_005",
+   "item_missiletank_006",
+   "item_missiletankplus_000",
+   "item_missiletankplus_001",
+   "item_powerbombtank_000",
+   "powerup_chargebeam",
+   "powerup_grapplebeam",
+   "powerup_screwattack",
+   "powerup_variasuit"
+  ],
+  "s020_magma": [
+   "item_energyfragment_000",
+   "item_energyfragment_001",
+   "item_energytank_000",
+   "item_missiletank",
+   "item_missiletank_000",
+   "item_missiletank_001",
+   "item_missiletank_002",
+   "item_missiletank_003",
+   "item_missiletank_004",
+   "item_missiletank_005",
+   "item_missiletank_006",
+   "item_missiletank_007",
+   "item_missiletank_008",
+   "item_missiletank_009",
+   "item_missiletank_010",
+   "item_missiletank_011",
+   "item_missiletank_012",
+   "item_missiletankplus_000",
+   "item_powerbombtank_000",
+   "item_powerbombtank_001",
+   "item_powerbombtank_002",
+   "powerup_diffusionbeam"
+  ],
+  "s030_baselab": [
+   "item_energyfragment_000",
+   "item_energyfragment_001",
+   "item_energyfragment_002",
+   "item_energyfragment_003",
+   "item_energytank",
+   "item_missiletank",
+   "item_missiletank_000",
+   "item_missiletank_001",
+   "item_missiletank_002",
+   "item_missiletank_003",
+   "item_missiletank_004",
+   "item_missiletank_005",
+   "item_missiletank_006",
+   "item_missiletank_007",
+   "item_missiletank_008",
+   "item_missiletank_010",
+   "item_missiletankplus_000",
+   "item_powerbombtank_000",
+   "item_powerbombtank_001",
+   "item_powerbombtank_002",
+   "powerup_bomb",
+   "powerup_widebeam"
+  ],
+  "s040_aqua": [
+   "item_energyfragment_000",
+   "item_energyfragment_002",
+   "item_energytank",
+   "item_energytank_000",
+   "item_missiletank",
+   "item_missiletank_000",
+   "item_missiletank_001",
+   "item_missiletank_003",
+   "item_missiletank_004",
+   "item_missiletank_005",
+   "item_missiletank_006",
+   "item_missiletank_007",
+   "item_missiletankplus",
+   "item_missiletankplus_000",
+   "item_missiletankplus_001",
+   "item_missiletankplus_002",
+   "item_powerbombtank_000",
+   "powerup_ghostaura",
+   "powerup_gravitysuit"
+  ],
+  "s050_forest": [
+   "item_energyfragment",
+   "item_energyfragment_000",
+   "item_energytank_000",
+   "item_missiletank",
+   "item_missiletank_000",
+   "item_missiletank_001",
+   "item_missiletank_002",
+   "item_missiletank_003",
+   "item_missiletank_004",
+   "item_missiletank_005",
+   "item_missiletank_006",
+   "item_missiletank_007",
+   "item_missiletank_009",
+   "item_missiletankplus_000",
+   "item_powerbombtank_000",
+   "powerup_doublejump",
+   "powerup_sonar",
+   "powerup_supermissile"
+  ],
+  "s060_quarantine": [
+   "item_energytank_000",
+   "item_missiletank_000",
+   "item_missiletank_002",
+   "item_powerbombtank_000",
+   "powerup_plasmabeam"
+  ],
+  "s070_basesanc": [
+   "item_energyfragment",
+   "item_energyfragment_000",
+   "item_energyfragment_001",
+   "item_energyfragment_002",
+   "item_missiletank_000",
+   "item_missiletank_001",
+   "item_missiletank_002",
+   "item_missiletank_003",
+   "item_missiletank_004",
+   "item_missiletank_005",
+   "item_missiletankplus_000",
+   "item_missiletankplus_001",
+   "item_powerbombtank_000",
+   "item_powerbombtank_001",
+   "powerup_spacejump"
+  ],
+  "s080_shipyard": [
+   "item_missiletank",
+   "item_missiletank_000",
+   "item_powerbombtank_000"
+  ],
+  "s090_skybase": []
+ },
+ "ability_labels": {
+  "s010_cave": [
+   "powerup_chargebeam",
+   "powerup_grapplebeam",
+   "powerup_screwattack",
+   "powerup_variasuit"
+  ],
+  "s020_magma": [
+   "powerup_diffusionbeam"
+  ],
+  "s030_baselab": [
+   "powerup_bomb",
+   "powerup_widebeam"
+  ],
+  "s040_aqua": [
+   "powerup_ghostaura",
+   "powerup_gravitysuit"
+  ],
+  "s050_forest": [
+   "powerup_doublejump",
+   "powerup_sonar",
+   "powerup_supermissile"
+  ],
+  "s060_quarantine": [
+   "powerup_plasmabeam"
+  ],
+  "s070_basesanc": [
+   "powerup_spacejump"
+  ],
+  "s080_shipyard": [],
+  "s090_skybase": []
+ }
+}

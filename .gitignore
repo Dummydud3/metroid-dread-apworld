@@ -1,5 +1,11 @@
-__pycache__/
+﻿__pycache__/
 *.py[cod]
-*.pyo
+.pytest_cache/
+node_modules/
+dread-client-app/node_modules/
+*.log
+logs/
+output/
 .DS_Store
-Thumbs.db
+dread_client_ui_config.json
+dread_direct_patch_config.json

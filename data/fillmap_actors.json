@@ -1,0 +1,779 @@
+{
+  "version": 1,
+  "paint_path": "Game.SetMinimapRegionVisited(fillmap_actor)",
+  "notes": [
+    "Bright paint uses scenario fillmap / logicshape ACTOR names.",
+    "collision_camera_* BMSCC asset ids are silent no-ops for SetMinimapRegionVisited.",
+    "OdrMap.VisitBounds (flag=6) remains crash-guarded; do not use for AP paint yet.",
+    "Camera/area resolution: fillmap actor vPos point-in-BMSCC polygon (approximate).",
+    "Confirmed in-game: Watervalve_fillmap \u2192 EMMI Zone Hub; cut_fillmap_54 \u2192 Corpius Arena."
+  ],
+  "scenarios": {
+    "s010_cave": {
+      "region": "Artaria",
+      "fillmaps": {
+        "Watervalve_fillmap": {
+          "sublayer": "default",
+          "pos": [
+            -3481.22,
+            -5241.69
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_010",
+              "camera_raw": "collision_camera_010",
+              "area": "EMMI Zone Hub"
+            }
+          ]
+        },
+        "cut_fillmap_51": {
+          "sublayer": "Cutscenes",
+          "pos": [
+            9500.0,
+            -4400.0
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_090",
+              "camera_raw": "collision_camera_090",
+              "area": "Central Unit"
+            }
+          ]
+        },
+        "cut_fillmap_49_2": {
+          "sublayer": "Cutscenes",
+          "pos": [
+            8100.0,
+            -3258.57
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_018",
+              "camera_raw": "collision_camera_018",
+              "area": "EMMI Zone Entrance Hallway"
+            }
+          ]
+        },
+        "cut_fillmap_54": {
+          "sublayer": "Cutscenes",
+          "pos": [
+            19629.6,
+            118.6
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_020",
+              "camera_raw": "collision_camera_020",
+              "area": "Corpius Arena"
+            }
+          ]
+        },
+        "cut_fillmap_49_1": {
+          "sublayer": "Cutscenes",
+          "pos": [
+            10100.0,
+            -3400.0
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_018",
+              "camera_raw": "collision_camera_018",
+              "area": "EMMI Zone Entrance Hallway"
+            }
+          ]
+        },
+        "cut_fillmap_3": {
+          "sublayer": "Cutscenes",
+          "pos": [
+            7435.44,
+            -7274.96
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_068",
+              "camera_raw": "collision_camera_068",
+              "area": "Navigation Station South"
+            }
+          ]
+        },
+        "cut_fillmap_5": {
+          "sublayer": "Cutscenes",
+          "pos": [
+            11223.49,
+            -8225.01
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_003",
+              "camera_raw": "collision_camera_003",
+              "area": "Melee Tutorial Room"
+            },
+            {
+              "camera": "collision_camera_003_B",
+              "camera_raw": "collision_camera_003_B",
+              "area": null
+            },
+            {
+              "camera": "collision_camera_003_C",
+              "camera_raw": "collision_camera_003_C",
+              "area": null
+            }
+          ]
+        },
+        "cut_fillmap_34": {
+          "sublayer": "Cutscenes",
+          "pos": [
+            15596.5,
+            -3117.24
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_016",
+              "camera_raw": "collision_camera_016",
+              "area": "Proto EMMI Introduction"
+            }
+          ]
+        },
+        "cut_fillmap_48": {
+          "sublayer": "Cutscenes",
+          "pos": [
+            22066.74,
+            -2498.34
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_074",
+              "camera_raw": "collision_camera_074",
+              "area": "Proto EMMI CU"
+            }
+          ]
+        },
+        "cut_fillmap_36": {
+          "sublayer": "Cutscenes",
+          "pos": [
+            8300.0,
+            -1900.0
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_004",
+              "camera_raw": "collision_camera_004",
+              "area": "Early Cloak Room"
+            }
+          ]
+        },
+        "cut_fillmap_37": {
+          "sublayer": "Cutscenes",
+          "pos": [
+            4500.0,
+            -1400.0
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_006",
+              "camera_raw": "collision_camera_006",
+              "area": "White EMMI Introduction"
+            }
+          ]
+        },
+        "cut_fillmap_50": {
+          "sublayer": "Cutscenes",
+          "pos": [
+            8521.87,
+            -4154.07
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_090",
+              "camera_raw": "collision_camera_090",
+              "area": "Central Unit"
+            }
+          ]
+        }
+      }
+    },
+    "s020_magma": {
+      "region": "Cataris",
+      "fillmaps": {
+        "cut_fillmap_38": {
+          "sublayer": "cutscenes",
+          "pos": [
+            -3666.07,
+            -1044.9
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_020",
+              "camera_raw": "collision_camera_020",
+              "area": "Green EMMI Introduction"
+            }
+          ]
+        },
+        "cut_fillmap_59": {
+          "sublayer": "cutscenes",
+          "pos": [
+            -16066.99,
+            -5650.4
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_063",
+              "camera_raw": "collision_camera_063",
+              "area": "Kraid Arena"
+            },
+            {
+              "camera": "collision_camera_063_Stage_001",
+              "camera_raw": "collision_camera_063_Stage_001",
+              "area": null
+            },
+            {
+              "camera": "collision_camera_063_Stage_002",
+              "camera_raw": "collision_camera_063_Stage_002",
+              "area": null
+            }
+          ]
+        },
+        "cut_fillmap_60": {
+          "sublayer": "cutscenes",
+          "pos": [
+            -15515.0,
+            -6442.0
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_063",
+              "camera_raw": "collision_camera_063",
+              "area": "Kraid Arena"
+            },
+            {
+              "camera": "collision_camera_063_Stage_001",
+              "camera_raw": "collision_camera_063_Stage_001",
+              "area": null
+            },
+            {
+              "camera": "collision_camera_063_Stage_002",
+              "camera_raw": "collision_camera_063_Stage_002",
+              "area": null
+            }
+          ]
+        },
+        "cut_fillmap_53": {
+          "sublayer": "cutscenes",
+          "pos": [
+            -8616.6,
+            5316.2
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_037",
+              "camera_raw": "collision_camera_037",
+              "area": "Central Unit"
+            }
+          ]
+        },
+        "cut_fillmap_78": {
+          "sublayer": "cutscenes",
+          "pos": [
+            3371.55,
+            -6829.23
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_009",
+              "camera_raw": "collision_camera_009",
+              "area": "Above Z-57 Fight"
+            },
+            {
+              "camera": "collision_camera_009_C",
+              "camera_raw": "collision_camera_009_C",
+              "area": null
+            },
+            {
+              "camera": "collision_camera_CooldownX",
+              "camera_raw": "collision_camera_CooldownX",
+              "area": "Experiment Z-57 Fight?"
+            }
+          ]
+        },
+        "cut_fillmap_61": {
+          "sublayer": "cutscenes",
+          "pos": [
+            -15979.59,
+            -6533.38
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_063",
+              "camera_raw": "collision_camera_063",
+              "area": "Kraid Arena"
+            },
+            {
+              "camera": "collision_camera_063_Stage_002",
+              "camera_raw": "collision_camera_063_Stage_002",
+              "area": null
+            }
+          ]
+        }
+      }
+    },
+    "s050_forest": {
+      "region": "Ghavoran",
+      "fillmaps": {
+        "cut_fillmap_33": {
+          "sublayer": "cutscenes",
+          "pos": [
+            2467.19,
+            5683.29
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_032",
+              "camera_raw": "collision_camera_032",
+              "area": "Pulse Radar Room"
+            }
+          ]
+        },
+        "cut_fillmap_53": {
+          "sublayer": "cutscenes",
+          "pos": [
+            -7700.0,
+            4300.0
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_017",
+              "camera_raw": "collision_camera_017",
+              "area": "Central Unit"
+            }
+          ]
+        }
+      }
+    },
+    "s080_shipyard": {
+      "region": "Hanubia",
+      "fillmaps": {
+        "cut_fillmap_12": {
+          "sublayer": "cutscenes",
+          "pos": [
+            5214.02,
+            -1543.83
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_010",
+              "camera_raw": "collision_camera_010",
+              "area": "Tank Room"
+            }
+          ]
+        },
+        "cut_fillmap_71": {
+          "sublayer": "cutscenes",
+          "pos": [
+            4600.0,
+            3300.0
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_005",
+              "camera_raw": "collision_camera_005",
+              "area": "Gold Chozo Warrior Arena"
+            },
+            {
+              "camera": "collision_camera_005_B",
+              "camera_raw": "collision_camera_005_B",
+              "area": null
+            }
+          ]
+        },
+        "cut_fillmap_110": {
+          "sublayer": "cutscenes",
+          "pos": [
+            14205.38,
+            -8179.95
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_020",
+              "camera_raw": "collision_camera_020",
+              "area": "Raven Beak X Arena"
+            }
+          ]
+        }
+      }
+    },
+    "s090_skybase": {
+      "region": "Itorash",
+      "fillmaps": {
+        "cut_fillmap_86": {
+          "sublayer": "cutscenes",
+          "pos": [
+            4565.71,
+            1974.6
+          ],
+          "cameras": [
+            {
+              "camera": "collision_camera_004",
+              "camera_raw": "collision_camera_004",
+              "area": "Raven Beak Arena"
+            }
+          ]
+        }
+      }
+    },
+    "s030_baselab": {
+      "region": "Dairon",
+      "fillmaps": {
+        "cut_fillmap_39": {
+          "sublayer": null,
+          "pos": null,
+          "cameras": [],
+          "source": "pkg_string"
+        },
+        "cut_fillmap_53": {
+          "sublayer": null,
+          "pos": null,
+          "cameras": [],
+          "source": "pkg_string"
+        }
+      }
+    },
+    "s040_aqua": {
+      "region": "Burenia",
+      "fillmaps": {
+        "cut_fillmap_32": {
+          "sublayer": null,
+          "pos": null,
+          "cameras": [],
+          "source": "pkg_string"
+        },
+        "cut_fillmap_63": {
+          "sublayer": null,
+          "pos": null,
+          "cameras": [],
+          "source": "pkg_string"
+        },
+        "cut_fillmap_65": {
+          "sublayer": null,
+          "pos": null,
+          "cameras": [],
+          "source": "pkg_string"
+        }
+      }
+    },
+    "s060_quarantine": {
+      "region": "Elun",
+      "fillmaps": {
+        "cut_fillmap_113": {
+          "sublayer": null,
+          "pos": null,
+          "cameras": [],
+          "source": "pkg_string"
+        },
+        "cut_fillmap_13": {
+          "sublayer": null,
+          "pos": null,
+          "cameras": [],
+          "source": "pkg_string"
+        },
+        "cut_fillmap_4": {
+          "sublayer": null,
+          "pos": null,
+          "cameras": [],
+          "source": "pkg_string"
+        },
+        "cut_fillmap_67": {
+          "sublayer": null,
+          "pos": null,
+          "cameras": [],
+          "source": "pkg_string"
+        }
+      }
+    },
+    "s070_basesanc": {
+      "region": "Ferenia",
+      "fillmaps": {
+        "cut_fillmap_40": {
+          "sublayer": null,
+          "pos": null,
+          "cameras": [],
+          "source": "pkg_string"
+        },
+        "cut_fillmap_53": {
+          "sublayer": null,
+          "pos": null,
+          "cameras": [],
+          "source": "pkg_string"
+        }
+      }
+    }
+  },
+  "area_to_fillmaps": {
+    "Artaria/EMMI Zone Hub": [
+      {
+        "scenario": "s010_cave",
+        "fillmap": "Watervalve_fillmap",
+        "asset_id": "collision_camera_010"
+      }
+    ],
+    "Artaria/Central Unit": [
+      {
+        "scenario": "s010_cave",
+        "fillmap": "cut_fillmap_51",
+        "asset_id": "collision_camera_090"
+      },
+      {
+        "scenario": "s010_cave",
+        "fillmap": "cut_fillmap_50",
+        "asset_id": "collision_camera_090"
+      }
+    ],
+    "Artaria/EMMI Zone Entrance Hallway": [
+      {
+        "scenario": "s010_cave",
+        "fillmap": "cut_fillmap_49_2",
+        "asset_id": "collision_camera_018"
+      },
+      {
+        "scenario": "s010_cave",
+        "fillmap": "cut_fillmap_49_1",
+        "asset_id": "collision_camera_018"
+      }
+    ],
+    "Artaria/Corpius Arena": [
+      {
+        "scenario": "s010_cave",
+        "fillmap": "cut_fillmap_54",
+        "asset_id": "collision_camera_020"
+      }
+    ],
+    "Artaria/Navigation Station South": [
+      {
+        "scenario": "s010_cave",
+        "fillmap": "cut_fillmap_3",
+        "asset_id": "collision_camera_068"
+      }
+    ],
+    "Artaria/Melee Tutorial Room": [
+      {
+        "scenario": "s010_cave",
+        "fillmap": "cut_fillmap_5",
+        "asset_id": "collision_camera_003"
+      }
+    ],
+    "Artaria/Proto EMMI Introduction": [
+      {
+        "scenario": "s010_cave",
+        "fillmap": "cut_fillmap_34",
+        "asset_id": "collision_camera_016"
+      }
+    ],
+    "Artaria/Proto EMMI CU": [
+      {
+        "scenario": "s010_cave",
+        "fillmap": "cut_fillmap_48",
+        "asset_id": "collision_camera_074"
+      }
+    ],
+    "Artaria/Early Cloak Room": [
+      {
+        "scenario": "s010_cave",
+        "fillmap": "cut_fillmap_36",
+        "asset_id": "collision_camera_004"
+      }
+    ],
+    "Artaria/White EMMI Introduction": [
+      {
+        "scenario": "s010_cave",
+        "fillmap": "cut_fillmap_37",
+        "asset_id": "collision_camera_006"
+      }
+    ],
+    "Cataris/Green EMMI Introduction": [
+      {
+        "scenario": "s020_magma",
+        "fillmap": "cut_fillmap_38",
+        "asset_id": "collision_camera_020"
+      }
+    ],
+    "Cataris/Kraid Arena": [
+      {
+        "scenario": "s020_magma",
+        "fillmap": "cut_fillmap_59",
+        "asset_id": "collision_camera_063"
+      },
+      {
+        "scenario": "s020_magma",
+        "fillmap": "cut_fillmap_60",
+        "asset_id": "collision_camera_063"
+      },
+      {
+        "scenario": "s020_magma",
+        "fillmap": "cut_fillmap_61",
+        "asset_id": "collision_camera_063"
+      }
+    ],
+    "Cataris/Central Unit": [
+      {
+        "scenario": "s020_magma",
+        "fillmap": "cut_fillmap_53",
+        "asset_id": "collision_camera_037"
+      }
+    ],
+    "Cataris/Above Z-57 Fight": [
+      {
+        "scenario": "s020_magma",
+        "fillmap": "cut_fillmap_78",
+        "asset_id": "collision_camera_009"
+      }
+    ],
+    "Cataris/Experiment Z-57 Fight?": [
+      {
+        "scenario": "s020_magma",
+        "fillmap": "cut_fillmap_78",
+        "asset_id": "collision_camera_CooldownX"
+      }
+    ],
+    "Ghavoran/Pulse Radar Room": [
+      {
+        "scenario": "s050_forest",
+        "fillmap": "cut_fillmap_33",
+        "asset_id": "collision_camera_032"
+      }
+    ],
+    "Ghavoran/Central Unit": [
+      {
+        "scenario": "s050_forest",
+        "fillmap": "cut_fillmap_53",
+        "asset_id": "collision_camera_017"
+      }
+    ],
+    "Hanubia/Tank Room": [
+      {
+        "scenario": "s080_shipyard",
+        "fillmap": "cut_fillmap_12",
+        "asset_id": "collision_camera_010"
+      }
+    ],
+    "Hanubia/Gold Chozo Warrior Arena": [
+      {
+        "scenario": "s080_shipyard",
+        "fillmap": "cut_fillmap_71",
+        "asset_id": "collision_camera_005"
+      }
+    ],
+    "Hanubia/Raven Beak X Arena": [
+      {
+        "scenario": "s080_shipyard",
+        "fillmap": "cut_fillmap_110",
+        "asset_id": "collision_camera_020"
+      }
+    ],
+    "Itorash/Raven Beak Arena": [
+      {
+        "scenario": "s090_skybase",
+        "fillmap": "cut_fillmap_86",
+        "asset_id": "collision_camera_004"
+      }
+    ]
+  },
+  "asset_id_to_fillmaps": {
+    "s010_cave": {
+      "collision_camera_010": [
+        "Watervalve_fillmap"
+      ],
+      "collision_camera_090": [
+        "cut_fillmap_51",
+        "cut_fillmap_50"
+      ],
+      "collision_camera_018": [
+        "cut_fillmap_49_2",
+        "cut_fillmap_49_1"
+      ],
+      "collision_camera_020": [
+        "cut_fillmap_54"
+      ],
+      "collision_camera_068": [
+        "cut_fillmap_3"
+      ],
+      "collision_camera_003": [
+        "cut_fillmap_5"
+      ],
+      "collision_camera_003_B": [
+        "cut_fillmap_5"
+      ],
+      "collision_camera_003_C": [
+        "cut_fillmap_5"
+      ],
+      "collision_camera_016": [
+        "cut_fillmap_34"
+      ],
+      "collision_camera_074": [
+        "cut_fillmap_48"
+      ],
+      "collision_camera_004": [
+        "cut_fillmap_36"
+      ],
+      "collision_camera_006": [
+        "cut_fillmap_37"
+      ]
+    },
+    "s020_magma": {
+      "collision_camera_020": [
+        "cut_fillmap_38"
+      ],
+      "collision_camera_063": [
+        "cut_fillmap_59",
+        "cut_fillmap_60",
+        "cut_fillmap_61"
+      ],
+      "collision_camera_063_Stage_001": [
+        "cut_fillmap_59",
+        "cut_fillmap_60"
+      ],
+      "collision_camera_063_Stage_002": [
+        "cut_fillmap_59",
+        "cut_fillmap_60",
+        "cut_fillmap_61"
+      ],
+      "collision_camera_037": [
+        "cut_fillmap_53"
+      ],
+      "collision_camera_009": [
+        "cut_fillmap_78"
+      ],
+      "collision_camera_009_C": [
+        "cut_fillmap_78"
+      ],
+      "collision_camera_CooldownX": [
+        "cut_fillmap_78"
+      ]
+    },
+    "s050_forest": {
+      "collision_camera_032": [
+        "cut_fillmap_33"
+      ],
+      "collision_camera_017": [
+        "cut_fillmap_53"
+      ]
+    },
+    "s080_shipyard": {
+      "collision_camera_010": [
+        "cut_fillmap_12"
+      ],
+      "collision_camera_005": [
+        "cut_fillmap_71"
+      ],
+      "collision_camera_005_B": [
+        "cut_fillmap_71"
+      ],
+      "collision_camera_020": [
+        "cut_fillmap_110"
+      ]
+    },
+    "s090_skybase": {
+      "collision_camera_004": [
+        "cut_fillmap_86"
+      ]
+    }
+  }
+}

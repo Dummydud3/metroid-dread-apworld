@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "game_versions": ["1.0.0", "2.1.0"],
+  "respawn_anchor": {
+    "description": "Bench position only. Updated at save stations / scripted checkpoints, never on pickup flush.",
+    "player_blackboard_props": [
+      { "key": "LevelID", "type": "s", "role": "anchor" },
+      { "key": "ScenarioID", "type": "s", "role": "anchor" },
+      { "key": "StartPoint", "type": "s", "role": "anchor" }
+    ],
+    "save_station_charclasses": ["savestation", "accesspoint", "maproom"],
+    "scripted_checkpoint_name_prefixes": ["SP_Checkpoint_", "TG_PostBossCheckpoint_", "TG_SnapshotCheckpoint_"]
+  },
+  "progress_store": {
+    "inventory": {
+      "blackboard_section": "PLAYER_INVENTORY",
+      "also_via": "Game.GetItemAmount / Game.SetItemAmount",
+      "persist_keys": [
+        "ITEM_DOUBLE_JUMP",
+        "ITEM_FLOOR_SLIDE",
+        "ITEM_GHOST_AURA",
+        "ITEM_GRAVITY_SUIT",
+        "ITEM_HYPER_SUIT",
+        "ITEM_MAGNET_GLOVE",
+        "ITEM_MAX_LIFE",
+        "ITEM_MAX_SPECIAL_ENERGY",
+        "ITEM_METROIDNIZATION",
+        "ITEM_METROID_COUNT",
+        "ITEM_METROID_TOTAL_COUNT",
+        "ITEM_MORPH_BALL",
+        "ITEM_MULTILOCKON",
+        "ITEM_OPTIC_CAMOUFLAGE",
+        "ITEM_RESERVE_TANK_LIFE",
+        "ITEM_RESERVE_TANK_LIFE_SIZE",
+        "ITEM_RESERVE_TANK_MISSILE",
+        "ITEM_RESERVE_TANK_MISSILE_SIZE",
+        "ITEM_RESERVE_TANK_SPECIAL_ENERGY",
+        "ITEM_RESERVE_TANK_SPECIAL_ENERGY_SIZE",
+        "ITEM_SCREW_ATTACK",
+        "ITEM_SONAR",
+        "ITEM_SPACE_JUMP",
+        "ITEM_SPEED_BOOSTER",
+        "ITEM_SPRING_BALL",
+        "ITEM_VARIA_SUIT",
+        "ITEM_WEAPON_BOMB",
+        "ITEM_WEAPON_CHARGE_BEAM",
+        "ITEM_WEAPON_DIFFUSION_BEAM",
+        "ITEM_WEAPON_GRAPPLE_BEAM",
+        "ITEM_WEAPON_HYPER_BEAM",
+        "ITEM_WEAPON_ICE_MISSILE",
+        "ITEM_WEAPON_LINE_BOMB",
+        "ITEM_WEAPON_MISSILE_MAX",
+        "ITEM_WEAPON_PLASMA_BEAM",
+        "ITEM_WEAPON_POWER_BOMB",
+        "ITEM_WEAPON_POWER_BOMB_MAX",
+        "ITEM_WEAPON_SUPER_MISSILE",
+        "ITEM_WEAPON_WAVE_BEAM",
+        "ITEM_WEAPON_WIDE_BEAM",
+        "ITEM_WEAPON_MISSILE_LAUNCHER",
+        "ITEM_WEAPON_POWER_BEAM",
+        "ITEM_WEAPON_STORM_MISSILE",
+        "ITEM_ENERGY_TANKS",
+        "ITEM_LIFE_SHARDS",
+        "ITEM_UPGRADE_FLASH_SHIFT_CHAIN",
+        "ITEM_UPGRADE_SPEED_BOOST_CHARGE"
+      ],
+      "vitals_keys_refill_on_death": [
+        "ITEM_CURRENT_LIFE",
+        "ITEM_CURRENT_SPECIAL_ENERGY",
+        "ITEM_WEAPON_MISSILE_CURRENT",
+        "ITEM_WEAPON_POWER_BOMB_CURRENT"
+      ],
+      "vitals_policy": "On death Continue, set each CURRENT from matching MAX via Scenario.RecoverPlayerMaxItemsAmounts (do not restore mid-fight CURRENT from ProgressStore)."
+    },
+    "player_blackboard_patterns": [
+      { "pattern": "Location_Collected_*", "type": "b", "source": "ODR RandomizerPowerup" },
+      { "key": "InventoryIndex", "type": "f", "source": "ODR" },
+      { "key": "THIS_RANDO_IDENTIFIER", "type": "s", "source": "ODR" },
+      { "key": "RANDO_GAME_INITIALIZED", "type": "b", "source": "ODR" }
+    ],
+    "global_sections": [
+      {
+        "section": "GAME_PROGRESS",
+        "description": "Story gates, teleports, quarantine, rando visit flags",
+        "known_keys": [
+          "QUARENTINE_OPENED",
+          "TeleportWorldUnlocked",
+          "RandoTeleportWorldUnlocked",
+          "RandoVisitScenarios",
+          "RandoUnlockTeleportal",
+          "X_RELEASE_TRUE"
+        ],
+        "key_patterns": [
+          "RandoVisited*",
+          "RandoMapSeen*",
+          "s010_cave*",
+          "s020_magma*",
+          "s030_baselab*",
+          "s040_aqua*",
+          "s050_forest*",
+          "s060_quarantine*",
+          "s070_basesanc*",
+          "s080_shipyard*",
+          "s090_skybase*"
+        ]
+      },
+      {
+        "section": "GAME",
+        "description": "Global stats; ProgressStat_PlayerDeaths may already survive Continue on 2.0+",
+        "known_keys": [
+          "NumTanksPickedUp",
+          "Completion",
+          "ProgressStat_PlayerDeaths",
+          "Rando_PlayerDeathCount",
+          "Player"
+        ]
+      },
+      {
+        "section": "PlayedCutscenes",
+        "description": "Cutscene played flags; keep finished gates, not in-flight playback"
+      },
+      {
+        "section": "ScenarioShared",
+        "description": "Cross-scenario shared props via WriteToSharedBlackboard"
+      }
+    ],
+    "scenario_blackboard": {
+      "description": "Per-area section from Game.GetScenarioBlackboardSectionID(scenarioId). Capture all props written via Scenario.WriteToBlackboard / InitFromBlackboard.",
+      "scenarios": [
+        "s010_cave",
+        "s020_magma",
+        "s030_baselab",
+        "s040_aqua",
+        "s050_forest",
+        "s060_quarantine",
+        "s070_basesanc",
+        "s080_shipyard",
+        "s090_skybase"
+      ],
+      "vanilla_registered_props_example": [
+        "CAVES_GAME_INTRO",
+        "CAVES_EMMY_SPAWNED",
+        "CAVES_CENTRAL_UNIT_WAKE_UP_CUTSCENE_LAUNCHED",
+        "HYDROGIGA_DEAD",
+        "COOLDOWN_FINISHED",
+        "NumTanksPickedUp",
+        "NumTanksPickedUpMax"
+      ],
+      "capture_strategy": "On CaptureNow, iterate known prop registries + diff poll of scenario section if native enumeration exists; else maintain dirty set of keys touched via hooked WriteToBlackboard."
+    },
+    "minimap_visit": {
+      "description": "Profile visit grid bits per scenario. See AP_DREAD_REACHABLE_MAP_HANDOFF.md.",
+      "lua_surfaces": [
+        "guicallbacks.OnMinimapCellVisited",
+        "minimap.SetProfileDataDirty",
+        "minimap.GetNumVisitedCells"
+      ],
+      "needs_exlaunch_if": "No selective visit bit dump/restore API in Lua after Continue rollback"
+    }
+  },
+  "side_channel_fallback": {
+    "section": "HK_PROGRESS",
+    "description": "Optional dedicated BB section or exlaunch buffer holding serialized ProgressStore JSON/blob if live checkpoint cannot be patched without moving StartPoint."
+  },
+  "flush_policy": {
+    "debounce_seconds": 1.0,
+    "immediate_reasons": ["major_item", "boss", "save_station", "ap_item"],
+    "profile_save_call": "Game.SaveGame(\"savedata\", \"HKAutosave\", respawn_anchor.StartPoint, true)",
+    "checkpoint_save_call_caution": "Game.SaveGame(\"checkpoint\", \"\", \"\", false) may rewrite spawn — confirm in Phase 0 before using for progress-only flush",
+    "busy_guard": "Game.IsSaveDataBusy"
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "137": {
+    "pickup_type": "emmi",
+    "scenario": "s080_shipyard",
+    "callback_function": "OnEmmyShipyardAbilityObtained",
+    "callback_args": 0,
+    "actor_def": "actors/characters/emmyshipyard/charclasses/emmyshipyard.bmsad",
+    "string_key": "GUI_ITEM_ACQUIRED_POWER_BOMB"
+  },
+  "138": {
+    "pickup_type": "corpius",
+    "scenario": "s010_cave",
+    "callback_function": "OnCorpiusDeath_CUSTOM",
+    "callback_args": 0,
+    "actor_def": "actors/characters/scorpius/charclasses/scorpius.bmsad",
+    "string_key": "GUI_ITEM_ACQUIRED_OPTICAL_CAMO"
+  },
+  "139": {
+    "pickup_type": "emmi",
+    "scenario": "s010_cave",
+    "callback_function": "OnEmmyCaveDead",
+    "callback_args": 0,
+    "actor_def": "actors/characters/emmycave/charclasses/emmycave.bmsad",
+    "string_key": "GUI_ITEM_ACQUIRED_SPIDER_MAGNET"
+  },
+  "140": {
+    "pickup_type": "cutscene",
+    "scenario": "s040_aqua",
+    "callback_function": "OnHydrogigaDead_CUSTOM",
+    "callback_args": 0
+  },
+  "141": {
+    "pickup_type": "cutscene",
+    "scenario": "s020_magma",
+    "callback_function": "OnExperimentDeath_CUSTOM",
+    "callback_args": 0
+  },
+  "142": {
+    "pickup_type": "corex",
+    "scenario": "s070_basesanc",
+    "callback_function": "escue",
+    "callback_args": 2,
+    "actor_def": "actors/characters/core_x_superquetzoa/charclasses/core_x_superquetzoa.bmsad",
+    "string_key": "GUI_ITEM_ACQUIRED_MULTI_LOCK"
+  },
+  "143": {
+    "pickup_type": "emmi",
+    "scenario": "s070_basesanc",
+    "callback_function": "OnEmmySancDead",
+    "callback_args": 0,
+    "actor_def": "actors/characters/emmysanc/charclasses/emmysanc.bmsad",
+    "string_key": "GUI_ITEM_ACQUIRED_WAVE_BEAM"
+  },
+  "144": {
+    "pickup_type": "emmi",
+    "scenario": "s020_magma",
+    "callback_function": "OnEmmyMagmaDead",
+    "callback_args": 0,
+    "actor_def": "actors/characters/emmymagma/charclasses/emmymagma.bmsad",
+    "string_key": "GUI_ITEM_ACQUIRED_MORPH_BALL"
+  },
+  "145": {
+    "pickup_type": "corex",
+    "scenario": "s050_forest",
+    "callback_function": "golzuna",
+    "callback_args": 2,
+    "actor_def": "actors/characters/core_x/charclasses/core_x.bmsad",
+    "string_key": "GUI_ITEM_ACQUIRED_LINE_BOMB"
+  },
+  "146": {
+    "pickup_type": "emmi",
+    "scenario": "s050_forest",
+    "callback_function": "OnEmmyForestDead",
+    "callback_args": 0,
+    "actor_def": "actors/characters/emmyforest/charclasses/emmyforest.bmsad",
+    "string_key": "GUI_ITEM_ACQUIRED_ICE_MISSILE"
+  },
+  "147": {
+    "pickup_type": "emmi",
+    "scenario": "s030_baselab",
+    "callback_function": "OnEmmyBaseLabDead",
+    "callback_args": 0,
+    "actor_def": "actors/characters/emmylab/charclasses/emmylab.bmsad",
+    "string_key": "GUI_ITEM_ACQUIRED_SPEED_BOOSTER"
+  },
+  "148": {
+    "pickup_type": "cutscene",
+    "scenario": "s020_magma",
+    "callback_function": "OnKraidDeath_CUSTOM",
+    "callback_args": 0
+  }
+}

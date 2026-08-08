@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dread Map Tracker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="top">
+        <div>
+          <p class="brand">Metroid Dread</p>
+          <h1>Map Tracker</h1>
+        </div>
+        <div class="meta">
+          <span id="conn" data-state="off">AP offline</span>
+          <span id="slot-label">—</span>
+          <span id="counts">0 items · 0 / 0 checks</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="items-pane">
+          <h2>Items</h2>
+          <div id="item-grid" class="item-grid"></div>
+        </aside>
+        <section class="locs-pane">
+          <div class="region-tabs" id="region-tabs"></div>
+          <div class="loc-head">
+            <h2 id="region-title">Locations</h2>
+            <span id="region-counts" class="muted"></span>
+          </div>
+          <p class="legend muted">
+            <span class="legend-dot in-logic"></span> In logic with your current items
+            · <span class="legend-dot checked"></span> Checked
+          </p>
+          <ul id="loc-list" class="loc-list"></ul>
+        </section>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

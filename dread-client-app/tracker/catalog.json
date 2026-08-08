@@ -1,0 +1,1194 @@
+{
+  "regions": [
+    "Artaria",
+    "Cataris",
+    "Dairon",
+    "Burenia",
+    "Ghavoran",
+    "Ferenia",
+    "Hanubia",
+    "Elun"
+  ],
+  "item_rows": [
+    [
+      "progressive_beam",
+      "wide_beam",
+      "plasma_beam",
+      "wave_beam"
+    ],
+    [
+      "progressive_charge",
+      "charge_beam",
+      "diffusion_beam",
+      "grapple_beam"
+    ],
+    [
+      "progressive_missiles",
+      "super_missile",
+      "ice_missile",
+      "storm_missile"
+    ],
+    [
+      "progressive_bombs",
+      "bomb",
+      "cross_bomb",
+      "power_bomb"
+    ],
+    [
+      "morph_ball",
+      "spider_magnet",
+      "speed_booster",
+      "screw_attack"
+    ],
+    [
+      "progressive_suit",
+      "varia_suit",
+      "gravity_suit",
+      "pulse_radar"
+    ],
+    [
+      "progressive_spin",
+      "spin_boost",
+      "space_jump",
+      "phantom_cloak"
+    ],
+    [
+      "flash_shift_upgrade",
+      "energy_tank",
+      "missile_tank",
+      "power_bomb_tank"
+    ],
+    [
+      "energy_part",
+      "missile_plus_tank",
+      "metroid_dna",
+      "speed_booster_upgrade"
+    ]
+  ],
+  "items": [
+    {
+      "code": "progressive_beam",
+      "name": "Progressive Beam",
+      "id": 84003,
+      "max_count": 3,
+      "icon": "icons/progressive_beam.png"
+    },
+    {
+      "code": "wide_beam",
+      "name": "Wide Beam",
+      "id": 84000,
+      "max_count": 1,
+      "icon": "icons/wide_beam.png"
+    },
+    {
+      "code": "plasma_beam",
+      "name": "Plasma Beam",
+      "id": 84001,
+      "max_count": 1,
+      "icon": "icons/plasma_beam.png"
+    },
+    {
+      "code": "wave_beam",
+      "name": "Wave Beam",
+      "id": 84002,
+      "max_count": 1,
+      "icon": "icons/wave_beam.png"
+    },
+    {
+      "code": "progressive_charge",
+      "name": "Progressive Charge Beam",
+      "id": 84006,
+      "max_count": 2,
+      "icon": "icons/progressive_charge.png"
+    },
+    {
+      "code": "charge_beam",
+      "name": "Charge Beam",
+      "id": 84004,
+      "max_count": 1,
+      "icon": "icons/charge_beam.png"
+    },
+    {
+      "code": "diffusion_beam",
+      "name": "Diffusion Beam",
+      "id": 84005,
+      "max_count": 1,
+      "icon": "icons/diffusion_beam.png"
+    },
+    {
+      "code": "grapple_beam",
+      "name": "Grapple Beam",
+      "id": 84007,
+      "max_count": 1,
+      "icon": "icons/grapple_beam.png"
+    },
+    {
+      "code": "progressive_missiles",
+      "name": "Progressive Missiles",
+      "id": 84013,
+      "max_count": 2,
+      "icon": "icons/progressive_missiles.png"
+    },
+    {
+      "code": "super_missile",
+      "name": "Super Missile",
+      "id": 84011,
+      "max_count": 1,
+      "icon": "icons/super_missile.png"
+    },
+    {
+      "code": "ice_missile",
+      "name": "Ice Missile",
+      "id": 84012,
+      "max_count": 1,
+      "icon": "icons/ice_missile.png"
+    },
+    {
+      "code": "storm_missile",
+      "name": "Storm Missile",
+      "id": 84014,
+      "max_count": 1,
+      "icon": "icons/storm_missile.png"
+    },
+    {
+      "code": "progressive_bombs",
+      "name": "Progressive Bombs",
+      "id": 84043,
+      "max_count": 2,
+      "icon": "icons/progressive_bombs.png"
+    },
+    {
+      "code": "bomb",
+      "name": "Bomb",
+      "id": 84041,
+      "max_count": 1,
+      "icon": "icons/bomb.png"
+    },
+    {
+      "code": "cross_bomb",
+      "name": "Cross Bomb",
+      "id": 84042,
+      "max_count": 1,
+      "icon": "icons/cross_bomb.png"
+    },
+    {
+      "code": "power_bomb",
+      "name": "Power Bomb",
+      "id": 84044,
+      "max_count": 1,
+      "icon": "icons/power_bomb.png"
+    },
+    {
+      "code": "morph_ball",
+      "name": "Morph Ball",
+      "id": 84040,
+      "max_count": 1,
+      "icon": "icons/morph_ball.png"
+    },
+    {
+      "code": "progressive_suit",
+      "name": "Progressive Suit",
+      "id": 84032,
+      "max_count": 2,
+      "icon": "icons/progressive_suit.png"
+    },
+    {
+      "code": "varia_suit",
+      "name": "Varia Suit",
+      "id": 84030,
+      "max_count": 1,
+      "icon": "icons/varia_suit.png"
+    },
+    {
+      "code": "gravity_suit",
+      "name": "Gravity Suit",
+      "id": 84031,
+      "max_count": 1,
+      "icon": "icons/gravity_suit.png"
+    },
+    {
+      "code": "spider_magnet",
+      "name": "Spider Magnet",
+      "id": 84051,
+      "max_count": 1,
+      "icon": "icons/spider_magnet.png"
+    },
+    {
+      "code": "speed_booster",
+      "name": "Speed Booster",
+      "id": 84052,
+      "max_count": 1,
+      "icon": "icons/speed_booster.png"
+    },
+    {
+      "code": "progressive_spin",
+      "name": "Progressive Spin",
+      "id": 84055,
+      "max_count": 2,
+      "icon": "icons/progressive_spin.png"
+    },
+    {
+      "code": "spin_boost",
+      "name": "Spin Boost",
+      "id": 84053,
+      "max_count": 1,
+      "icon": "icons/spin_boost.png"
+    },
+    {
+      "code": "space_jump",
+      "name": "Space Jump",
+      "id": 84054,
+      "max_count": 1,
+      "icon": "icons/space_jump.png"
+    },
+    {
+      "code": "screw_attack",
+      "name": "Screw Attack",
+      "id": 84056,
+      "max_count": 1,
+      "icon": "icons/screw_attack.png"
+    },
+    {
+      "code": "phantom_cloak",
+      "name": "Phantom Cloak",
+      "id": 84020,
+      "max_count": 1,
+      "icon": "icons/phantom_cloak.png"
+    },
+    {
+      "code": "flash_shift_upgrade",
+      "name": "Flash Shift Upgrade",
+      "id": 84103,
+      "max_count": 7,
+      "icon": "icons/flash_shift_upgrade.png"
+    },
+    {
+      "code": "pulse_radar",
+      "name": "Pulse Radar",
+      "id": 84022,
+      "max_count": 1,
+      "icon": "icons/pulse_radar.png"
+    },
+    {
+      "code": "energy_tank",
+      "name": "Energy Tank",
+      "id": 84060,
+      "max_count": 14
+    },
+    {
+      "code": "energy_part",
+      "name": "Energy Part",
+      "id": 84061,
+      "max_count": 16
+    },
+    {
+      "code": "missile_tank",
+      "name": "Missile Tank",
+      "id": 84100,
+      "max_count": 80
+    },
+    {
+      "code": "missile_plus_tank",
+      "name": "Missile+ Tank",
+      "id": 84101,
+      "max_count": 20
+    },
+    {
+      "code": "power_bomb_tank",
+      "name": "Power Bomb Tank",
+      "id": 84102,
+      "max_count": 20
+    },
+    {
+      "code": "metroid_dna",
+      "name": "Metroid DNA",
+      "id": 84200,
+      "max_count": 12,
+      "icon": "icons/metroid_dna.png"
+    },
+    {
+      "code": "speed_booster_upgrade",
+      "name": "Speed Booster Upgrade",
+      "id": 84070,
+      "max_count": 4
+    },
+    {
+      "code": "missile_launcher",
+      "name": "Missile Launcher",
+      "id": 84010,
+      "max_count": 1
+    },
+    {
+      "code": "slide",
+      "name": "Slide",
+      "id": 84050,
+      "max_count": 1
+    }
+  ],
+  "id_to_codes": {
+    "84003": [
+      "progressive_beam"
+    ],
+    "84000": [
+      "wide_beam"
+    ],
+    "84001": [
+      "plasma_beam"
+    ],
+    "84002": [
+      "wave_beam"
+    ],
+    "84006": [
+      "progressive_charge"
+    ],
+    "84004": [
+      "charge_beam"
+    ],
+    "84005": [
+      "diffusion_beam"
+    ],
+    "84007": [
+      "grapple_beam"
+    ],
+    "84013": [
+      "progressive_missiles"
+    ],
+    "84011": [
+      "super_missile"
+    ],
+    "84012": [
+      "ice_missile"
+    ],
+    "84014": [
+      "storm_missile"
+    ],
+    "84043": [
+      "progressive_bombs"
+    ],
+    "84041": [
+      "bomb"
+    ],
+    "84042": [
+      "cross_bomb"
+    ],
+    "84044": [
+      "power_bomb"
+    ],
+    "84040": [
+      "morph_ball"
+    ],
+    "84032": [
+      "progressive_suit"
+    ],
+    "84030": [
+      "varia_suit"
+    ],
+    "84031": [
+      "gravity_suit"
+    ],
+    "84051": [
+      "spider_magnet"
+    ],
+    "84052": [
+      "speed_booster"
+    ],
+    "84055": [
+      "progressive_spin"
+    ],
+    "84053": [
+      "spin_boost"
+    ],
+    "84054": [
+      "space_jump"
+    ],
+    "84056": [
+      "screw_attack"
+    ],
+    "84020": [
+      "phantom_cloak"
+    ],
+    "84103": [
+      "flash_shift_upgrade"
+    ],
+    "84022": [
+      "pulse_radar"
+    ],
+    "84060": [
+      "energy_tank"
+    ],
+    "84061": [
+      "energy_part"
+    ],
+    "84100": [
+      "missile_tank"
+    ],
+    "84101": [
+      "missile_plus_tank"
+    ],
+    "84102": [
+      "power_bomb_tank"
+    ],
+    "84200": [
+      "metroid_dna"
+    ],
+    "84070": [
+      "speed_booster_upgrade"
+    ],
+    "84010": [
+      "missile_launcher"
+    ],
+    "84050": [
+      "slide"
+    ],
+    "84021": [
+      "flash_shift_upgrade"
+    ]
+  },
+  "locations": [
+    {
+      "id": 84026,
+      "name": "Artaria - Arbitrary Enky Room - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84019,
+      "name": "Artaria - Central Unit Access - Pickup (Spider Magnet)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84008,
+      "name": "Artaria - Charge Beam Access - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84009,
+      "name": "Artaria - Charge Beam Room - Pickup (Charge Beam)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84000,
+      "name": "Artaria - Charge Tutorial - Pickup (Energy Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84012,
+      "name": "Artaria - Corpius Arena - Pickup (Phantom Cloak)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84013,
+      "name": "Artaria - David Jaffe Room - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84004,
+      "name": "Artaria - EMMI Zone Exit North - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84021,
+      "name": "Artaria - EMMI Zone Exit Northwest - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84003,
+      "name": "Artaria - EMMI Zone First Entrance - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84005,
+      "name": "Artaria - EMMI Zone Hub - Pickup (Power Bomb Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84010,
+      "name": "Artaria - EMMI Zone Spinner - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84014,
+      "name": "Artaria - East Lava Missile Room - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84022,
+      "name": "Artaria - Energy Recharge Station South - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84032,
+      "name": "Artaria - Freezer - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84018,
+      "name": "Artaria - Grapple Beam Room - Pickup (Grapple Beam)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84027,
+      "name": "Artaria - Hot Cataris Shortcut - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84020,
+      "name": "Artaria - Invisible Corpius Room - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84001,
+      "name": "Artaria - Melee Tutorial Room - Pickup (Missile Tank 1)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84002,
+      "name": "Artaria - Melee Tutorial Room - Pickup (Missile Tank 2)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84011,
+      "name": "Artaria - Proto EMMI Introduction - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84029,
+      "name": "Artaria - Screw Attack Room - Pickup (Missile Tank, Top)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84030,
+      "name": "Artaria - Screw Attack Room - Pickup (Missile Tank, Underwater)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84031,
+      "name": "Artaria - Screw Attack Room - Pickup (Screw Attack)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84016,
+      "name": "Artaria - Shutter Platform Puzzle - Pickup (Energy Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84034,
+      "name": "Artaria - Speed Hallway - Pickup (Energy Part)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84033,
+      "name": "Artaria - Speed Hallway - Pickup (Missile+ Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84007,
+      "name": "Artaria - Teleport to Cataris - Pickup (Missile Tank, Supers-locked)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84006,
+      "name": "Artaria - Teleport to Cataris - Pickup (Missile Tank, Underwater)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84025,
+      "name": "Artaria - Thermal Device - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84028,
+      "name": "Artaria - Transport to Burenia - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84017,
+      "name": "Artaria - Varia Suit Room - Pickup (Varia Suit)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84015,
+      "name": "Artaria - Varia Suit Tutorial North - Pickup (Missile+ Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84024,
+      "name": "Artaria - Waterfall - Pickup (Energy Part)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84023,
+      "name": "Artaria - Waterfall - Pickup (Missile Tank)",
+      "region": "Artaria"
+    },
+    {
+      "id": 84085,
+      "name": "Burenia - Burenia Hub to Dairon - Pickup (Energy Part)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84084,
+      "name": "Burenia - Burenia Hub to Dairon - Pickup (Missile Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84102,
+      "name": "Burenia - Drogyga Arena - Pickup (Drogyga)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84095,
+      "name": "Burenia - Early Gravity Speedboost Room 1 - Pickup (Energy Part)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84096,
+      "name": "Burenia - Early Gravity Speedboost Room 1 - Pickup (Missile+ Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84092,
+      "name": "Burenia - Energy Recharge South - Pickup (Missile Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84093,
+      "name": "Burenia - Flash Shift Room - Pickup (Flash Shift)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84099,
+      "name": "Burenia - Gravity Suit Room - Pickup (Gravity Suit)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84100,
+      "name": "Burenia - Gravity Suit Room - Pickup (Power Bomb Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84098,
+      "name": "Burenia - Gravity Suit Tower - Pickup (Missile Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84097,
+      "name": "Burenia - Gravity Suit Tower - Pickup (Missile+ Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84091,
+      "name": "Burenia - Main Hub Tower Middle - Pickup (Missile Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84090,
+      "name": "Burenia - Main Hub Tower Middle - Pickup (Missile+ Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84088,
+      "name": "Burenia - Main Hub Tower Top - Pickup (Energy Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84089,
+      "name": "Burenia - Main Hub Tower Top - Pickup (Missile Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84101,
+      "name": "Burenia - Storm Missile Gate Room - Pickup (Energy Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84087,
+      "name": "Burenia - Teleport to Ferenia - Pickup (Missile+ Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84094,
+      "name": "Burenia - Transport to Artaria - Pickup (Missile Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84086,
+      "name": "Burenia - Underneath Drogyga - Pickup (Missile Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84083,
+      "name": "Burenia - Upper Burenia Hub - Pickup (Missile Tank)",
+      "region": "Burenia"
+    },
+    {
+      "id": 84036,
+      "name": "Cataris - Above Z-57 Fight - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84037,
+      "name": "Cataris - Above Z-57 Fight - Pickup (Z-57)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84046,
+      "name": "Cataris - Central Unit Access - Pickup (Morph Ball)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84047,
+      "name": "Cataris - Dairon Transport Access - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84050,
+      "name": "Cataris - Diffusion Beam Room - Pickup (Diffusion Beam)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84051,
+      "name": "Cataris - Diffusion Beam Room - Pickup (Power Bomb Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84053,
+      "name": "Cataris - Double Obsydomithon Room - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84044,
+      "name": "Cataris - EMMI Zone Exits West - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84057,
+      "name": "Cataris - EMMI Zone Hidden Missile Room - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84045,
+      "name": "Cataris - EMMI Zone Item Tunnel - Pickup (Power Bomb Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84059,
+      "name": "Cataris - Kraid Arena - Pickup (Kraid)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84058,
+      "name": "Cataris - Kraid Eyedoor Room - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84052,
+      "name": "Cataris - Lava Button East Access - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84038,
+      "name": "Cataris - Teleport to Artaria (Blue) - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84039,
+      "name": "Cataris - Teleport to Artaria (Blue) - Pickup (Power Bomb Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84041,
+      "name": "Cataris - Teleport to Artaria (Red) - Pickup (Missile+ Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84055,
+      "name": "Cataris - Teleport to Dairon - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84043,
+      "name": "Cataris - Teleport to Ghavoran - Pickup (Missile Tank - Bottom)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84042,
+      "name": "Cataris - Teleport to Ghavoran - Pickup (Missile Tank - Top)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84048,
+      "name": "Cataris - Thermal Device Room North - Pickup (Energy Part)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84049,
+      "name": "Cataris - Thermal Device Room North - Pickup (Energy Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84035,
+      "name": "Cataris - Transport to Artaria - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84056,
+      "name": "Cataris - Underlava Puzzle Room 2 - Pickup (Energy Part)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84054,
+      "name": "Cataris - Z-57 Heat Room East - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84040,
+      "name": "Cataris - Z-57 Heat Room West (Right) - Pickup (Missile Tank)",
+      "region": "Cataris"
+    },
+    {
+      "id": 84061,
+      "name": "Dairon - Big Hub - Pickup (Missile Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84071,
+      "name": "Dairon - Bomb Room - Pickup (Bomb)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84072,
+      "name": "Dairon - Bomb Room - Pickup (Missile Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84080,
+      "name": "Dairon - Central Unit Access - Pickup (Energy Part)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84081,
+      "name": "Dairon - Central Unit Access - Pickup (Speed Booster)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84070,
+      "name": "Dairon - Cross Bomb Puzzle Room - Pickup (Missile Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84068,
+      "name": "Dairon - EMMI Zone Exit North - Pickup (Power Bomb Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84075,
+      "name": "Dairon - EMMI Zone Exit Northwest - Pickup (Missile Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84063,
+      "name": "Dairon - Early Grapple Access - Pickup (Energy Part)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84065,
+      "name": "Dairon - Early Grapple Room - Pickup (Missile Tank Speedboost)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84066,
+      "name": "Dairon - Early Grapple Room - Pickup (Missile Tank Tunnel)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84082,
+      "name": "Dairon - Energy Recharge Station West - Pickup (Energy Part)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84073,
+      "name": "Dairon - Freezer - Pickup (Missile Tank - Lower)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84074,
+      "name": "Dairon - Freezer - Pickup (Missile Tank - Upper)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84076,
+      "name": "Dairon - Hidden Grapple Shortcut Room - Pickup (Missile Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84079,
+      "name": "Dairon - Lake Puzzle Room - Pickup (Power Bomb Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84077,
+      "name": "Dairon - Save Station West Tunnels - Pickup (Missile Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84067,
+      "name": "Dairon - Shinespark Tutorial - Pickup (Energy Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84078,
+      "name": "Dairon - Storm Missile Gate Room - Pickup (Missile+ Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84060,
+      "name": "Dairon - Teleport to Artaria - Pickup (Missile Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84064,
+      "name": "Dairon - Transport to Artaria - Pickup (Power Bomb Tank)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84062,
+      "name": "Dairon - Wide Beam Room - Pickup (Wide Beam)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84069,
+      "name": "Dairon - Yellow EMMI Introduction - Pickup (Energy Part)",
+      "region": "Dairon"
+    },
+    {
+      "id": 84144,
+      "name": "Elun - Ammo Recharge Station - Pickup (Energy Tank)",
+      "region": "Elun"
+    },
+    {
+      "id": 84146,
+      "name": "Elun - Fan Room - Pickup (Missile Tank)",
+      "region": "Elun"
+    },
+    {
+      "id": 84148,
+      "name": "Elun - Horizontal Bomb Maze - Pickup (Missile Tank)",
+      "region": "Elun"
+    },
+    {
+      "id": 84145,
+      "name": "Elun - Plasma Beam Room - Pickup (Plasma Beam)",
+      "region": "Elun"
+    },
+    {
+      "id": 84147,
+      "name": "Elun - Vertical Bomb Maze - Pickup (Power Bomb Tank)",
+      "region": "Elun"
+    },
+    {
+      "id": 84137,
+      "name": "Ferenia - Cold Room (Storm Missile Gate) - Pickup (Missile Tank)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84133,
+      "name": "Ferenia - Energy Recharge Station Secret - Pickup (Energy Part)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84136,
+      "name": "Ferenia - Escue Arena - Pickup (Storm Missile)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84135,
+      "name": "Ferenia - Escue Eyedoor Room - Pickup (Missile Tank)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84124,
+      "name": "Ferenia - Fan Room - Pickup (Missile+ Tank)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84134,
+      "name": "Ferenia - Path to Escue - Pickup (Energy Part)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84131,
+      "name": "Ferenia - Pitfall Puzzle Room - Pickup (Missile Tank)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84138,
+      "name": "Ferenia - Purple EMMI Arena - Pickup (Wave Beam)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84139,
+      "name": "Ferenia - Purple EMMI Introduction - Pickup (Power Bomb Tank)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84126,
+      "name": "Ferenia - Separate Tunnels Room - Pickup (Missile Tank - Left)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84127,
+      "name": "Ferenia - Separate Tunnels Room - Pickup (Missile Tank - Right)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84129,
+      "name": "Ferenia - Space Jump Room - Pickup (Missile Tank)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84130,
+      "name": "Ferenia - Space Jump Room - Pickup (Missile+ Tank)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84128,
+      "name": "Ferenia - Space Jump Room - Pickup (Space Jump)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84125,
+      "name": "Ferenia - Speedboost Slopes Maze - Pickup (Energy Part)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84123,
+      "name": "Ferenia - Total Recharge Station - Pickup (Energy Part)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84132,
+      "name": "Ferenia - Twin Robot Arena - Pickup (Power Bomb Tank)",
+      "region": "Ferenia"
+    },
+    {
+      "id": 84122,
+      "name": "Ghavoran - Above Pulse Radar - Pickup (Missile Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84108,
+      "name": "Ghavoran - Central Unit Access - Pickup (Ice Missile)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84121,
+      "name": "Ghavoran - Cross Bomb Tutorial - Pickup (Missile Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84105,
+      "name": "Ghavoran - Dairon Transport Access - Pickup (Missile Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84118,
+      "name": "Ghavoran - Elun Transport Access - Pickup (Missile Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84116,
+      "name": "Ghavoran - Golzuna Arena - Pickup (Cross Bomb)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84112,
+      "name": "Ghavoran - Golzuna Tower - Pickup (Energy Part)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84113,
+      "name": "Ghavoran - Golzuna Tower - Pickup (Missile Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84104,
+      "name": "Ghavoran - Left Entrance - Pickup (Missile Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84117,
+      "name": "Ghavoran - Map Station Access Secret - Pickup (Missile Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84120,
+      "name": "Ghavoran - Pulse Radar Room - Pickup (Pulse Radar)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84103,
+      "name": "Ghavoran - Right Entrance - Pickup (Missile Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84119,
+      "name": "Ghavoran - Spin Boost Room - Pickup (Spin Boost)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84110,
+      "name": "Ghavoran - Spin Boost Tower - Pickup (Energy Part)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84111,
+      "name": "Ghavoran - Spin Boost Tower - Pickup (Energy Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84109,
+      "name": "Ghavoran - Spin Boost Tower - Pickup (Power Bomb Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84107,
+      "name": "Ghavoran - Super Missile Room - Pickup (Super Missile)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84106,
+      "name": "Ghavoran - Super Missile Room Access - Pickup (Missile+ Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84114,
+      "name": "Ghavoran - Teleport to Burenia - Pickup (Missile Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84115,
+      "name": "Ghavoran - Total Recharge Station North - Pickup (Missile Tank)",
+      "region": "Ghavoran"
+    },
+    {
+      "id": 84140,
+      "name": "Hanubia - Ferenia Shortcut - Pickup (Missile Tank)",
+      "region": "Hanubia"
+    },
+    {
+      "id": 84143,
+      "name": "Hanubia - Orange EMMI Introduction - Pickup (Power Bomb)",
+      "region": "Hanubia"
+    },
+    {
+      "id": 84142,
+      "name": "Hanubia - Speedboost Puzzle Room - Pickup (Power Bomb Tank)",
+      "region": "Hanubia"
+    },
+    {
+      "id": 84141,
+      "name": "Hanubia - Total Recharge Station North - Pickup (Missile Tank)",
+      "region": "Hanubia"
+    }
+  ]
+}
