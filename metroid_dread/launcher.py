@@ -1,6 +1,11 @@
 """
 Metroid Dread Launcher Component
-Registers the Metroid Dread client in the Archipelago Launcher
+Registers the Metroid Dread Client Hub in the Archipelago Launcher.
+
+Launch path:
+  1. Prefer our Electron Dread Client Hub (dread-client-app)
+  2. Download npm packages when missing; auto-repair incomplete Electron installs
+  3. Fall back to the Python MetroidDreadClient when Hub cannot start
 """
 
 from worlds.LauncherComponents import Component, components, Type, launch_subprocess
@@ -9,28 +14,26 @@ from worlds.LauncherComponents import Component, components, Type, launch_subpro
 from .icon_setup import *
 
 
-def run_client(*args):
-    """Client entry point. Must stay at module level for multiprocessing spawn."""
-    from MetroidDreadClient import main, get_base_parser
-    import asyncio
+def run_hub_or_client(*args):
+    """
+    Entry point for multiprocessing spawn — must stay at module level (picklable).
+    Starts our Hub with package install/repair, or the Python client fallback.
+    """
+    from .hub_launcher import launch_hub_or_fallback
 
-    parser = get_base_parser(description="Metroid Dread Client for Archipelago")
-    parser.add_argument('--dread-ip', default='127.0.0.1',
-                      help='IP address of Ryujinx running Dread')
-
-    parsed_args = parser.parse_args(args)
-    asyncio.run(main(parsed_args))
+    # Block this worker process until Hub/client exits so the launcher can track it.
+    launch_hub_or_fallback(args, wait=True)
 
 
 def launch_metroid_dread_client(*args):
-    """Launch the Metroid Dread client"""
-    launch_subprocess(run_client, name="Metroid Dread Client", args=args)
+    """Launch our Metroid Dread Client Hub (or Python fallback)."""
+    launch_subprocess(run_hub_or_client, name="Metroid Dread Client Hub", args=args)
 
 
 # Register the Metroid Dread client component
 components.append(
     Component(
-        display_name="Metroid Dread Client",
+        display_name="Metroid Bread Client",
         script_name="MetroidDreadClient",
         frozen_name="ArchipelagoMetroidDreadClient",
         func=launch_metroid_dread_client,
@@ -39,6 +42,8 @@ components.append(
         game_name="Metroid Dread",
         supports_uri=True,
         cli=False,
-        description="Connect to Metroid Dread running in Ryujinx and sync items/locations with the multiworld."
+        description=(
+            "Launch the Metroid Bread Client Hub (patcher + tracker + connect UI). "
+        ),
     )
 )
