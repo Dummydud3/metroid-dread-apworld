@@ -23,6 +23,7 @@ from . import DoorRando
 from . import StartKit
 from . import TransportRando
 from . import victory_clearance
+from .logic_options import collect_logic_options_from_options
 
 # Register launcher component
 try:
@@ -851,6 +852,9 @@ class MetroidDreadWorld(World):
                     dna_locs.append(loc.name)
             if dna_locs:
                 extras["dna_locations"] = dna_locs
+        # Trick / ammo preset for the client tracker (must match generation logic).
+        logic_options = collect_logic_options_from_options(self.options)
+        extras["logic_options"] = dict(logic_options)
         slot_data = {
             "death_link": self.options.death_link.value,
             "required_dna": int(self.options.required_dna.value),
@@ -863,6 +867,7 @@ class MetroidDreadWorld(World):
             "energy_per_tank": int(self.options.energy_per_tank.value),
             "door_lock_rando": int(self.options.door_lock_rando.value),
             "transport_rando": int(self.options.transport_rando.value),
+            "logic_options": dict(logic_options),
             # Full patch payload so clients can rebuild the mod without a local spoiler.
             "patch_extras": extras,
         }
