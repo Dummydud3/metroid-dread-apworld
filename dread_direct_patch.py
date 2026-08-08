@@ -366,6 +366,21 @@ def apply_freesink(patcher_data: dict, enabled: bool) -> None:
     )
 
 
+def _format_odr_validation_error(err: str, *, head: int = 1800, tail: int = 500) -> str:
+    """Keep the jsonschema *message* visible when the dump is enormous.
+
+    Root ``additionalProperties`` failures embed the entire schema + instance
+    (hundreds of KB). Truncating with ``err[-2000:]`` only showed door_patches
+    tails and hid the real reason (e.g. unexpected ``has_flash_upgrades``).
+    """
+    err = (err or "").strip()
+    if not err:
+        return "(no error output)"
+    if len(err) <= head + tail + 40:
+        return err
+    return f"{err[:head]}\n\n...[truncated {len(err) - head - tail} chars]...\n\n{err[-tail:]}"
+
+
 def validate_patcher_json(patcher_data: dict) -> None:
     """Fail fast with a clear error if open-dread-rando would reject the JSON."""
     try:
@@ -378,7 +393,10 @@ def validate_patcher_json(patcher_data: dict) -> None:
         validate(patcher_data)
         log("[OK] patcher.json passes open-dread-rando schema")
     except Exception as e:
-        raise PatchError(f"patcher.json failed open-dread-rando validation:\n{e}") from e
+        raise PatchError(
+            "patcher.json failed open-dread-rando validation:\n"
+            f"{_format_odr_validation_error(str(e))}"
+        ) from e
 
 
 def verify_elevator_brflds(romfs: Path, patcher_json: Path) -> None:
@@ -1014,14 +1032,16 @@ def patch_from_spoiler(
     py = find_python_with_odr()
     log(f"Using Python with open-dread-rando: {' '.join(py)}")
 
-    # Match cosmetic_patches.lua.custom_init to the validating ODR schema
-    # (show_dna_in_hud is ODR ≥2.19-only; older schemas reject it).
-    from ap_to_patcher import sanitize_custom_init_for_odr
+    # Match patcher.json to the validating ODR schema (show_dna_in_hud /
+    # has_flash_upgrades / has_speed_upgrades are ODR ≥2.19-only; older schemas
+    # reject them with additionalProperties: false).
+    from ap_to_patcher import apply_upgrade_menu_flags, sanitize_patcher_for_odr
 
-    stripped = sanitize_custom_init_for_odr(patcher_data, py_cmd=py)
+    apply_upgrade_menu_flags(patcher_data, py_cmd=py)
+    stripped = sanitize_patcher_for_odr(patcher_data, py_cmd=py)
     if stripped:
         log(
-            "[INFO] Stripped custom_init keys unsupported by patch ODR: "
+            "[INFO] Stripped patcher keys unsupported by patch ODR: "
             + ", ".join(stripped)
         )
 
@@ -1064,7 +1084,10 @@ def patch_from_spoiler(
     )
     if val.returncode != 0 or "SCHEMA_OK" not in (val.stdout or ""):
         err = (val.stderr or val.stdout or "").strip()
-        raise PatchError(f"patcher.json failed open-dread-rando validation:\n{err[-2000:]}")
+        raise PatchError(
+            "patcher.json failed open-dread-rando validation:\n"
+            f"{_format_odr_validation_error(err)}"
+        )
     log("[OK] patcher.json passes open-dread-rando schema")
 
     run_open_dread_rando(py, out_json, base_rom, output)

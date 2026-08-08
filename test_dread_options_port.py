@@ -127,6 +127,112 @@ class TestPatchExtrasMerge(unittest.TestCase):
             patcher["cosmetic_patches"]["lua"]["custom_init"],
         )
 
+    def test_sanitize_root_strips_has_flash_for_old_odr(self):
+        """ODR ≤2.18 rejects has_flash_upgrades at root (additionalProperties)."""
+        import ap_to_patcher as ap
+
+        patcher = {
+            "configuration_identifier": "AP",
+            "has_flash_upgrades": True,
+            "has_speed_upgrades": False,
+            "enable_logging": False,
+        }
+        old_root = frozenset(
+            {
+                "configuration_identifier",
+                "starting_location",
+                "starting_items",
+                "pickups",
+                "enable_remote_lua",
+            }
+        )
+        with mock.patch.object(ap, "_load_odr_root_properties", return_value=old_root):
+            removed = ap.sanitize_root_for_odr(patcher)
+        self.assertEqual(
+            set(removed),
+            {"has_flash_upgrades", "has_speed_upgrades", "enable_logging"},
+        )
+        self.assertNotIn("has_flash_upgrades", patcher)
+        self.assertIn("configuration_identifier", patcher)
+
+    def test_sanitize_patcher_strips_skew_fields(self):
+        import ap_to_patcher as ap
+
+        patcher = {
+            "has_flash_upgrades": True,
+            "cosmetic_patches": {
+                "split_saves": True,
+                "lua": {"custom_init": {"show_dna_in_hud": True, "enable_death_counter": True}},
+            },
+        }
+        with mock.patch.object(
+            ap,
+            "_load_odr_root_properties",
+            return_value=frozenset({"cosmetic_patches", "pickups"}),
+        ), mock.patch.object(
+            ap,
+            "_load_odr_schema",
+            return_value={
+                "properties": {
+                    "cosmetic_patches": {
+                        "properties": {
+                            "config": {},
+                            "lua": {
+                                "properties": {
+                                    "custom_init": {
+                                        "properties": {
+                                            "enable_death_counter": {},
+                                            "enable_room_name_display": {},
+                                        }
+                                    }
+                                }
+                            },
+                            "shield_versions": {},
+                        }
+                    }
+                }
+            },
+        ), mock.patch.object(
+            ap,
+            "_load_odr_custom_init_properties",
+            return_value=frozenset(
+                {"enable_death_counter", "enable_room_name_display"}
+            ),
+        ):
+            removed = ap.sanitize_patcher_for_odr(patcher)
+        self.assertIn("has_flash_upgrades", removed)
+        self.assertIn("cosmetic_patches.split_saves", removed)
+        self.assertIn("show_dna_in_hud", removed)
+        self.assertNotIn("has_flash_upgrades", patcher)
+        self.assertNotIn("split_saves", patcher["cosmetic_patches"])
+        self.assertNotIn(
+            "show_dna_in_hud",
+            patcher["cosmetic_patches"]["lua"]["custom_init"],
+        )
+
+    def test_apply_upgrade_menu_flags_respects_schema(self):
+        import ap_to_patcher as ap
+
+        patcher = {
+            "starting_items": {"ITEM_UPGRADE_FLASH_SHIFT_CHAIN": 1},
+            "pickups": [
+                {
+                    "resources": [
+                        [{"item_id": "ITEM_UPGRADE_SPEED_BOOST_CHARGE", "quantity": 1}]
+                    ]
+                }
+            ],
+        }
+        with mock.patch.object(ap, "_root_field_supported", return_value=True):
+            ap.apply_upgrade_menu_flags(patcher)
+        self.assertTrue(patcher["has_flash_upgrades"])
+        self.assertTrue(patcher["has_speed_upgrades"])
+
+        with mock.patch.object(ap, "_root_field_supported", return_value=False):
+            ap.apply_upgrade_menu_flags(patcher)
+        self.assertNotIn("has_flash_upgrades", patcher)
+        self.assertNotIn("has_speed_upgrades", patcher)
+
     def test_apply_disabled_lights(self):
         import ap_to_patcher as ap
 

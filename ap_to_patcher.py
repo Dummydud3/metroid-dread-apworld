@@ -575,31 +575,50 @@ COSMETIC_COMBAT_PATHS: dict[str, tuple[str, ...]] = {
     "energy_per_tank": ("energy_per_tank",),
 }
 
-# Fields under cosmetic_patches.lua.custom_init that older ODR schemas reject
-# (additionalProperties: false). show_dna_in_hud landed in open-dread-rando 2.19.0.
+# Fields older ODR schemas reject via additionalProperties: false.
+# show_dna_in_hud / has_*_upgrades / enable_logging / skip_item_popups: ODR ≥2.19.
+# split_saves under cosmetic_patches: ODR ≥2.19.
 _CUSTOM_INIT_OPTIONAL_KEYS = frozenset({"show_dna_in_hud"})
+_ROOT_OPTIONAL_KEYS = frozenset({
+    "has_flash_upgrades",
+    "has_speed_upgrades",
+    "enable_logging",
+    "skip_item_popups",
+})
+_COSMETIC_OPTIONAL_KEYS = frozenset({"split_saves"})
+
+# Cache probed ODR schemas per interpreter key (None = this process).
+_ODR_SCHEMA_CACHE: dict[Optional[tuple], Optional[dict]] = {}
 
 
-def _load_odr_custom_init_properties(
-    py_cmd: Optional[List[str]] = None,
-) -> Optional[frozenset]:
-    """Return allowed custom_init property names from an installed ODR schema.
+def _load_odr_schema(py_cmd: Optional[List[str]] = None) -> Optional[dict]:
+    """Load open-dread-rando files/schema.json from *py_cmd* or this process."""
+    cache_key: Optional[tuple]
+    if py_cmd:
+        cache_key = tuple(py_cmd)
+    else:
+        cache_key = None
+    if cache_key in _ODR_SCHEMA_CACHE:
+        return _ODR_SCHEMA_CACHE[cache_key]
 
-    When *py_cmd* is given (e.g. find_python_with_odr()), probe that interpreter —
-    the one that will validate/patch — rather than this process's import.
-    Returns None if the schema cannot be read.
-    """
+    schema: Optional[dict] = None
     if py_cmd:
         import subprocess
 
+        # Compact probe: only the property-name sets we sanitize against.
         probe = (
-            "import json,os,sys;"
+            "import json,os;"
             "import open_dread_rando;"
             "p=os.path.join(os.path.dirname(open_dread_rando.__file__),'files','schema.json');"
             "s=json.load(open(p,encoding='utf-8'));"
-            "props=s['properties']['cosmetic_patches']['properties']['lua']"
+            "ci=s['properties']['cosmetic_patches']['properties']['lua']"
             "['properties']['custom_init']['properties'];"
-            "print(json.dumps(sorted(props)))"
+            "cp=s['properties']['cosmetic_patches']['properties'];"
+            "print(json.dumps({"
+            "'root':sorted(s['properties']),"
+            "'custom_init':sorted(ci),"
+            "'cosmetic':sorted(cp)"
+            "}))"
         )
         try:
             r = subprocess.run(
@@ -609,27 +628,73 @@ def _load_odr_custom_init_properties(
                 timeout=20,
             )
             if r.returncode == 0 and (r.stdout or "").strip():
-                keys = json.loads(r.stdout.strip().splitlines()[-1])
-                if isinstance(keys, list):
-                    return frozenset(str(k) for k in keys)
-        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
-            pass
+                summary = json.loads(r.stdout.strip().splitlines()[-1])
+                # Rebuild a minimal schema-shaped dict for the helpers below.
+                schema = {
+                    "properties": {
+                        **{k: {} for k in summary.get("root", [])},
+                        "cosmetic_patches": {
+                            "properties": {
+                                **{k: {} for k in summary.get("cosmetic", [])},
+                                "lua": {
+                                    "properties": {
+                                        "custom_init": {
+                                            "properties": {
+                                                k: {}
+                                                for k in summary.get("custom_init", [])
+                                            }
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError, KeyError):
+            schema = None
+    else:
+        try:
+            import open_dread_rando
+
+            schema_path = (
+                Path(open_dread_rando.__file__).resolve().parent / "files" / "schema.json"
+            )
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        except Exception:
+            schema = None
+
+    _ODR_SCHEMA_CACHE[cache_key] = schema
+    return schema
+
+
+def _load_odr_custom_init_properties(
+    py_cmd: Optional[List[str]] = None,
+) -> Optional[frozenset]:
+    """Return allowed custom_init property names from an installed ODR schema."""
+    schema = _load_odr_schema(py_cmd)
+    if not schema:
         return None
-
     try:
-        import open_dread_rando
-
-        schema_path = (
-            Path(open_dread_rando.__file__).resolve().parent / "files" / "schema.json"
-        )
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
         props = (
             schema["properties"]["cosmetic_patches"]["properties"]["lua"]["properties"][
                 "custom_init"
             ]["properties"]
         )
-        return frozenset(props)
-    except Exception:
+        return frozenset(str(k) for k in props)
+    except (KeyError, TypeError):
+        return None
+
+
+def _load_odr_root_properties(
+    py_cmd: Optional[List[str]] = None,
+) -> Optional[frozenset]:
+    """Return allowed top-level patcher.json property names from ODR schema."""
+    schema = _load_odr_schema(py_cmd)
+    if not schema:
+        return None
+    try:
+        return frozenset(str(k) for k in schema["properties"])
+    except (KeyError, TypeError):
         return None
 
 
@@ -640,6 +705,14 @@ def _cosmetic_custom_init_field_supported(field: str) -> bool:
         return field in allowed
     # Unknown ODR: omit keys that older schemas (≤2.18) reject.
     return field not in _CUSTOM_INIT_OPTIONAL_KEYS
+
+
+def _root_field_supported(field: str, py_cmd: Optional[List[str]] = None) -> bool:
+    """Whether *field* may be written at the patcher.json root for target ODR."""
+    allowed = _load_odr_root_properties(py_cmd)
+    if allowed is not None:
+        return field in allowed
+    return field not in _ROOT_OPTIONAL_KEYS
 
 
 def sanitize_custom_init_for_odr(
@@ -670,6 +743,134 @@ def sanitize_custom_init_for_odr(
         custom_init.pop(key, None)
         removed.append(key)
     return removed
+
+
+def sanitize_root_for_odr(
+    patcher_data: dict,
+    *,
+    py_cmd: Optional[List[str]] = None,
+) -> list[str]:
+    """Drop root keys the target ODR schema rejects (additionalProperties: false).
+
+    Same skew class as show_dna_in_hud: ODR ≤2.18 has no has_flash_upgrades /
+    has_speed_upgrades / enable_logging / skip_item_popups.
+    """
+    if not isinstance(patcher_data, dict):
+        return []
+    allowed = _load_odr_root_properties(py_cmd)
+    removed: list[str] = []
+    if allowed is None:
+        drop = [k for k in list(patcher_data) if k in _ROOT_OPTIONAL_KEYS]
+    else:
+        drop = [k for k in list(patcher_data) if k not in allowed]
+    for key in drop:
+        patcher_data.pop(key, None)
+        removed.append(key)
+    return removed
+
+
+def sanitize_cosmetic_for_odr(
+    patcher_data: dict,
+    *,
+    py_cmd: Optional[List[str]] = None,
+) -> list[str]:
+    """Drop cosmetic_patches keys unsupported by the target ODR schema."""
+    try:
+        cosmetic = patcher_data["cosmetic_patches"]
+    except (KeyError, TypeError):
+        return []
+    if not isinstance(cosmetic, dict):
+        return []
+
+    schema = _load_odr_schema(py_cmd)
+    removed: list[str] = []
+    if schema is None:
+        drop = [k for k in list(cosmetic) if k in _COSMETIC_OPTIONAL_KEYS]
+    else:
+        try:
+            allowed = frozenset(
+                schema["properties"]["cosmetic_patches"]["properties"]
+            )
+        except (KeyError, TypeError):
+            drop = [k for k in list(cosmetic) if k in _COSMETIC_OPTIONAL_KEYS]
+        else:
+            # Only strip known optional keys when schema omits them — never
+            # delete required keys (config/lua/shield_versions) if probe is odd.
+            drop = [
+                k
+                for k in list(cosmetic)
+                if k in _COSMETIC_OPTIONAL_KEYS and k not in allowed
+            ]
+    for key in drop:
+        cosmetic.pop(key, None)
+        removed.append(key)
+    return removed
+
+
+def sanitize_patcher_for_odr(
+    patcher_data: dict,
+    *,
+    py_cmd: Optional[List[str]] = None,
+) -> list[str]:
+    """Strip all known ODR-version-skew fields the target schema rejects.
+
+    Returns dotted paths of removed keys (e.g. ``show_dna_in_hud``,
+    ``has_flash_upgrades``, ``cosmetic_patches.split_saves``).
+    """
+    removed: list[str] = []
+    for key in sanitize_root_for_odr(patcher_data, py_cmd=py_cmd):
+        removed.append(key)
+    for key in sanitize_cosmetic_for_odr(patcher_data, py_cmd=py_cmd):
+        removed.append(f"cosmetic_patches.{key}")
+    for key in sanitize_custom_init_for_odr(patcher_data, py_cmd=py_cmd):
+        removed.append(key)
+    return removed
+
+
+def _patcher_has_item(patcher_data: dict, item_id: str) -> bool:
+    """True if starting_items or any pickup grants *item_id* with qty > 0."""
+    start = patcher_data.get("starting_items") or {}
+    if isinstance(start, dict) and int(start.get(item_id, 0) or 0) > 0:
+        return True
+    for pickup in patcher_data.get("pickups") or []:
+        if not isinstance(pickup, dict):
+            continue
+        for stage in pickup.get("resources") or []:
+            if not isinstance(stage, list):
+                continue
+            for entry in stage:
+                if (
+                    isinstance(entry, dict)
+                    and entry.get("item_id") == item_id
+                    and int(entry.get("quantity", 0) or 0) > 0
+                ):
+                    return True
+    return False
+
+
+def apply_upgrade_menu_flags(
+    patcher_data: dict,
+    *,
+    py_cmd: Optional[List[str]] = None,
+) -> None:
+    """Set has_flash_upgrades / has_speed_upgrades when the ODR schema allows.
+
+    Mirrors Randovania patch_data_factory: these flags control Samus-menu rows.
+    Omitted on ODR ≤2.18 (root additionalProperties: false).
+    """
+    if _root_field_supported("has_flash_upgrades", py_cmd):
+        patcher_data["has_flash_upgrades"] = _patcher_has_item(
+            patcher_data, "ITEM_UPGRADE_FLASH_SHIFT_CHAIN"
+        )
+    else:
+        patcher_data.pop("has_flash_upgrades", None)
+
+    if _root_field_supported("has_speed_upgrades", py_cmd):
+        patcher_data["has_speed_upgrades"] = _patcher_has_item(
+            patcher_data, "ITEM_UPGRADE_SPEED_BOOST_CHARGE"
+        )
+    else:
+        patcher_data.pop("has_speed_upgrades", None)
 
 LIGHT_REGION_TO_SCENARIO: dict[str, str] = {
     "artaria": "s010_cave",
@@ -1139,15 +1340,6 @@ def create_patcher_json(
 
     apply_dread_patch_extras(patcher_data, extras, our_player=our_player_name)
 
-    # Belt-and-suspenders: strip any custom_init keys this process's ODR rejects
-    # (template leftovers, or extras applied before a schema probe succeeded).
-    removed = sanitize_custom_init_for_odr(patcher_data)
-    if removed:
-        print(
-            f"[INFO] Stripped unsupported custom_init keys for ODR schema: "
-            f"{', '.join(removed)}"
-        )
-
     # Legacy spoilers without extras: keep vanilla X and no DNA gate.
     if not extras:
         if "game_patches" in patcher_data and isinstance(patcher_data["game_patches"], dict):
@@ -1265,6 +1457,19 @@ def create_patcher_json(
     no_icon = len(keys_preview.get("skipped") or [])
     if no_icon:
         print(f"     - {no_icon} pickups keep their vanilla map icon (no ItemCustom slot)")
+
+    # Samus-menu upgrade rows (ODR ≥2.19). Safe no-op / strip on ≤2.18.
+    apply_upgrade_menu_flags(patcher_data)
+
+    # Belt-and-suspenders: strip any fields this process's ODR rejects
+    # (template leftovers, validate()-filled defaults, extras applied early).
+    removed = sanitize_patcher_for_odr(patcher_data)
+    if removed:
+        print(
+            f"[INFO] Stripped unsupported patcher keys for ODR schema: "
+            f"{', '.join(removed)}"
+        )
+
     print("[NOTE] Prefer: py -3.11 dread_direct_patch.py --spoiler ... --player ...")
 
     return patcher_data
