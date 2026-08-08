@@ -168,6 +168,28 @@ def build_start_kit(
         )
         return checks, len(nodes)
 
+    def is_better(found: Tuple[int, int], best: Tuple[int, int]) -> bool:
+        """Climb toward min_locations, then prefer the tightest kit that makes it.
+
+        Maximizing open checks once the floor is met handed Hanubia Morph + Power
+        Bomb (26 sphere-0 checks, and Power Bomb for the Raven Beak generator)
+        instead of Morph + Bomb (4 checks). That is a fill aid turning into a
+        free endgame kit.
+        """
+        f_checks, f_nodes = found
+        b_checks, b_nodes = best
+        f_ok = f_checks >= min_locations
+        b_ok = b_checks >= min_locations
+        if f_ok != b_ok:
+            return f_ok
+        if f_ok:
+            if f_checks != b_checks:
+                return f_checks < b_checks
+            return f_nodes < b_nodes
+        if f_checks != b_checks:
+            return f_checks > b_checks
+        return f_nodes > b_nodes
+
     kit: List[KitItem] = list(base_kit)
     counts = kit_counts(kit)
     current = score(counts)
@@ -199,14 +221,14 @@ def build_start_kit(
         best_score = current
         for pool_item in pool:
             found = score(with_items((pool_item,)))
-            if found > best_score:
+            if is_better(found, best_score):
                 best, best_score = [pool_item], found
         if best or budget < 2:
             return best
         for i, first in enumerate(pool):
             for second in pool[i + 1:]:
                 found = score(with_items((first, second)))
-                if found > best_score:
+                if is_better(found, best_score):
                     best, best_score = [first, second], found
         return best
 

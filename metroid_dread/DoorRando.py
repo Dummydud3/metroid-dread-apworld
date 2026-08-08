@@ -7,7 +7,7 @@ and emits open-dread-rando door_patches.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple  # Any used by slot_data helpers
 
 NodeId = Tuple[str, str, str]
 
@@ -232,3 +232,168 @@ def assignments_to_door_patches(assignments: Dict[PhysicalKey, str]) -> List[dic
             "door_type": door_type,
         })
     return patches
+
+
+DOOR_TYPE_TO_WEAKNESS: Dict[str, str] = {
+    door_type: weakness
+    for weakness, door_type in WEAKNESS_DOOR_TYPE.items()
+    if door_type not in ("frame", "closed")
+}
+
+
+def assignments_from_slot_data(entries: Any) -> Dict[PhysicalKey, str]:
+    """Deserialize door_assignments from patch_extras / slot_data."""
+    out: Dict[PhysicalKey, str] = {}
+    if not entries:
+        return out
+    if isinstance(entries, dict):
+        # {"s010_cave/door…": "Plasma Beam Door"} or nested
+        for key, weakness in entries.items():
+            if isinstance(key, str) and "/" in key and isinstance(weakness, str):
+                scenario, actor = key.split("/", 1)
+                out[(scenario, actor)] = weakness
+        return out
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            scenario = entry.get("scenario")
+            actor = entry.get("actor")
+            weakness = entry.get("weakness")
+            if not weakness and entry.get("door_type"):
+                weakness = DOOR_TYPE_TO_WEAKNESS.get(str(entry["door_type"]))
+            if scenario and actor and weakness:
+                out[(str(scenario), str(actor))] = str(weakness)
+    return out
+
+
+def apply_assignments_from_slot_data(parser, entries: Any) -> int:
+    """Apply serialized door assignments onto a fresh parser. Returns count."""
+    assignments = assignments_from_slot_data(entries)
+    if not assignments:
+        # Fall back to ODR door_patches shape if present.
+        if isinstance(entries, list):
+            patched = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                actor = entry.get("actor")
+                if isinstance(actor, dict) and entry.get("door_type"):
+                    patched.append(
+                        {
+                            "scenario": actor.get("scenario"),
+                            "actor": actor.get("actor"),
+                            "door_type": entry.get("door_type"),
+                        }
+                    )
+            assignments = assignments_from_slot_data(patched)
+    if not assignments:
+        return 0
+    apply_assignments(parser, assignments)
+    return len(assignments)
+
+
+# Easy lock used when density-softening doors to rescue fill / start reachability.
+SOFT_WEAKNESS = "Power Beam Door"
+# Doors already this open do not need softening.
+_ALREADY_SOFT = frozenset({"Power Beam Door", "Access Open"})
+
+
+def _pickup_count_in_nodes(
+    pickup_nodes: Dict[str, NodeId],
+    active: Set[str],
+    reachable: Set[NodeId],
+) -> int:
+    return sum(
+        1
+        for name, node in pickup_nodes.items()
+        if name in active and node in reachable
+    )
+
+
+def score_doors_by_new_checks(
+    logic,
+    assignments: Dict[PhysicalKey, str],
+    *,
+    pickup_nodes: Dict[str, NodeId],
+    active_names: Set[str],
+    inventory_counts: Dict[str, int],
+    goal_node: NodeId,
+    protected: Optional[Set[PhysicalKey]] = None,
+    max_candidates: int = 48,
+) -> List[Tuple[int, PhysicalKey]]:
+    """
+    Score assigned doors by how many extra active pickups become reachable
+    (and whether the goal opens) if the door is softened to Power Beam.
+
+    Returns (score, key) pairs sorted best-first. Score is
+    ``1000`` if softening newly reaches the goal, else the pickup delta.
+    """
+    if not assignments:
+        return []
+
+    protected = protected or set()
+    inv = logic.inventory_from_counts(dict(inventory_counts))
+    baseline_nodes = logic.get_reachable_nodes(inv)
+    baseline_pickups = _pickup_count_in_nodes(pickup_nodes, active_names, baseline_nodes)
+    baseline_goal = goal_node in baseline_nodes
+
+    candidates = [
+        key for key, weakness in assignments.items()
+        if key not in protected and weakness not in _ALREADY_SOFT
+    ]
+    # Prefer evaluating a bounded set so generate_early stays responsive.
+    if len(candidates) > max_candidates:
+        # Deterministic trim: keep a spread by hashing actor name.
+        candidates = sorted(candidates, key=lambda k: k[1])[:max_candidates]
+
+    scored: List[Tuple[int, PhysicalKey]] = []
+    parser = logic.parser
+    for key in candidates:
+        apply_assignments(parser, {key: SOFT_WEAKNESS})
+        logic.rebuild_graph()
+        nodes = logic.get_reachable_nodes(inv)
+        pickups = _pickup_count_in_nodes(pickup_nodes, active_names, nodes)
+        goal = goal_node in nodes
+        delta = pickups - baseline_pickups
+        score = delta
+        if goal and not baseline_goal:
+            score += 1000
+        scored.append((score, key))
+        # Restore this door to its rolled weakness before the next trial.
+        apply_assignments(parser, {key: assignments[key]})
+        logic.rebuild_graph()
+
+    scored.sort(key=lambda pair: (-pair[0], pair[1][0], pair[1][1]))
+    return scored
+
+
+def soften_assignments(
+    assignments: Dict[PhysicalKey, str],
+    keys: Iterable[PhysicalKey],
+    soft_weakness: str = SOFT_WEAKNESS,
+) -> List[PhysicalKey]:
+    """Set the given doors to an easy weakness. Returns keys actually changed."""
+    changed: List[PhysicalKey] = []
+    for key in keys:
+        if key not in assignments:
+            continue
+        if assignments[key] == soft_weakness:
+            continue
+        assignments[key] = soft_weakness
+        changed.append(key)
+    return changed
+
+
+def pick_doors_to_soften(
+    scored: List[Tuple[int, PhysicalKey]],
+    *,
+    top_k: int = 6,
+) -> List[PhysicalKey]:
+    """Choose top-K doors; prefer positive scores, else still take top-K."""
+    if not scored or top_k <= 0:
+        return []
+    positive = [key for score, key in scored if score > 0]
+    if positive:
+        return positive[:top_k]
+    return [key for _score, key in scored[:top_k]]

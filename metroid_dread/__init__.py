@@ -7,9 +7,10 @@ Uses Randovania logic_database as the live reachability engine (see dread_logic.
 from __future__ import annotations
 
 import json
-from typing import List
+from typing import List, Optional
 
 from BaseClasses import Tutorial, ItemClassification
+from Fill import FillError
 from worlds.AutoWorld import World, WebWorld
 from .Items import MetroidDreadItem, item_table, item_name_groups
 from .Locations import MetroidDreadLocation, location_table, location_name_groups
@@ -21,6 +22,7 @@ from .starting_locations import get_by_option_key, get_default, load_starting_lo
 from . import DoorRando
 from . import StartKit
 from . import TransportRando
+from . import victory_clearance
 
 # Register launcher component
 try:
@@ -40,6 +42,11 @@ _MIN_START_COVERAGE = 0.8
 # leaves it no room to manoeuvre. Starts the kit cannot lift this high get
 # relocated rather than handed an ever-growing pile of items.
 _MIN_START_CHECKS = StartKit.MIN_START_LOCATIONS
+
+# Graph repair ladder: full re-rolls, then density-biased door softening, then vanilla.
+_GRAPH_REROLL_ATTEMPTS = 2
+_DOOR_SOFTEN_PASSES = 3
+_DOOR_SOFTEN_TOP_K = 6
 
 # Boss / EMMI defeat-style pickups (for DNA placement + include_boss_pickups).
 _BOSS_EMMI_LOCATION_SUBSTR = (
@@ -114,6 +121,8 @@ class MetroidDreadWorld(World):
     elevator_patches: list
     patch_extras: dict
     start_kit: list
+    # Boss/EMMI checks kept despite include_boss_pickups=false for DNA capacity.
+    forced_boss_locations: set
 
     def generate_early(self):
         self.logic = DreadLogic(self)
@@ -123,6 +132,18 @@ class MetroidDreadWorld(World):
         self.elevator_patches = []
         self.patch_extras = {}
         self.start_kit = []
+        self.forced_boss_locations = set()
+
+        # Victory implies 90% check reachability. Minimal/Items would let the
+        # assumed fill place softballs after Raven Beak; force Full so fill and
+        # fulfills_accessibility cooperate with the post_fill guarantee.
+        if self.options.accessibility != "full":
+            requested = self.options.accessibility.current_key
+            self.options.accessibility.value = self.options.accessibility.option_full
+            print(
+                f"[Metroid Dread Player {self.player}] accessibility "
+                f"{requested!r} upgraded to 'full' (victory implies 90% clearance)"
+            )
 
         self._resolve_starting_location()
 
@@ -131,41 +152,35 @@ class MetroidDreadWorld(World):
         # reopens the start (see StartKit) before door rando, so the doors it
         # needs are part of the frontier that stays vanilla.
         self._roll_start_kit()
+        vanilla_kit = list(self.start_kit)
 
-        # Door lock rando (mutate graph, then rebuild adjacency).
-        if self.options.door_lock_rando.value == 1:
-            self.door_assignments = DoorRando.roll_assignments(
-                self.logic,
-                self.random,
-                doors_to_change=self.options.doors_to_change.value,
-                change_doors_to=self.options.change_doors_to.value,
-                mode="individual_doors",
-                start_counts=StartKit.kit_counts(self.start_kit),
-            )
-            DoorRando.apply_assignments(self.logic.parser, self.door_assignments)
-            self.door_patches = DoorRando.assignments_to_door_patches(self.door_assignments)
-
-        # Transport rando.
-        if self.options.transport_rando.value == 1:
-            matching, transports = TransportRando.roll_connected_matching(
-                self.logic, self.random, mode="randomized"
-            )
-            self.transport_matching = matching
-            if matching:
-                TransportRando.apply_matching(self.logic.parser, transports, matching)
-                self.elevator_patches = TransportRando.matching_to_elevators(
-                    matching, transports
-                )
-
-        if self.door_assignments or self.transport_matching:
-            vanilla_kit = self.start_kit
-            self.logic.rebuild_graph()
-            # Rando can still cost the start a few checks; top the kit back up,
-            # and if that is not enough, go back to the graph we validated.
-            self.start_kit = StartKit.build_start_kit(self, base_kit=vanilla_kit)
-            if self._start_checks() < _MIN_START_CHECKS:
+        want_doors = self.options.door_lock_rando.value == 1
+        want_transports = self.options.transport_rando.value == 1
+        if want_doors or want_transports:
+            accepted, last_preflight = self._try_graph_rerolls(vanilla_kit)
+            if (
+                not accepted
+                and self.door_assignments
+                and self._try_door_soften_passes(vanilla_kit)
+            ):
+                accepted = True
+                last_preflight = None
+            if not accepted and (self.door_assignments or self.transport_matching):
                 self._revert_randomizers(vanilla_kit)
+                if last_preflight is not None:
+                    print(
+                        f"[Metroid Dread Player {self.player}] "
+                        f"door/transport preflight failed after re-rolls"
+                        f"{' + door soften' if want_doors else ''} "
+                        f"({last_preflight}); reverted to vanilla graph"
+                    )
 
+        # Final guard: never ship a kit that can already touch Raven Beak.
+        if self._start_kit_reaches_goal():
+            self._roll_start_kit()
+
+        self._compute_forced_boss_locations()
+        victory_clearance.assert_graph_preflight(self)
         self._build_patch_extras_base()
 
     def _build_patch_extras_base(self) -> None:
@@ -202,10 +217,33 @@ class MetroidDreadWorld(World):
             "flash_shift_included_ammo": int(self.options.flash_shift_included_ammo.value),
             "start_with_pulse_radar": bool(self.options.start_with_pulse_radar.value),
             "starting_items": StartKit.odr_starting_items(self.start_kit),
+            # Logic-graph form for the client tracker (elevators alone use arrival
+            # spawn actors, which are awkward to map back to dock nodes).
+            "transport_matching": dict(self.transport_matching or {}),
+            "door_assignments": [
+                {"scenario": scenario, "actor": actor, "weakness": weakness}
+                for (scenario, actor), weakness in sorted(
+                    (self.door_assignments or {}).items()
+                )
+            ],
         }
 
     def _start_checks(self) -> int:
         return StartKit.start_checks(self, StartKit.kit_counts(self.start_kit))
+
+    def _start_kit_reaches_goal(self) -> bool:
+        """True when the starting kit alone can already reach Raven Beak."""
+        counts = StartKit.kit_counts(self.start_kit)
+        nodes = self.logic.get_reachable_nodes(
+            self.logic.inventory_from_counts(counts)
+        )
+        return _GOAL_NODE in nodes
+
+    def _kit_is_ok(self) -> bool:
+        return (
+            self._start_checks() >= _MIN_START_CHECKS
+            and not self._start_kit_reaches_goal()
+        )
 
     def _roll_start_kit(self) -> None:
         """Pick the starting kit, relocating if this start cannot be opened.
@@ -216,7 +254,7 @@ class MetroidDreadWorld(World):
         seed the fill cannot complete.
         """
         self.start_kit = StartKit.build_start_kit(self)
-        if self._start_checks() >= _MIN_START_CHECKS:
+        if self._kit_is_ok():
             return
 
         original = self.logic.starting_node
@@ -228,7 +266,7 @@ class MetroidDreadWorld(World):
                 continue
             self.logic.set_starting_node(info.node_id)
             self.start_kit = StartKit.build_start_kit(self)
-            if self._start_checks() >= _MIN_START_CHECKS:
+            if self._kit_is_ok():
                 print(
                     f"[Metroid Dread Player {self.player}] starting location "
                     f"{'/'.join(original)} has too little in logic to fill from; "
@@ -239,8 +277,8 @@ class MetroidDreadWorld(World):
         self.logic.set_starting_node(original)
         self.start_kit = original_kit
 
-    def _revert_randomizers(self, vanilla_kit: list) -> None:
-        """Drop door / transport rando and go back to the vanilla graph."""
+    def _reset_logic_graph(self, kit: list) -> None:
+        """Rebuild a vanilla logic graph at the current start (clear rando)."""
         node = self.logic.starting_node
         self.logic = DreadLogic(self)
         self.logic.set_starting_node(node)
@@ -248,11 +286,262 @@ class MetroidDreadWorld(World):
         self.door_patches = []
         self.transport_matching = {}
         self.elevator_patches = []
-        self.start_kit = vanilla_kit
+        self.start_kit = list(kit)
+
+    def _roll_door_and_transport_rando(self) -> None:
+        """Apply one door-lock / transport shuffle onto the current vanilla graph."""
+        self.door_assignments = {}
+        self.door_patches = []
+        self.transport_matching = {}
+        self.elevator_patches = []
+
+        if self.options.door_lock_rando.value == 1:
+            self.door_assignments = DoorRando.roll_assignments(
+                self.logic,
+                self.random,
+                doors_to_change=self.options.doors_to_change.value,
+                change_doors_to=self.options.change_doors_to.value,
+                mode="individual_doors",
+                start_counts=StartKit.kit_counts(self.start_kit),
+            )
+            DoorRando.apply_assignments(self.logic.parser, self.door_assignments)
+            self.door_patches = DoorRando.assignments_to_door_patches(
+                self.door_assignments
+            )
+
+        if self.options.transport_rando.value == 1:
+            matching, transports = TransportRando.roll_connected_matching(
+                self.logic, self.random, mode="randomized"
+            )
+            self.transport_matching = matching
+            if matching:
+                TransportRando.apply_matching(self.logic.parser, transports, matching)
+                self.elevator_patches = TransportRando.matching_to_elevators(
+                    matching, transports
+                )
+
+    def _reapply_door_and_transport(self, vanilla_kit: list) -> None:
+        """Reset to vanilla logic, then re-apply stored transport + door assignments."""
+        matching = dict(self.transport_matching or {})
+        doors = dict(self.door_assignments or {})
+        self._reset_logic_graph(vanilla_kit)
+        self.transport_matching = matching
+        self.door_assignments = doors
+        if matching:
+            transports = TransportRando.collect_transports(self.logic.parser)
+            TransportRando.apply_matching(self.logic.parser, transports, matching)
+            self.elevator_patches = TransportRando.matching_to_elevators(
+                matching, transports
+            )
+        else:
+            self.elevator_patches = []
+        if doors:
+            DoorRando.apply_assignments(self.logic.parser, doors)
+            self.door_patches = DoorRando.assignments_to_door_patches(doors)
+        else:
+            self.door_patches = []
+        self.logic.rebuild_graph()
+        self.start_kit = StartKit.build_start_kit(self, base_kit=vanilla_kit)
+
+    def _graph_state_acceptable(self) -> Optional[FillError]:
+        """None when start kit + preflight are OK; otherwise the failure reason."""
+        if self._start_checks() < _MIN_START_CHECKS or self._start_kit_reaches_goal():
+            return FillError(
+                "start kit too weak or already reaches Raven Beak "
+                "under rolled doors/transports"
+            )
+        try:
+            victory_clearance.assert_graph_preflight(self)
+        except FillError as exc:
+            return exc
+        return None
+
+    def _try_graph_rerolls(self, vanilla_kit: list) -> tuple:
+        """Full door/transport re-rolls. Returns (accepted, last_error)."""
+        last_preflight: Optional[FillError] = None
+        for attempt in range(_GRAPH_REROLL_ATTEMPTS):
+            if attempt > 0:
+                self._reset_logic_graph(vanilla_kit)
+            self._roll_door_and_transport_rando()
+            if not (self.door_assignments or self.transport_matching):
+                return False, last_preflight
+            self.logic.rebuild_graph()
+            self.start_kit = StartKit.build_start_kit(self, base_kit=vanilla_kit)
+            err = self._graph_state_acceptable()
+            if err is None:
+                if attempt > 0:
+                    print(
+                        f"[Metroid Dread Player {self.player}] "
+                        f"accepted door/transport graph on re-roll "
+                        f"{attempt + 1}/{_GRAPH_REROLL_ATTEMPTS}"
+                    )
+                return True, None
+            last_preflight = err
+        return False, last_preflight
+
+    def _try_door_soften_passes(self, vanilla_kit: list) -> bool:
+        """
+        Density-biased door softening after re-rolls failed.
+
+        Softens doors that unlock the most new checks (start-kit inventory first,
+        full inventory as tie-break context via goal bonus) then re-applies the
+        graph. Returns True when preflight accepts.
+        """
+        if not self.door_assignments:
+            return False
+
+        active = set(self.active_location_names())
+        pickup_nodes = {
+            name: node
+            for name, node in self.logic.pickup_nodes.items()
+            if name in active
+        }
+        protected = DoorRando.start_frontier_keys(
+            self.logic, self.logic.inventory_from_counts(StartKit.kit_counts(vanilla_kit))
+        )
+
+        for pass_i in range(_DOOR_SOFTEN_PASSES):
+            # Score with start-kit inventory so early checks open for fill.
+            kit_counts = StartKit.kit_counts(self.start_kit or vanilla_kit)
+            scored = DoorRando.score_doors_by_new_checks(
+                self.logic,
+                self.door_assignments,
+                pickup_nodes=pickup_nodes,
+                active_names=active,
+                inventory_counts=kit_counts,
+                goal_node=_GOAL_NODE,
+                protected=protected,
+            )
+            # If start-kit scoring is flat, retry scoring with a fuller inventory
+            # so we still bias opens toward clearable density / Raven Beak.
+            if not scored or all(score <= 0 for score, _key in scored):
+                scored = DoorRando.score_doors_by_new_checks(
+                    self.logic,
+                    self.door_assignments,
+                    pickup_nodes=pickup_nodes,
+                    active_names=active,
+                    inventory_counts=self._full_inventory_counts(),
+                    goal_node=_GOAL_NODE,
+                    protected=protected,
+                )
+            keys = DoorRando.pick_doors_to_soften(scored, top_k=_DOOR_SOFTEN_TOP_K)
+            if not keys:
+                return False
+            changed = DoorRando.soften_assignments(self.door_assignments, keys)
+            if not changed:
+                return False
+            self._reapply_door_and_transport(vanilla_kit)
+            err = self._graph_state_acceptable()
+            print(
+                f"[Metroid Dread Player {self.player}] door soften pass "
+                f"{pass_i + 1}/{_DOOR_SOFTEN_PASSES}: opened {len(changed)} "
+                f"door(s) toward denser checks"
+                f"{'' if err is None else f' (still failing: {err})'}"
+            )
+            if err is None:
+                return True
+        return False
+
+    def attempt_fill_with_door_repair(self, distribute_fn) -> None:
+        """
+        Run assumed fill; on FillError, soften density doors and retry fill.
+
+        `distribute_fn` should be ``lambda: distribute_items_restrictive(mw)``.
+        Only safe when this world still owns mutable door assignments and the
+        multiworld itempool/locations can be refilled (tests/stress helpers).
+        Stock Archipelago Generate relies on generate_early softening instead.
+        """
+        last_exc: Optional[BaseException] = None
+        vanilla_kit = list(self.start_kit)
+        for attempt in range(1 + _DOOR_SOFTEN_PASSES):
+            try:
+                distribute_fn()
+                self.post_fill()
+                return
+            except FillError as exc:
+                last_exc = exc
+                if not self.door_assignments or attempt >= _DOOR_SOFTEN_PASSES:
+                    break
+                active = set(self.active_location_names())
+                scored = DoorRando.score_doors_by_new_checks(
+                    self.logic,
+                    self.door_assignments,
+                    pickup_nodes={
+                        n: node for n, node in self.logic.pickup_nodes.items()
+                        if n in active
+                    },
+                    active_names=active,
+                    inventory_counts=self._full_inventory_counts(),
+                    goal_node=_GOAL_NODE,
+                    protected=DoorRando.start_frontier_keys(
+                        self.logic,
+                        self.logic.inventory_from_counts(
+                            StartKit.kit_counts(vanilla_kit)
+                        ),
+                    ),
+                )
+                keys = DoorRando.pick_doors_to_soften(
+                    scored, top_k=_DOOR_SOFTEN_TOP_K
+                )
+                if not DoorRando.soften_assignments(self.door_assignments, keys):
+                    break
+                # Door mutations after regions exist still update logic + patches;
+                # fill retry requires the caller to reset placement state.
+                DoorRando.apply_assignments(self.logic.parser, self.door_assignments)
+                self.door_patches = DoorRando.assignments_to_door_patches(
+                    self.door_assignments
+                )
+                self.logic.rebuild_graph()
+                if self.patch_extras is not None:
+                    self.patch_extras["door_patches"] = self.door_patches
+                print(
+                    f"[Metroid Dread Player {self.player}] fill failed "
+                    f"({exc}); softened {len(keys)} door(s) for retry "
+                    f"{attempt + 1}/{_DOOR_SOFTEN_PASSES}"
+                )
+        if last_exc is not None:
+            raise last_exc
+
+    def _revert_randomizers(self, vanilla_kit: list) -> None:
+        """Drop door / transport rando and go back to the vanilla graph."""
+        self._reset_logic_graph(vanilla_kit)
         print(
             f"[Metroid Dread Player {self.player}] door / transport rando left "
-            f"{'/'.join(node)} with too little in logic; reverted to vanilla"
+            f"{'/'.join(self.logic.starting_node)} with too little in logic; "
+            f"reverted to vanilla"
         )
+
+    def _compute_forced_boss_locations(self) -> None:
+        """
+        When boss/EMMI pickups are excluded, still keep enough DNA sinks under
+        high DNA / transport / door pressure so prefer_emmi/bosses can place.
+        """
+        self.forced_boss_locations = set()
+        if self.options.include_boss_pickups:
+            return
+        needed = int(self.options.required_dna.value)
+        mode = int(self.options.dna_placement.value)
+        if needed <= 0 or mode == 2:
+            return
+        pressured = (
+            self.options.transport_rando.value == 1
+            or self.options.door_lock_rando.value == 1
+            or needed >= 6
+        )
+        if not pressured:
+            return
+        substrs = _EMMI_DNA_SUBSTR if mode == 0 else _BOSS_DNA_SUBSTR
+        sinks = [n for n in location_table if any(s in n for s in substrs)]
+        self.random.shuffle(sinks)
+        # Keep at least `needed` sink checks (and a small buffer) available.
+        keep = min(len(sinks), max(needed + 2, needed))
+        self.forced_boss_locations = set(sinks[:keep])
+        if self.forced_boss_locations:
+            print(
+                f"[Metroid Dread Player {self.player}] keeping "
+                f"{len(self.forced_boss_locations)} boss/EMMI check(s) as DNA "
+                f"sinks (include_boss_pickups is off)"
+            )
 
     def _full_inventory_counts(self) -> dict:
         """Every real item, in quantities past any progressive / DNA threshold."""
@@ -447,9 +736,10 @@ class MetroidDreadWorld(World):
         names = list(location_table.keys())
         if self.options.include_boss_pickups:
             return names
+        forced = getattr(self, "forced_boss_locations", set()) or set()
         return [
             n for n in names
-            if not any(s in n for s in _BOSS_EMMI_LOCATION_SUBSTR)
+            if n in forced or not any(s in n for s in _BOSS_EMMI_LOCATION_SUBSTR)
         ]
 
     def create_item(self, name: str) -> MetroidDreadItem:
@@ -460,9 +750,12 @@ class MetroidDreadWorld(World):
 
     def set_rules(self):
         set_rules(self.multiworld, self.player, self.options)
-        # Remove excluded boss/EMMI locations from the multiworld.
+        # Remove excluded boss/EMMI locations from the multiworld (keep forced sinks).
         if not self.options.include_boss_pickups:
+            forced = getattr(self, "forced_boss_locations", set()) or set()
             for name in list(location_table.keys()):
+                if name in forced:
+                    continue
                 if any(s in name for s in _BOSS_EMMI_LOCATION_SUBSTR):
                     try:
                         loc = self.multiworld.get_location(name, self.player)
@@ -473,29 +766,53 @@ class MetroidDreadWorld(World):
 
     def pre_fill(self) -> None:
         self._pre_place_dna()
+        victory_clearance.assert_location_capacity(self)
+
+    def post_fill(self) -> None:
+        """Reject fills where Raven Beak opens before 90% of checks are in logic."""
+        victory_clearance.assert_victory_implies_full_clearance(self)
 
     def _dna_candidate_locations(self) -> List[str]:
         mode = int(self.options.dna_placement.value)
         active = set(self.active_location_names())
+        anywhere = [n for n in location_table if n in active]
+        if mode == 2:
+            return anywhere
+
         if mode == 0:  # prefer_emmi
             substrs = _EMMI_DNA_SUBSTR
-        elif mode == 1:  # prefer_bosses
+        else:  # prefer_bosses
             substrs = _BOSS_DNA_SUBSTR
-        else:
-            return [n for n in location_table if n in active]
 
-        preferred = [n for n in location_table if n in active and any(s in n for s in substrs)]
-        if len(preferred) >= int(self.options.required_dna.value):
+        preferred = [
+            n for n in location_table
+            if n in active and any(s in n for s in substrs)
+        ]
+        needed = int(self.options.required_dna.value)
+        # High DNA + transport/doors: preferred first, then anywhere (softening).
+        pressured = (
+            needed >= 6
+            or self.options.transport_rando.value == 1
+            or self.options.door_lock_rando.value == 1
+        )
+        if len(preferred) >= needed and not pressured:
             return preferred
-        # Fall back to anywhere active.
-        return [n for n in location_table if n in active]
+        # Preferred first, then remaining actives — never starve DNA placement.
+        seen = set(preferred)
+        return preferred + [n for n in anywhere if n not in seen]
 
     def _pre_place_dna(self) -> None:
         n = int(self.options.required_dna.value)
         if n <= 0 or int(self.options.dna_placement.value) == 2:
             return
         candidates = self._dna_candidate_locations()
-        self.random.shuffle(candidates)
+        # Keep preferred-first order but shuffle within tiers loosely.
+        if candidates:
+            head = candidates[:n]
+            self.random.shuffle(head)
+            rest = candidates[n:]
+            self.random.shuffle(rest)
+            candidates = head + rest
         if len(candidates) < n:
             return
         dna_items = [
