@@ -10,6 +10,7 @@
 const assert = require("assert");
 const {
   normalizeUriPassword,
+  parseConnectServerString,
   hostPortFromServer,
   buildWsCandidates,
   decideConnectAfterRoomInfo,
@@ -58,14 +59,62 @@ test("hostPortFromServer strips schemes and paths", () => {
   assert.strictEqual(hostPortFromServer("127.0.0.1:38281"), "127.0.0.1:38281");
 });
 
-test("buildWsCandidates prefers wss for archipelago.gg", () => {
+test("parseConnectServerString accepts Text Client paste with None password", () => {
+  const exact = "DreadPlayer:None@archipelago.gg:45441";
+  const p = parseConnectServerString(exact);
+  assert.strictEqual(p.server, "archipelago.gg:45441");
+  assert.strictEqual(p.slot, "DreadPlayer");
+  assert.strictEqual(p.password, "");
+  assert.strictEqual(p.hasUserinfo, true);
+
+  const withWss = parseConnectServerString(`wss://${exact}`);
+  assert.strictEqual(withWss.server, "archipelago.gg:45441");
+  assert.strictEqual(withWss.slot, "DreadPlayer");
+  assert.strictEqual(withWss.password, "");
+  assert.strictEqual(withWss.scheme, "wss");
+  assert.strictEqual(withWss.hasUserinfo, true);
+
+  const plain = parseConnectServerString("archipelago.gg:45441");
+  assert.strictEqual(plain.server, "archipelago.gg:45441");
+  assert.strictEqual(plain.hasUserinfo, false);
+  assert.strictEqual(plain.slot, null);
+});
+
+test("hostPortFromServer strips Text Client userinfo (no scheme)", () => {
+  assert.strictEqual(
+    hostPortFromServer("DreadPlayer:None@archipelago.gg:45441"),
+    "archipelago.gg:45441"
+  );
+  assert.strictEqual(
+    hostPortFromServer("wss://DreadPlayer:None@archipelago.gg:45441"),
+    "archipelago.gg:45441"
+  );
+});
+
+test("buildWsCandidates prefers ws then wss (matches CommonClient)", () => {
   const c = buildWsCandidates("archipelago.gg:34841");
   assert.deepStrictEqual(c, [
-    "wss://archipelago.gg:34841",
     "ws://archipelago.gg:34841",
+    "wss://archipelago.gg:34841",
   ]);
   const local = buildWsCandidates("127.0.0.1:38281");
   assert.deepStrictEqual(local, ["ws://127.0.0.1:38281", "wss://127.0.0.1:38281"]);
+  const explicitWss = buildWsCandidates("wss://archipelago.gg:34841");
+  assert.deepStrictEqual(explicitWss, [
+    "wss://archipelago.gg:34841",
+    "ws://archipelago.gg:34841",
+  ]);
+  // Userinfo must not remain in probe URLs (would look like a bad host).
+  const pasted = buildWsCandidates("DreadPlayer:None@archipelago.gg:45441");
+  assert.deepStrictEqual(pasted, [
+    "ws://archipelago.gg:45441",
+    "wss://archipelago.gg:45441",
+  ]);
+  const pastedWss = buildWsCandidates("wss://DreadPlayer:None@archipelago.gg:45441");
+  assert.deepStrictEqual(pastedWss, [
+    "wss://archipelago.gg:45441",
+    "ws://archipelago.gg:45441",
+  ]);
 });
 
 test("decideConnectAfterRoomInfo open room ignores empty URI password", () => {

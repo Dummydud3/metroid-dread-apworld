@@ -233,6 +233,28 @@ class PrefillAndFindTests(unittest.TestCase):
             found = hl.find_containing_apworld(virtual)
             self.assertEqual(found, apw.resolve())
 
+    def test_ensure_filesystem_world_dir_extracts_apworld(self):
+        """Linux frozen fallback: Python client must not read Items.py from zip path."""
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            apw = root / "metroid_dread.apworld"
+            with zipfile.ZipFile(apw, "w") as zf:
+                zf.writestr("metroid_dread/dread-client-app/package.json", "{}")
+                zf.writestr("metroid_dread/dread-client-app/main.js", "// hub")
+                zf.writestr("metroid_dread/dread-client-app/room_info_gate.js", "// gate")
+                zf.writestr("metroid_dread/MetroidDreadClient.py", "# client\n")
+                zf.writestr("metroid_dread/Items.py", 'base_id = 84000\nitem_table = {"Missile": ItemData(base_id + 0)}\n')
+            dest = root / "runtime"
+            with mock.patch.object(hl, "find_containing_apworld", return_value=apw):
+                with mock.patch.object(hl, "world_package_dir", return_value=apw / "metroid_dread"):
+                    with mock.patch.object(hl, "runtime_world_dir", return_value=dest):
+                        out = hl.ensure_filesystem_world_dir()
+            self.assertEqual(out.resolve(), dest.resolve())
+            self.assertTrue((dest / "Items.py").is_file())
+            self.assertTrue((dest / hl.CLIENT_SCRIPT_NAME).is_file())
+
 
 class ProbeAndRelativeBinaryTests(unittest.TestCase):
     def test_relative_binary_per_platform(self):

@@ -1,10 +1,12 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
+const { parseConnectServerString } = require("./room_info_gate");
 
 contextBridge.exposeInMainWorld("dreadHub", {
   getConfig: () => ipcRenderer.invoke("get-config"),
   saveConfig: (partial) => ipcRenderer.invoke("save-config", partial),
   startClient: (opts) => ipcRenderer.invoke("start-client", opts),
   probeRoomInfo: (server) => ipcRenderer.invoke("probe-room-info", server),
+  parseConnectServer: (server) => parseConnectServerString(server || ""),
   stopClient: () => ipcRenderer.invoke("stop-client"),
   sendCommand: (text) => ipcRenderer.invoke("send-command", text),
   getStatus: () => ipcRenderer.invoke("get-status"),

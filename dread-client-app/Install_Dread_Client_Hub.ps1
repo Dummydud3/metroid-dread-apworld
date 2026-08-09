@@ -86,6 +86,29 @@ function New-Shortcut {
   [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wsh) | Out-Null
 }
 
+function Install-PythonClientDeps {
+  $ensure = Join-Path $RepoRoot "ensure_client_deps.py"
+  if (-not (Test-Path -LiteralPath $ensure)) {
+    Write-Host "ensure_client_deps.py not found; skipping Python client package check."
+    return
+  }
+  Write-Host "Installing / verifying Python client packages (websockets, …)..."
+  if (Get-Command py -ErrorAction SilentlyContinue) {
+    & py -3 $ensure --world $RepoRoot
+  } elseif (Get-Command python -ErrorAction SilentlyContinue) {
+    & python $ensure --world $RepoRoot
+  } else {
+    throw (
+      "No usable Python found for Hub client packages.`n" +
+      "Install Python 3.11 or 3.12 from https://www.python.org/downloads/ (Add to PATH), " +
+      "or run: py install 3.12"
+    )
+  }
+  if ($LASTEXITCODE -ne 0) {
+    throw "Python client dependency install failed (exit $LASTEXITCODE). See messages above."
+  }
+}
+
 function Install-NpmDeps {
   Write-Host "Installing / verifying npm dependencies..."
   Push-Location $AppDir
@@ -116,6 +139,7 @@ function Install-Hub {
   }
 
   if ($Deps) {
+    Install-PythonClientDeps
     Install-NpmDeps
   }
 

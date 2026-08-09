@@ -39,7 +39,8 @@ def read_database_bytes(filename: str, fallback_dir: Optional[Path]) -> bytes:
     if _PACKAGE:
         try:
             data = pkgutil.get_data(_PACKAGE, f"{LOGIC_DATABASE_DIRNAME}/{filename}")
-        except OSError:
+        except (OSError, ValueError):
+            # ValueError: "<pkg>.__spec__ is None" from incomplete synthetic packages.
             data = None
         if data is not None:
             return data

@@ -7,8 +7,14 @@ const { spawn, spawnSync } = require("child_process");
 const AdmZip = require("adm-zip");
 const {
   normalizeUriPassword,
+  parseConnectServerString,
   probeRoomInfo,
 } = require("./room_info_gate");
+const {
+  formatPythonCmd,
+  pythonMissingError,
+  explainClientExit,
+} = require("./client_exit");
 
 // Hub lives at worlds/metroid_dread/dread-client-app — world package is parent.
 const WORLD_DIR = path.resolve(__dirname, "..");
@@ -147,7 +153,7 @@ const UI_PREFIX = "@@APUI@@";
 const DREAD_TITLE_ID = "010093801237c000";
 
 const DEFAULT_CONFIG = {
-  server: "archipelago.gg:38281",
+  server: "127.0.0.1:38281",
   slot: "DreadPlayer",
   password: "",
   dread_ip: "127.0.0.1",
@@ -295,6 +301,26 @@ function applyLauncherPrefill(cfg) {
   return cfg;
 }
 
+function migratePlaceholderDreadIp(cfg) {
+  // Old sample/placeholder game IP; leave any other custom IP alone.
+  if (String(cfg.dread_ip || "").trim() !== "1.2.3.4") {
+    return false;
+  }
+  cfg.dread_ip = DEFAULT_CONFIG.dread_ip;
+  try {
+    if (fs.existsSync(CONFIG_PATH)) {
+      const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+      if (String(raw.dread_ip || "").trim() === "1.2.3.4") {
+        raw.dread_ip = DEFAULT_CONFIG.dread_ip;
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2), "utf8");
+      }
+    }
+  } catch (err) {
+    console.error("Failed to migrate dread_ip placeholder:", err);
+  }
+  return true;
+}
+
 function loadConfig() {
   const patch = loadPatchDefaults();
   const cfg = {
@@ -312,6 +338,7 @@ function loadConfig() {
   } catch (err) {
     console.error("Failed to load config:", err);
   }
+  migratePlaceholderDreadIp(cfg);
   applyLauncherPrefill(cfg);
   delete cfg.poptracker_path;
   if (!cfg.output_path) {
@@ -350,13 +377,30 @@ function saveConfig(partial) {
 }
 
 let cachedPythonLauncher = null;
+const ENSURE_CLIENT_DEPS_SCRIPT = path.join(WORLD_DIR, "ensure_client_deps.py");
 
 function findPythonLauncher() {
   if (cachedPythonLauncher) {
     return cachedPythonLauncher;
   }
   if (process.platform !== "win32") {
-    cachedPythonLauncher = { cmd: "python3", prefixArgs: [] };
+    const unixCandidates = [
+      { cmd: "python3.12", prefixArgs: [] },
+      { cmd: "python3.11", prefixArgs: [] },
+      { cmd: "python3.13", prefixArgs: [] },
+      { cmd: "python3", prefixArgs: [] },
+      { cmd: "python", prefixArgs: [] },
+    ];
+    const probeUnix = (candidate, code) =>
+      spawnSync(candidate.cmd, [...candidate.prefixArgs, "-c", code], {
+        timeout: 30000,
+      }).status === 0;
+    const versionOk =
+      "import sys; raise SystemExit(0 if (3,11,9) <= sys.version_info < (3,14) else 1)";
+    const foundUnix =
+      unixCandidates.find((c) => probeUnix(c, "import open_dread_rando")) ||
+      unixCandidates.find((c) => probeUnix(c, versionOk));
+    cachedPythonLauncher = foundUnix || null;
     return cachedPythonLauncher;
   }
 
@@ -374,11 +418,83 @@ function findPythonLauncher() {
       windowsHide: true,
     }).status === 0;
 
-  cachedPythonLauncher =
+  const found =
     candidates.find((c) => probe(c, "import open_dread_rando")) ||
-    candidates.find((c) => probe(c, "import sys; raise SystemExit(0 if (3,11,9) <= sys.version_info < (3,14) else 1)")) ||
-    candidates[0];
+    candidates.find((c) =>
+      probe(
+        c,
+        "import sys; raise SystemExit(0 if (3,11,9) <= sys.version_info < (3,14) else 1)"
+      )
+    );
+  // Do NOT fall back to py -3.11 when nothing probes clean — that yields a bare
+  // launcher exit (classic 103 / pymanager 0xA0000006) with no useful UI hint.
+  if (!found) {
+    return null;
+  }
+  cachedPythonLauncher = found;
   return cachedPythonLauncher;
+}
+
+/**
+ * Install websockets/etc. into the same interpreter findPythonLauncher() returns.
+ * Shares worlds/metroid_dread/ensure_client_deps.py with hub_launcher / bat / sh.
+ */
+function ensureClientDeps(launcher) {
+  if (!launcher) {
+    return { ok: false, error: pythonMissingError() };
+  }
+  if (!fs.existsSync(ENSURE_CLIENT_DEPS_SCRIPT)) {
+    return {
+      ok: false,
+      error:
+        `ensure_client_deps.py not found:\n${ENSURE_CLIENT_DEPS_SCRIPT}\n` +
+        "Reinstall/update metroid_dread.apworld (or refresh _metroid_dread_runtime).",
+    };
+  }
+  const result = spawnSync(
+    launcher.cmd,
+    [...launcher.prefixArgs, ENSURE_CLIENT_DEPS_SCRIPT, "--world", WORLD_DIR],
+    {
+      cwd: WORLD_DIR,
+      encoding: "utf8",
+      timeout: 600000,
+      windowsHide: true,
+      env: {
+        ...process.env,
+        SKIP_REQUIREMENTS_UPDATE: "1",
+        PYTHONUNBUFFERED: "1",
+      },
+    }
+  );
+  const stdout = String(result.stdout || "").trim();
+  const stderr = String(result.stderr || "").trim();
+  const combined = [stdout, stderr].filter(Boolean).join("\n");
+  if (result.error) {
+    const errMsg = String(result.error.message || result.error);
+    const unsigned =
+      result.status == null && /ENOENT/i.test(errMsg)
+        ? null
+        : result.status;
+    if (/ENOENT/i.test(errMsg) || unsigned === 0xa0000006 || unsigned === 103) {
+      return { ok: false, error: pythonMissingError() };
+    }
+    return {
+      ok: false,
+      error: `Failed to run ensure_client_deps.py:\n${errMsg}\n${combined}`.trim(),
+    };
+  }
+  if (result.status === 2) {
+    return { ok: false, error: pythonMissingError() };
+  }
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      error:
+        combined ||
+        `Failed to install Python client packages (exit ${result.status}).`,
+    };
+  }
+  return { ok: true, message: combined };
 }
 
 function findRyujinxPath() {
@@ -624,34 +740,27 @@ function normalizeConnectOpts(opts) {
     roomId = roomMatch[1];
   }
 
-  if (/^archipelago:\/\//i.test(server) || /^wss?:\/\//i.test(server)) {
-    try {
-      const normalized = server.replace(/^archipelago:\/\//i, "http://");
-      const u = new URL(normalized);
-      if (u.username) slot = decodeURIComponent(u.username);
-      if (u.password != null) password = normalizeUriPassword(u.password);
-      server = u.host;
-    } catch (err) {
-      console.error("URL parse failed:", err);
-    }
-  } else if (/^https?:\/\//i.test(server)) {
-    try {
-      const u = new URL(server);
-      if (u.hostname) {
-        // Keep host; port may come from room_status later.
-        server = u.port ? `${u.hostname}:${u.port}` : u.hostname;
-      }
-    } catch (_) {
-      /* keep as-is */
-    }
+  // Text Client / launcher strings: optional scheme + slot:password@host:port.
+  // Always pass bare host:port to Python --connect (ws-first in CommonClient).
+  const parsed = parseConnectServerString(server);
+  if (parsed.server) {
+    server = parsed.server;
+  }
+  if (parsed.hasUserinfo) {
+    // Prefer userinfo from the server string over separate fields.
+    if (parsed.slot) slot = parsed.slot;
+    password = parsed.password || "";
+  }
+  if (parsed.room) {
+    roomId = parsed.room;
   }
 
-  if (server && !/^[a-z][a-z0-9+.-]*:\/\//i.test(server)) {
-    const hostOnly = server.split("/")[0].toLowerCase();
-    if (hostOnly.startsWith("archipelago.gg") || hostOnly.includes(".archipelago.gg")) {
-      server = `wss://${server}`;
-    }
-  }
+  // Strip any leftover scheme/path so --connect matches Text Client / CommonClient.
+  server = String(server || "")
+    .replace(/^wss?:\/\//i, "")
+    .replace(/^archipelago:\/\//i, "")
+    .replace(/^https?:\/\//i, "")
+    .split("/")[0];
 
   return {
     server,
@@ -704,7 +813,24 @@ function startClient(opts) {
     room_id: normalized.roomId || loadConfig().room_id || "",
   });
 
-  const { cmd, prefixArgs } = findPythonLauncher();
+  const launcher = findPythonLauncher();
+  if (!launcher) {
+    return { ok: false, error: pythonMissingError() };
+  }
+  appendLog(
+    "stdout",
+    `[app] Checking Python client packages (${formatPythonCmd(launcher)})…\n`
+  );
+  const deps = ensureClientDeps(launcher);
+  if (!deps.ok) {
+    appendLog("stderr", `\n[app] ${String(deps.error || "").replace(/\n/g, "\n[app] ")}\n`);
+    return { ok: false, error: deps.error };
+  }
+  if (deps.message) {
+    appendLog("stdout", `[app] ${deps.message.replace(/\n/g, "\n[app] ")}\n`);
+  }
+
+  const { cmd, prefixArgs } = launcher;
   const args = [
     ...prefixArgs,
     CLIENT_SCRIPT,
@@ -733,6 +859,7 @@ function startClient(opts) {
       cwd: INSTALL_ROOT,
       env: pythonSpawnEnv(),
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
   } catch (err) {
     return { ok: false, error: String(err.message || err) };
@@ -749,33 +876,43 @@ function startClient(opts) {
   });
   clientProcess.stderr.on("data", (chunk) => {
     const text = chunk.toString("utf8");
-    stderrBuf = (stderrBuf + text).slice(-4000);
+    stderrBuf = (stderrBuf + text).slice(-8000);
     appendLog("stderr", text);
+  });
+  clientProcess.on("error", (err) => {
+    clientProcess = null;
+    const msg = `Failed to start Python (${formatPythonCmd(launcher)}): ${err.message}`;
+    appendLog("stderr", `\n[app] ${msg}\n`);
+    latestStatus = {
+      type: "status",
+      ap_connected: false,
+      game_connected: false,
+      stopped: true,
+      exit_code: null,
+      exit_error: msg,
+      received_items: [],
+      checked_location_ids: [],
+    };
+    sendToRenderer("client-status", latestStatus);
+    sendTrackerUpdate();
   });
   clientProcess.on("exit", (code, signal) => {
     if (stdoutBuf.trim()) handleStdoutLine(stdoutBuf.trim());
     stdoutBuf = "";
     clientProcess = null;
     appendLog("stdout", `\n[app] Client exited (code=${code}, signal=${signal || "none"})\n`);
-    const crashHint = (() => {
-      const blob = stderrBuf || "";
-      if (/No module named 'CommonClient'/i.test(blob)) {
-        return "Python could not import CommonClient (wrong Archipelago root).";
-      }
-      if (/partially initialized module 'Options'/i.test(blob)) {
-        return "Options.py import clash — Archipelago root / PYTHONPATH is wrong.";
-      }
-      const mod = blob.match(/ModuleNotFoundError: No module named '([^']+)'/i);
-      if (mod) return `Missing Python module: ${mod[1]}`;
-      return "";
-    })();
+    const crashHint = explainClientExit(code, stderrBuf);
+    if (crashHint && stderrBuf.trim()) {
+      // Ensure the UI status line is not the only place stderr is visible.
+      appendLog("stdout", `[app] ${crashHint.replace(/\n/g, "\n[app] ")}\n`);
+    }
     latestStatus = {
       type: "status",
       ap_connected: false,
       game_connected: false,
       stopped: true,
       exit_code: code,
-      exit_error: crashHint || (code ? `Client exited (code ${code})` : ""),
+      exit_error: crashHint,
       received_items: [],
       checked_location_ids: [],
     };
@@ -788,6 +925,7 @@ function startClient(opts) {
     `[app] Connecting to Archipelago…\n` +
       `      Server: ${normalized.server}\n` +
       `      Slot:   ${normalized.slot}\n` +
+      `      Python: ${formatPythonCmd(launcher)}\n` +
       `      AP import: ${AP_ROOT}\n` +
       `      AP install: ${INSTALL_ROOT}\n`
   );
@@ -1301,7 +1439,11 @@ function runPatch(opts) {
     freesink: opts.freesink != null ? Boolean(opts.freesink) : loadConfig().freesink,
   });
 
-  const { cmd, prefixArgs } = findPythonLauncher();
+  const launcher = findPythonLauncher();
+  if (!launcher) {
+    return Promise.resolve({ ok: false, error: pythonMissingError() });
+  }
+  const { cmd, prefixArgs } = launcher;
   const args = [
     ...prefixArgs,
     PATCHER_SCRIPT,
@@ -1320,6 +1462,7 @@ function runPatch(opts) {
   return new Promise((resolve) => {
     let settled = false;
     let progress = 0;
+    let patchStderr = "";
     const startedAt = Date.now();
     const finish = (payload) => {
       if (settled) return;
@@ -1341,6 +1484,9 @@ function runPatch(opts) {
 
     const sendPatchLog = (chunk, stream) => {
       const text = chunk.toString();
+      if (stream === "stderr") {
+        patchStderr = (patchStderr + text).slice(-8000);
+      }
       progress = estimatePatchProgress(text, progress);
       const elapsed = (Date.now() - startedAt) / 1000;
       let etaSec = null;
@@ -1358,7 +1504,10 @@ function runPatch(opts) {
     patchProcess.stdout.on("data", (d) => sendPatchLog(d, "stdout"));
     patchProcess.stderr.on("data", (d) => sendPatchLog(d, "stderr"));
     patchProcess.on("error", (err) => {
-      finish({ ok: false, error: `Failed to start Python: ${err.message}` });
+      finish({
+        ok: false,
+        error: `Failed to start Python (${formatPythonCmd(launcher)}): ${err.message}`,
+      });
     });
     patchProcess.on("close", (code) => {
       if (code === 0) {
@@ -1369,10 +1518,12 @@ function runPatch(opts) {
         });
         saveConfig({ hub_stage: "client", last_patched_at: Date.now() });
       }
+      const hint =
+        code === 0 ? null : explainClientExit(code, patchStderr) || `Patcher exited with code ${code}`;
       finish({
         ok: code === 0,
         code,
-        error: code === 0 ? null : `Patcher exited with code ${code}`,
+        error: hint,
       });
     });
   });

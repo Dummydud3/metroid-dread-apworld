@@ -220,6 +220,31 @@ def bind_utils_install_root(install_root: Optional[Path] = None) -> None:
                 pass
 
 
+def _attach_world_package_spec(pkg: Any, name: str = "worlds.metroid_dread") -> None:
+    """
+    Give a synthetic package a real ModuleSpec.
+
+    Without ``__spec__``, ``pkgutil.get_data`` / ``importlib.util.find_spec`` raise
+    ``ValueError: worlds.metroid_dread.__spec__ is None`` (seen when the direct
+    patcher resolves starting locations from logic_database under ap_core).
+    """
+    import importlib.machinery
+    import importlib.util
+
+    init_py = WORLD_DIR / "__init__.py"
+    loader = importlib.machinery.SourceFileLoader(name, str(init_py))
+    spec = importlib.util.spec_from_file_location(
+        name,
+        str(init_py),
+        loader=loader,
+        submodule_search_locations=[str(WORLD_DIR)],
+    )
+    if spec is None:
+        return
+    pkg.__spec__ = spec
+    pkg.__loader__ = loader
+
+
 def ensure_runtime_world_namespace() -> None:
     """
     Expose WORLD_DIR as ``worlds.metroid_dread`` when the AP import root is ap_core.
@@ -230,7 +255,13 @@ def ensure_runtime_world_namespace() -> None:
     import types
 
     name = "worlds.metroid_dread"
-    if name in sys.modules:
+    existing = sys.modules.get(name)
+    if existing is not None:
+        # Repair incomplete synthetic packages left by older Hub builds.
+        if getattr(existing, "__spec__", None) is None and getattr(
+            existing, "__path__", None
+        ):
+            _attach_world_package_spec(existing, name)
         return
     try:
         import importlib
@@ -248,6 +279,7 @@ def ensure_runtime_world_namespace() -> None:
     pkg.__file__ = str(WORLD_DIR / "__init__.py")
     pkg.__package__ = name
     pkg.__path__ = [str(WORLD_DIR)]  # type: ignore[attr-defined]
+    _attach_world_package_spec(pkg, name)
     sys.modules[name] = pkg
 
 

@@ -628,21 +628,39 @@
 
   function fillFromServerField() {
     const raw = $("server").value.trim();
-    const roomMatch = raw.match(/\/room\/([A-Za-z0-9_-]+)/i);
-    if (roomMatch) state.roomId = roomMatch[1];
+    if (!raw) return;
 
-    if (!/^archipelago:\/\//i.test(raw) && !/^wss?:\/\//i.test(raw)) return;
-    try {
-      const u = new URL(raw.replace(/^archipelago:\/\//i, "http://"));
-      if (u.hostname) {
-        $("server").value = u.port ? `${u.hostname}:${u.port}` : u.hostname;
+    // Text Client paste: optional ws(s):// + slot:password@host:port, or plain host:port.
+    const parsed =
+      typeof hub.parseConnectServer === "function"
+        ? hub.parseConnectServer(raw)
+        : null;
+    if (!parsed) {
+      // Preload unavailable — keep prior archipelago:// / ws(s):// only behavior.
+      const roomMatch = raw.match(/\/room\/([A-Za-z0-9_-]+)/i);
+      if (roomMatch) state.roomId = roomMatch[1];
+      if (!/^archipelago:\/\//i.test(raw) && !/^wss?:\/\//i.test(raw)) return;
+      try {
+        const u = new URL(raw.replace(/^archipelago:\/\//i, "http://"));
+        if (u.hostname) {
+          $("server").value = u.port ? `${u.hostname}:${u.port}` : u.hostname;
+        }
+        if (u.username) $("slot").value = decodeURIComponent(u.username);
+        if (u.password != null) $("password").value = normalizeUriPassword(u.password);
+        const room = u.searchParams.get("room");
+        if (room) state.roomId = room;
+      } catch (_) {
+        /* ignore */
       }
-      if (u.username) $("slot").value = decodeURIComponent(u.username);
-      if (u.password != null) $("password").value = normalizeUriPassword(u.password);
-      const room = u.searchParams.get("room");
-      if (room) state.roomId = room;
-    } catch (_) {
-      /* ignore */
+      return;
+    }
+
+    if (parsed.room) state.roomId = parsed.room;
+    if (parsed.server) $("server").value = parsed.server;
+    if (parsed.hasUserinfo) {
+      // Always prefer userinfo from the server string when present.
+      if (parsed.slot) $("slot").value = parsed.slot;
+      $("password").value = normalizeUriPassword(parsed.password);
     }
   }
 
@@ -732,6 +750,8 @@
     state.unsubStatus = hub.onStatus((st) => applyStatus(st));
 
     const result = await hub.startClient({
+      // Bare host:port (or URI) — Hub/CommonClient use ws:// first like Text Client.
+      // dread-ip is only for Remote Lua after patch; never used as the AP server.
       server,
       slot,
       password: gate.password,
@@ -763,7 +783,8 @@
       if (state._connectGeneration !== connectGeneration) return;
       if (state.connecting && !state.apConnected) {
         setConnectStatus(
-          "Timed out waiting for Archipelago. Check address / slot / password, then Connect again.",
+          "Timed out waiting for Archipelago. Confirm Server is host:port (not Game IP), " +
+            "slot/password match Text Client, then Connect again. Check the log above for spawn/import errors.",
           true
         );
         state.connecting = false;

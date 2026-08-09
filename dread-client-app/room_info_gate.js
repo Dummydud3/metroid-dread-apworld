@@ -23,39 +23,135 @@ function normalizeUriPassword(password) {
   return text;
 }
 
-function hostPortFromServer(server) {
-  let raw = String(server || "").trim();
-  if (!raw) return "";
-  if (/^archipelago:\/\//i.test(raw) || /^wss?:\/\//i.test(raw) || /^https?:\/\//i.test(raw)) {
-    try {
-      const u = new URL(raw.replace(/^archipelago:\/\//i, "http://"));
-      return u.port ? `${u.hostname}:${u.port}` : u.hostname;
-    } catch (_) {
-      /* fall through */
+/**
+ * Parse Text Client / Hub / launcher connect strings into bare fields.
+ *
+ * Accepts:
+ *   - Optional `ws://` / `wss://` / `archipelago://` / `http(s)://` prefix
+ *   - Optional `slot:password@host:port` (password `None`/`null` → empty)
+ *   - Plain `host:port`
+ *
+ * @returns {{
+ *   server: string,
+ *   slot: string|null,
+ *   password: string|null,
+ *   hasUserinfo: boolean,
+ *   scheme: string,
+ *   room: string,
+ * }}
+ */
+function parseConnectServerString(server) {
+  const result = {
+    server: "",
+    slot: null,
+    password: null,
+    hasUserinfo: false,
+    scheme: "",
+    room: "",
+  };
+  const raw = String(server || "").trim();
+  if (!raw) return result;
+
+  const roomMatch = raw.match(/\/room\/([A-Za-z0-9_-]+)/i);
+  if (roomMatch) result.room = roomMatch[1];
+
+  let forUrl = raw;
+  if (/^archipelago:\/\//i.test(raw)) {
+    result.scheme = "archipelago";
+    forUrl = raw.replace(/^archipelago:\/\//i, "http://");
+  } else if (/^wss:\/\//i.test(raw)) {
+    result.scheme = "wss";
+  } else if (/^ws:\/\//i.test(raw)) {
+    result.scheme = "ws";
+  } else if (/^https:\/\//i.test(raw)) {
+    result.scheme = "https";
+  } else if (/^http:\/\//i.test(raw)) {
+    result.scheme = "http";
+  } else if (raw.includes("@")) {
+    // Text Client paste: slot:password@host:port (no scheme).
+    forUrl = `ws://${raw}`;
+  } else {
+    // Plain host:port (or host) — keep path/query stripped.
+    result.server = raw.split("?")[0].split("/")[0];
+    return result;
+  }
+
+  try {
+    const u = new URL(forUrl);
+    if (u.hostname) {
+      // Prefer host (hostname:port) without userinfo — safe for --connect.
+      result.server = u.host;
+    }
+    const hadUserinfo =
+      Boolean(u.username) ||
+      Boolean(u.password) ||
+      (u.host && raw.includes("@"));
+    if (hadUserinfo) {
+      result.hasUserinfo = true;
+      result.slot = u.username ? decodeURIComponent(u.username) : "";
+      result.password = normalizeUriPassword(u.password);
+    }
+    const room = u.searchParams.get("room");
+    if (room) result.room = room;
+  } catch (_) {
+    // Last resort: strip scheme and take authority before path.
+    let fallback = raw
+      .replace(/^wss?:\/\//i, "")
+      .replace(/^archipelago:\/\//i, "")
+      .replace(/^https?:\/\//i, "");
+    fallback = fallback.split("?")[0].split("/")[0];
+    if (fallback.includes("@")) {
+      const at = fallback.lastIndexOf("@");
+      const userinfo = fallback.slice(0, at);
+      result.server = fallback.slice(at + 1);
+      result.hasUserinfo = true;
+      const colon = userinfo.indexOf(":");
+      if (colon >= 0) {
+        try {
+          result.slot = decodeURIComponent(userinfo.slice(0, colon));
+        } catch (_) {
+          result.slot = userinfo.slice(0, colon);
+        }
+        result.password = normalizeUriPassword(userinfo.slice(colon + 1));
+      } else {
+        try {
+          result.slot = decodeURIComponent(userinfo);
+        } catch (_) {
+          result.slot = userinfo;
+        }
+        result.password = "";
+      }
+    } else {
+      result.server = fallback;
     }
   }
-  return raw.split("/")[0];
+  return result;
+}
+
+function hostPortFromServer(server) {
+  const parsed = parseConnectServerString(server);
+  return parsed.server || "";
 }
 
 /**
- * Candidate WebSocket URLs (preferred first). Mirrors CommonClient's
- * ws→wss retry and Hub's archipelago.gg → wss preference.
+ * Candidate WebSocket URLs (preferred first).
+ *
+ * Match CommonClient / Text Client: try plain `ws://` on the game port first,
+ * then `wss://`. Forcing wss-first for archipelago.gg caused Hub timeouts when
+ * TLS failed/hung while Text Client's ws:// path still worked.
+ *
+ * Always uses bare host:port (userinfo stripped). Explicit ws/wss in the
+ * input still prefers that scheme first.
  */
 function buildWsCandidates(server) {
-  const raw = String(server || "").trim();
-  if (!raw) return [];
-  if (/^wss?:\/\//i.test(raw)) {
-    const primary = raw;
-    const alt = primary.toLowerCase().startsWith("wss://")
-      ? `ws://${primary.slice(6)}`
-      : `wss://${primary.slice(5)}`;
-    return [primary, alt];
-  }
-  const hostPort = hostPortFromServer(raw);
+  const parsed = parseConnectServerString(server);
+  const hostPort = parsed.server;
   if (!hostPort) return [];
-  const lower = hostPort.toLowerCase();
-  if (lower.startsWith("archipelago.gg") || lower.includes(".archipelago.gg")) {
+  if (parsed.scheme === "wss") {
     return [`wss://${hostPort}`, `ws://${hostPort}`];
+  }
+  if (parsed.scheme === "ws") {
+    return [`ws://${hostPort}`, `wss://${hostPort}`];
   }
   return [`ws://${hostPort}`, `wss://${hostPort}`];
 }
@@ -210,6 +306,7 @@ function probeRoomInfo(server, opts = {}) {
 
 module.exports = {
   normalizeUriPassword,
+  parseConnectServerString,
   hostPortFromServer,
   buildWsCandidates,
   decideConnectAfterRoomInfo,

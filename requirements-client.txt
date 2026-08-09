@@ -1,0 +1,9 @@
+# Minimal packages for MetroidDreadClient + ap_core CommonClient / Utils
+# when Hub spawns system Python (SKIP_REQUIREMENTS_UPDATE skips full AP requirements).
+websockets>=13.0.1,<14
+colorama>=0.4.6
+PyYAML>=6.0.3
+pathspec>=0.12.1
+certifi>=2025.11.12
+platformdirs>=4.5.0
+jellyfish>=1.2.1

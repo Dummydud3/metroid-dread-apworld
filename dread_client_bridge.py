@@ -8,12 +8,80 @@ and Lua resource tables used over the Ryujinx TCP protocol (port 6969).
 from __future__ import annotations
 
 import json
+import os
+import zipfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 # Package directory (worlds/metroid_dread) — logic + client data live here.
+# When loaded from a .apworld zip, Path(__file__) is a virtual path; readers
+# below fall back to zip members / extracted runtime.
 ROOT = Path(__file__).resolve().parent
+
+
+def _find_containing_apworld(start: Optional[Path] = None) -> Optional[Path]:
+    here = Path(start) if start is not None else ROOT
+    for candidate in (here, *here.parents):
+        if candidate.suffix.lower() == ".apworld" and candidate.is_file():
+            return candidate
+    parts = list(here.parts)
+    for i, part in enumerate(parts):
+        if part.lower().endswith(".apworld"):
+            zipped = Path(*parts[: i + 1])
+            if zipped.is_file():
+                return zipped
+    return None
+
+
+def _read_world_text(filename: str) -> str:
+    """
+    Read a world-package text file from disk, extracted runtime, or .apworld zip.
+
+    Fixes NotADirectoryError when MetroidDreadClient is launched from zipimport
+    under ``custom_worlds/metroid_dread.apworld/.../Items.py``.
+    """
+    candidates: list[Path] = [ROOT / filename]
+    # Extracted Hub runtime (same layout Hub materializes for Electron).
+    raw = (os.environ.get("DREAD_HUB_WORLD_DIR") or "").strip()
+    if raw:
+        candidates.append(Path(raw) / filename)
+    try:
+        from Utils import user_path  # type: ignore
+
+        candidates.append(
+            Path(user_path("custom_worlds", "_metroid_dread_runtime")) / filename
+        )
+    except Exception:
+        pass
+
+    seen: set[Path] = set()
+    for path in candidates:
+        try:
+            key = path.resolve()
+        except OSError:
+            key = path
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            if path.is_file():
+                return path.read_text(encoding="utf-8")
+        except (NotADirectoryError, OSError):
+            continue
+
+    apworld = _find_containing_apworld()
+    if apworld is not None:
+        member = f"metroid_dread/{filename}".replace("\\", "/")
+        with zipfile.ZipFile(apworld, "r") as zf:
+            try:
+                return zf.read(member).decode("utf-8")
+            except KeyError as exc:
+                raise FileNotFoundError(
+                    f"{filename} not found in {apworld} ({member})"
+                ) from exc
+
+    raise FileNotFoundError(f"{filename} not found next to {ROOT}")
 
 # Lua handler class for RL.ReceivePickup(parent, ...) — must be a Lua identifier.
 ITEM_PARENT_BY_ID: Dict[str, str] = {
@@ -72,17 +140,14 @@ def pickup_index_to_ap_location() -> Dict[int, int]:
     """
     import re
 
-    export_path = ROOT / "rdvgame_export.py"
-    locations_path = ROOT / "Locations.py"
-
-    export_text = export_path.read_text(encoding="utf-8")
+    export_text = _read_world_text("rdvgame_export.py")
     start = export_text.index("AP_TO_RANDOVANIA_LOCATION_MAP = {")
     end = export_text.index("\n}", start) + 2
     ns: dict = {}
     exec(export_text[start:end], ns)  # noqa: S102 — trusted local mapping
     loc_map: Dict[str, tuple] = ns["AP_TO_RANDOVANIA_LOCATION_MAP"]
 
-    locations_text = locations_path.read_text(encoding="utf-8")
+    locations_text = _read_world_text("Locations.py")
     entries = re.findall(r'"([^"]+)": LocationData\((\d+),', locations_text)
 
     mapping: Dict[int, int] = {}
@@ -128,8 +193,7 @@ def ap_item_id_to_name() -> Dict[int, str]:
     """
     import re
 
-    items_path = ROOT / "Items.py"
-    text = items_path.read_text(encoding="utf-8")
+    text = _read_world_text("Items.py")
     mapping: Dict[int, str] = {}
     for name, offset in re.findall(r'"([^"]+)": ItemData\(base_id \+ (\d+)', text):
         mapping[84000 + int(offset)] = name
@@ -894,7 +958,7 @@ function RL.UpdateRDVClient(new_scenario)
         if new_scenario == true then
             RL.PendingPickup = nil
         end
-        -- Re-paint reachable bright after scenario load (VisitBoundsSafe is grid-local).
+        -- Re-paint reachable dim after scenario load (VisitBoundsSafe is grid-local).
         if RL.LastReachable and next(RL.LastReachable) ~= nil and RL.ApplyReachableMap then
             Game.AddSF(3.0, "RL.ReapplyLastReachable", "")
         end
@@ -1098,7 +1162,7 @@ RL.APConnected = true
 RL.Bootstrap = true
 """.strip()
 
-    # Reachable minimap: ApplyReachableMap → VisitBoundsSafe bright paint
+    # Reachable minimap: ApplyReachableMap → VisitBoundsSafe dim paint (flag=4)
     # (needs OdrMap binder + ap_reachable_map_cells.lua for area bounds).
     # Fillmaps remain optional supplement. NEVER call legacy OdrMap.VisitBounds
     # (0xe3b1b0+6; MapNativePaintEnabled stays false). Physical-OR: never revert
@@ -1123,10 +1187,10 @@ RL.LastReachable = RL.LastReachable or {{}}
 -- Legacy VisitBounds (0xe3b1b0+6) stays crash-guarded forever. Full-room paint uses
 -- VisitBoundsSafe instead; do NOT flip this on.
 if RL.MapNativePaintEnabled == nil then RL.MapNativePaintEnabled = false end
--- Prefer bright reachable AABB (flag=6). Dim (4) was A/B but invisible on FOW.
--- No-op on older binders without the API; covers stale dim-default binaries.
+-- Prefer dim/visible reachable AABB (flag=4). Bright (6) remains available for A/B.
+-- No-op on older binders without the API; forces dim even if binary default drifts.
 if OdrMap and OdrMap.SetVisitBoundsSafeFlag then
-    pcall(OdrMap.SetVisitBoundsSafeFlag, 6)
+    pcall(OdrMap.SetVisitBoundsSafeFlag, 4)
 end
 -- Area → fillmap actor(s) for SetMinimapRegionVisited (not collision_camera_*).
 {fillmap_embed}
@@ -1765,7 +1829,7 @@ function RL.NativeVisitWriterReady()
     return OdrMap.HasVisitWriter == true
 end
 function RL.NativeVisitBoundsSafeReady()
-    -- Full-room paint via VisitBoundsSafe (stackvt → 0xe3ad38 flag=6).
+    -- Full-room paint via VisitBoundsSafe (stackvt → 0xe3ad38 flag=4 dim default).
     -- Soft-fails are not latched; ready can flip true once mgr/grid is live.
     if OdrMap == nil or not OdrMap.VisitBoundsSafe then
         return false
@@ -1918,7 +1982,7 @@ function RL.ReapplyLastReachable()
     return "empty"
 end
 -- Physical-OR policy: do NOT hook/revert guicallbacks.OnMinimapCellVisited.
--- Native walk visits stay; AP OR-brightens via VisitBoundsSafe (+ fillmap supplement).
+-- Native walk visits stay; AP OR-reveals via VisitBoundsSafe dim (+ fillmap supplement).
 -- Bright = AP-reachable OR physically visited.
 RL.EnsureMapBounds()
 Game.AddSF(2.0, "RL.EnsureMapBounds", "")

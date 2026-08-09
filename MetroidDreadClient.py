@@ -526,7 +526,7 @@ class MetroidDreadClientCommandProcessor(ClientCommandProcessor):
         )
         self.output(
             f"Map bounds smoke: VisitBoundsSafe({area!r}) "
-            "(full camera AABB → stackvt → 0xe3ad38 flag=6; INGAME only)"
+            "(full camera AABB → stackvt → 0xe3ad38 flag=4 dim; INGAME only)"
         )
         asyncio.create_task(self._execute_map_smoke_bounds(lua))
 
@@ -808,7 +808,7 @@ class MetroidDreadContext(CommonContext):
         self._awaiting_patch_scouts: bool = False
         # Latest inventory quantities from PACKET_NEW_INVENTORY (game truth).
         self._game_inventory_amounts: List[int] = []
-        # Reachable minimap: AP logic areas → RL.ApplyReachableMap (bright VisitBoundsSafe)
+        # Reachable minimap: AP logic areas → RL.ApplyReachableMap (dim VisitBoundsSafe)
         self.reachable_minimap_enabled = True
         self._reachable_areas_sig: Optional[tuple] = None
         self._reachable_map_task: Optional[asyncio.Task] = None

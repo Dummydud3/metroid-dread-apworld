@@ -62,6 +62,43 @@ class FrozenApRootTests(unittest.TestCase):
         self.assertEqual(inst.resolve(), ROOT.resolve())
         self.assertNotEqual(imp.name.lower(), "ap_core")
 
+    def test_synthetic_world_namespace_has_spec_for_pkgutil(self) -> None:
+        """Patcher failure mode: pkgutil.get_data needs a real ModuleSpec."""
+        import pkgutil
+        import types
+
+        name = "worlds.metroid_dread"
+        saved = {
+            key: sys.modules.pop(key)
+            for key in list(sys.modules)
+            if key == name or key.startswith(name + ".")
+        }
+        try:
+            # Minimal parent package (ap_core stub style).
+            if "worlds" not in sys.modules:
+                parent = types.ModuleType("worlds")
+                parent.__path__ = []  # type: ignore[attr-defined]
+                sys.modules["worlds"] = parent
+
+            pkg = types.ModuleType(name)
+            pkg.__file__ = str((WORLD / "__init__.py").resolve())
+            pkg.__package__ = name
+            pkg.__path__ = [str(WORLD.resolve())]  # type: ignore[attr-defined]
+            sys.modules[name] = pkg
+            self.assertIsNone(getattr(pkg, "__spec__", None))
+
+            dp.ensure_runtime_world_namespace()
+            repaired = sys.modules[name]
+            self.assertIsNotNone(repaired.__spec__)
+            data = pkgutil.get_data(name, "logic_database/header.json")
+            self.assertIsNotNone(data)
+            self.assertGreater(len(data or b""), 100)
+        finally:
+            for key in list(sys.modules):
+                if key == name or key.startswith(name + "."):
+                    sys.modules.pop(key, None)
+            sys.modules.update(saved)
+
 
 def main() -> None:
     suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])

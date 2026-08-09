@@ -1,13 +1,3 @@
-"""
-Launch the Metroid Dread Client Hub (Electron) from Archipelago Launcher.
-
-Cross-platform:
-  - Ensures npm packages are installed when missing
-  - Detects / repairs the common incomplete Electron binary install
-    ("please delete node_modules/electron and try installing again")
-  - Falls back to the Python MetroidDreadClient when Hub cannot start
-    (no Node/npm, repeated Electron failure, missing Hub tree)
-"""
 
 from __future__ import annotations
 
@@ -39,7 +29,7 @@ CLIENT_SCRIPT_NAME = "MetroidDreadClient.py"
 RUNTIME_WORLD_DIRNAME = "_metroid_dread_runtime"
 APWORLD_STAMP_NAME = ".apworld_hub_source"
 # Bump when extract layout changes so stale runtime trees are refreshed.
-APWORLD_EXTRACT_LAYOUT = "world-pkg-v7"
+APWORLD_EXTRACT_LAYOUT = "world-pkg-v11"
 WORLD_ZIP_PREFIX = "metroid_dread/"
 HUB_ZIP_PREFIX = "metroid_dread/dread-client-app/"
 # Paths inside the apworld that must never be extracted (bloat / not usable from zip).
@@ -133,13 +123,6 @@ def world_package_dir() -> Path:
 
 
 def find_containing_apworld(start: Optional[Path] = None) -> Optional[Path]:
-    """
-    If this module is loaded from a .apworld zipimport path, return the zip file.
-
-    zipimport sets __file__ like:
-      .../custom_worlds/metroid_dread.apworld/metroid_dread/hub_launcher.py
-    even though only the .apworld file exists on disk.
-    """
     here = Path(start) if start is not None else Path(__file__).resolve()
     for candidate in (here, *here.parents):
         if candidate.suffix.lower() == ".apworld" and candidate.is_file():
@@ -918,6 +901,43 @@ def start_hub_process(
     return proc.returncode
 
 
+def ensure_system_client_python_deps(world_dir: Optional[Path] = None) -> str:
+    """
+    Install Hub client packages (websockets, etc.) into system Python.
+
+    Archipelago Launcher / Text Client use a bundled interpreter that already
+    has deps; Hub spawns system Python with SKIP_REQUIREMENTS_UPDATE=1, so those
+    packages must be installed separately. Raises RuntimeError with a clear
+    user-facing message on failure.
+    """
+    world = Path(world_dir) if world_dir else world_package_dir()
+    try:
+        from ensure_client_deps import ensure_client_deps_or_raise
+    except ImportError:
+        # When loaded from a .apworld before extract, import from materialized world.
+        import importlib.util
+
+        script = world / "ensure_client_deps.py"
+        if not script.is_file():
+            runtime = runtime_world_dir() / "ensure_client_deps.py"
+            script = runtime if runtime.is_file() else script
+        if not script.is_file():
+            raise RuntimeError(
+                "ensure_client_deps.py missing from the Metroid Dread world package.\n"
+                "Reinstall/update metroid_dread.apworld, then try again."
+            )
+        spec = importlib.util.spec_from_file_location("ensure_client_deps", script)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Cannot load {script}")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        ensure_client_deps_or_raise = mod.ensure_client_deps_or_raise
+
+    msg = ensure_client_deps_or_raise(world=world)
+    logger.info("%s", msg.splitlines()[0] if msg else "client deps ok")
+    return msg
+
+
 def launch_hub_with_repair(
     hub_dir: Path,
     *,
@@ -946,7 +966,41 @@ def launch_hub_with_repair(
     return start_hub_process(hub_dir, env=env, wait=wait)
 
 
-def _load_metroid_dread_client_module():
+def ensure_filesystem_world_dir() -> Path:
+    """
+    Return a real on-disk world package directory.
+
+    When the launcher is loaded from a ``.apworld`` zip, Path(__file__) looks like
+    ``…/metroid_dread.apworld/metroid_dread`` but is not a directory — reading
+    ``Items.py`` then raises NotADirectoryError. Extract to
+    ``custom_worlds/_metroid_dread_runtime`` first (same tree Hub uses).
+    """
+    world = world_package_dir()
+    if (world / CLIENT_SCRIPT_NAME).is_file() and (world / "Items.py").is_file():
+        return world
+
+    apworld = find_containing_apworld()
+    if apworld is None:
+        return world
+
+    dest = runtime_world_dir()
+    try:
+        materialize_hub_from_apworld(apworld, dest)
+    except Exception as exc:
+        logger.warning(
+            "Failed to extract world from %s for Python client fallback: %s",
+            apworld,
+            exc,
+        )
+        return world
+    if (dest / CLIENT_SCRIPT_NAME).is_file():
+        logger.info("Using extracted apworld runtime for Python client: %s", dest)
+        os.environ["DREAD_HUB_WORLD_DIR"] = str(dest.resolve())
+        return dest
+    return world
+
+
+def _load_metroid_dread_client_module(world: Optional[Path] = None):
     """
     Load MetroidDreadClient from a real file path, or via zipimport / package import
     when the world lives inside a .apworld.
@@ -954,12 +1008,23 @@ def _load_metroid_dread_client_module():
     import importlib
     import importlib.util
 
-    world = world_package_dir()
-    client_path = world / "MetroidDreadClient.py"
-    if client_path.is_file():
+    bases: list[Path] = []
+    if world is not None:
+        bases.append(world)
+    runtime = runtime_world_dir()
+    if runtime not in bases:
+        bases.append(runtime)
+    pkg_world = world_package_dir()
+    if pkg_world not in bases:
+        bases.append(pkg_world)
+
+    for base in bases:
+        client_path = base / CLIENT_SCRIPT_NAME
+        if not client_path.is_file():
+            continue
         spec = importlib.util.spec_from_file_location("metroid_dread_client_impl", client_path)
         if spec is None or spec.loader is None:
-            raise ImportError(f"Cannot load MetroidDreadClient from {client_path}")
+            continue
         mdc = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mdc)
         return mdc
@@ -981,20 +1046,27 @@ def _load_metroid_dread_client_module():
             exec(compile(source, mod.__file__, "exec"), mod.__dict__)
             return mod
 
-    raise ImportError(f"Cannot load MetroidDreadClient from {client_path}")
+    raise ImportError(
+        f"Cannot load MetroidDreadClient (tried {[str(b) for b in bases]})"
+    )
 
 
 def launch_python_client(args: Sequence[str]) -> None:
     """Fallback: run MetroidDreadClient in-process (used inside launcher subprocess)."""
     import asyncio
 
-    world = world_package_dir()
+    # Prefer a real extracted folder over zipimport fake paths (Items.py reads).
+    world = ensure_filesystem_world_dir()
     # Prefer env / CommonClient climb — runtime parents[1] is often a frozen install
     # and must not put world Options.py ahead of Archipelago Options.
     using_ap_core = False
     try:
         import dread_paths
 
+        # Point WORLD_DIR helpers at the extracted tree when we just materialized it.
+        if world != world_package_dir():
+            dread_paths.WORLD_DIR = world.resolve()
+            dread_paths.ROOT = dread_paths.WORLD_DIR
         dread_paths.ensure_import_paths()
         ap_root = dread_paths.AP_ROOT
         using_ap_core = ap_root.name.lower() == "ap_core"
@@ -1008,8 +1080,31 @@ def launch_python_client(args: Sequence[str]) -> None:
 
     # Source installs may fetch deps; ap_core ships for frozen Hub and must not
     # trigger ModuleUpdate against the full AP requirements (kivy/kivymd git, etc.).
+    # Still ensure the small client set (websockets, …) into system Python when
+    # Hub would have used it — and into this interpreter for in-process fallback.
     if using_ap_core:
         os.environ.setdefault("SKIP_REQUIREMENTS_UPDATE", "1")
+        try:
+            ensure_system_client_python_deps(world)
+        except RuntimeError as dep_exc:
+            # In-process fallback under Launcher's Python may already have deps;
+            # only hard-fail when this interpreter is also missing them.
+            try:
+                from ensure_client_deps import local_modules_present
+
+                local_missing = local_modules_present()
+            except Exception:
+                local_missing = ["websockets"]
+            if local_missing:
+                raise RuntimeError(
+                    f"{dep_exc}\n\n"
+                    f"Also missing in this Python: {', '.join(local_missing)}"
+                ) from dep_exc
+            logger.warning(
+                "System Python client deps unavailable (%s); continuing with "
+                "in-process packages.",
+                dep_exc,
+            )
     else:
         os.environ.pop("SKIP_REQUIREMENTS_UPDATE", None)
         try:
@@ -1017,9 +1112,13 @@ def launch_python_client(args: Sequence[str]) -> None:
             ModuleUpdate.update(yes=True)
         except Exception as exc:
             logger.warning("ModuleUpdate skipped/failed: %s", exc)
+        try:
+            ensure_system_client_python_deps(world)
+        except RuntimeError as dep_exc:
+            logger.warning("ensure_client_deps: %s", dep_exc)
 
-    # Prefer filesystem load; fall back to zipimport when inside a .apworld.
-    mdc = _load_metroid_dread_client_module()
+    # Prefer filesystem load from extracted runtime; zipimport only as last resort.
+    mdc = _load_metroid_dread_client_module(world)
     main = mdc.main
     get_base_parser = mdc.get_base_parser
 
@@ -1077,6 +1176,15 @@ def launch_hub_or_fallback(args: Sequence[str] = (), *, wait: bool = True) -> st
                 logger.warning(
                     "No filesystem CommonClient.py found for Hub — ensure "
                     "metroid_dread/ap_core is present, or set DREAD_HUB_AP_ROOT."
+                )
+            # Install websockets/etc. into system Python before Hub can spawn it.
+            # Soft-fail: Hub Connect re-checks and surfaces pythonMissingError / pip text.
+            try:
+                ensure_system_client_python_deps(world_dir)
+            except RuntimeError as dep_exc:
+                logger.error(
+                    "Could not ensure Hub client Python packages before launch:\n%s",
+                    dep_exc,
                 )
             logger.info("Launching Dread Client Hub from %s", hub)
             # After a successful start, do not fall back to Python just because
