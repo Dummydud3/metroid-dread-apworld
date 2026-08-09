@@ -17,7 +17,8 @@ This directory contains Lua scripts from Randovania's `open-dread-rando` project
 - `gen_map_icon_actors.py <extracted_romfs>` regenerates `dread_map_icon_actors.json`,
   the per-scenario list of vanilla minimap `items` actors. ODR only assigns an
   `ItemCustom{n}` to a pickup whose map actor is in that list, so pickups like
-  `ItemSphere_ChargeBeam` consume no number. Only needs re-running if Nintendo ships
+  `ItemSphere_ChargeBeam` is absent (icons use `powerup_*` via map_icon_actor).
+  Only needs re-running if Nintendo ships
   a map-data change or ODR changes `patch_minimap_icon`. Requires ODR's interpreter.
 - `rebuild_map_icon_keys.py [mod_root]` repairs an already-installed mod's
   `map_icon_keys.json` from its `patcher.json`, without re-patching. Use it when a

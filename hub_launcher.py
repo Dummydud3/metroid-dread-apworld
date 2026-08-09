@@ -1026,6 +1026,9 @@ def _load_metroid_dread_client_module(world: Optional[Path] = None):
         if spec is None or spec.loader is None:
             continue
         mdc = importlib.util.module_from_spec(spec)
+        # dataclasses + from __future__ import annotations looks up cls.__module__
+        # in sys.modules; omit this and @dataclass raises AttributeError on None.
+        sys.modules[spec.name] = mdc
         spec.loader.exec_module(mdc)
         return mdc
 
@@ -1043,6 +1046,7 @@ def _load_metroid_dread_client_module(world: Optional[Path] = None):
                 source = zf.read(member)
             mod = types.ModuleType("metroid_dread_client_impl")
             mod.__file__ = str(apworld / member)
+            sys.modules[mod.__name__] = mod
             exec(compile(source, mod.__file__, "exec"), mod.__dict__)
             return mod
 

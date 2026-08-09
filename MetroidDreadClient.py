@@ -362,6 +362,19 @@ class MetroidDreadClientCommandProcessor(ClientCommandProcessor):
         self.output(f"Map sprite smoke: {icon_id} -> ({r},{c}); watch the AP_MAP log lines.")
         asyncio.create_task(self.ctx.run_lua_code(lua, wait_response=False))
 
+    def _cmd_test_hint_ghavoran(self):
+        """Simulate an AP hint on one Ghavoran check (sprite + world-map global).
+
+        Picks the first uncollected Ghavoran location from map_icon_keys, reveals
+        its icon (AP logo / item sprite) and sets bIsGlobal so it appears on the
+        pause world map. Re-run after collect to confirm the global clears.
+        """
+        self.ctx._run_test_hint_ghavoran(self.output)
+
+    def _cmd_map_hint_test(self):
+        """Alias for /test_hint_ghavoran."""
+        self._cmd_test_hint_ghavoran()
+
     def _default_map_icon_smoke_actor(self) -> str:
         """Known Artaria pickup actor from dread_pickup_actors.json (Charge Tutorial ET)."""
         actors = bridge.load_pickup_actors()
@@ -841,6 +854,11 @@ class MetroidDreadContext(CommonContext):
         # labels also flip on every in-logic recompute.
         self._map_icon_sprites: Dict[str, Tuple[int, int]] = {}
         self._map_icon_sprites_sig: Optional[tuple] = None
+        # Hinted (not yet checked) → bIsGlobal so the icon shows on the world map.
+        self._map_icon_globals: Dict[str, bool] = {}
+        self._map_icon_globals_sig: Optional[tuple] = None
+        # Local test-hint overrides (location_id ints) for /test_hint_ghavoran.
+        self._test_hint_location_ids: set = set()
 
         self._lua_response_future: Optional[asyncio.Future] = None
         self.death_poll_task: Optional[asyncio.Task] = None
@@ -1558,6 +1576,8 @@ class MetroidDreadContext(CommonContext):
         slot = getattr(self, "slot", None)
         team = getattr(self, "team", None)
         if slot is None or team is None:
+            # Still honour local /test_hint_ghavoran overrides offline.
+            out |= set(getattr(self, "_test_hint_location_ids", None) or set())
             return out
         key = f"_read_hints_{team}_{slot}"
         stored = getattr(self, "stored_data", None) or {}
@@ -1581,6 +1601,7 @@ class MetroidDreadContext(CommonContext):
                 out.add(int(loc))
         except Exception as exc:
             logger.debug("hinted locations parse failed: %s", exc)
+        out |= set(getattr(self, "_test_hint_location_ids", None) or set())
         return out
 
     def _rebuild_map_icon_states(self) -> Tuple[Dict[str, str], Dict[str, str]]:
@@ -1591,7 +1612,9 @@ class MetroidDreadContext(CommonContext):
         texts are full display strings for SetLocalized fallback on old subsdk9.
 
         Also refreshes self._map_icon_sprites (base key → atlas cell) for the
-        revealed subset; push_map_icon_labels sends it after the labels.
+        revealed subset and self._map_icon_globals (hinted & uncollected →
+        bIsGlobal) for world-map visibility; push_map_icon_labels sends both
+        after the labels.
         """
         keys = self.ensure_map_icon_keys()
         if not keys:
@@ -1601,6 +1624,7 @@ class MetroidDreadContext(CommonContext):
             return {}, {}
         revealed_sprites = map_icon_labels.revealed_sprites_by_location_id(keys)
         sprites: Dict[str, Tuple[int, int]] = {}
+        globals_map: Dict[str, bool] = {}
         # Server state + local game-reported checks (collect before RoomUpdate).
         checked = set(getattr(self, "checked_locations", None) or set())
         checked |= set(getattr(self, "locations_checked", None) or set())
@@ -1628,10 +1652,16 @@ class MetroidDreadContext(CommonContext):
             texts[base] = map_icon_labels.format_map_label(name, is_in)
             if revealed:
                 sprite = revealed_sprites.get(loc_id)
-                if sprite is not None:
-                    sprites[base] = sprite
+                # Pre-logo sidecars baked ItemSphere for foreign/unknown; prefer
+                # the Archipelago atlas cell whenever nothing more specific fits.
+                if sprite is None or sprite == map_icon_labels.GENERIC_ITEM_SPRITE:
+                    sprite = map_icon_labels.AP_LOGO_SPRITE
+                sprites[base] = sprite
+            # World-map pulse only while hinted and not yet collected.
+            globals_map[base] = bool(loc_id in hinted and loc_id not in checked)
         self._map_icon_labels = variants
         self._map_icon_sprites = sprites
+        self._map_icon_globals = globals_map
         return variants, texts
 
     def _rebuild_map_icon_variants(self) -> Dict[str, str]:
@@ -1739,6 +1769,10 @@ class MetroidDreadContext(CommonContext):
             await self.push_map_icon_sprites(force=force)
         except Exception as exc:
             logger.warning("push_map_icon_sprites: %s", exc)
+        try:
+            await self.push_map_icon_globals(force=force)
+        except Exception as exc:
+            logger.warning("push_map_icon_globals: %s", exc)
 
     def _lua_buffer_size(self) -> int:
         """Remote-Lua EXEC packet limit; every chunk must fit inside one."""
@@ -1782,6 +1816,133 @@ class MetroidDreadContext(CommonContext):
             await self.run_lua_code(lua, wait_response=False)
             await asyncio.sleep(0.05)
         self._map_icon_sprites_sig = sig
+
+    async def push_map_icon_globals(self, force: bool = False) -> None:
+        """Push bIsGlobal for hinted icons via RL.ApplyMapIconGlobals."""
+        if not self.map_icon_labels_enabled or not self.game_connected:
+            return
+        if self._game_mode != "INGAME" or self._in_transition():
+            return
+        globals_map = dict(getattr(self, "_map_icon_globals", None) or {})
+        # Only ship icons that are true, plus any previously-true clears.
+        # Sending every false every connect is wasteful; merge prior true→false.
+        prev = getattr(self, "_map_icon_globals_prev_true", None) or set()
+        to_send: Dict[str, bool] = {}
+        true_now = {k for k, v in globals_map.items() if v}
+        for key in true_now:
+            to_send[key] = True
+        for key in prev - true_now:
+            to_send[key] = False
+        sig = map_icon_labels.globals_signature(to_send)
+        if not force and sig == self._map_icon_globals_sig:
+            return
+        if not to_send:
+            self._map_icon_globals_sig = sig
+            self._map_icon_globals_prev_true = true_now
+            return
+        buf = self._lua_buffer_size()
+        chunks = map_icon_labels.format_apply_map_icon_globals_chunks(
+            to_send, buffer_size=buf
+        )
+        logger.info(
+            "Map icon globals: updating %s icon(s) in %s chunk(s) (true=%s)",
+            len(to_send),
+            len(chunks),
+            len(true_now),
+        )
+        for lua in chunks:
+            if len(lua) > buf:
+                continue
+            await self.run_lua_code(lua, wait_response=False)
+            await asyncio.sleep(0.05)
+        self._map_icon_globals_sig = sig
+        self._map_icon_globals_prev_true = true_now
+
+    def _run_test_hint_ghavoran(self, output) -> None:
+        """Client-command body: simulate a Ghavoran AP hint for map testing."""
+        if not self.game_connected:
+            output("Error: Not connected to Metroid Dread")
+            return
+        keys = self.ensure_map_icon_keys()
+        if not keys:
+            output("Error: map_icon_keys not loaded — re-patch / reconnect")
+            return
+        entries = keys.get("entries") or []
+        checked = set(getattr(self, "checked_locations", None) or set())
+        checked |= set(getattr(self, "locations_checked", None) or set())
+        checked |= set(getattr(self, "game_reported_locations", None) or set())
+        chosen = None
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                loc_id = int(entry.get("location_id"))
+            except (TypeError, ValueError):
+                continue
+            # Prefer actor path / scenario hints when present; else name match.
+            scenario = str(entry.get("scenario") or "")
+            actor = str(entry.get("actor") or "")
+            region = str(entry.get("region") or "")
+            key = str(entry.get("key") or "")
+            is_ghavoran = (
+                scenario == "s050_forest"
+                or region.lower() == "ghavoran"
+                or "forest" in actor.lower()
+            )
+            if not is_ghavoran:
+                loc_name = ""
+                try:
+                    names = getattr(self, "location_names", None)
+                    if names is not None:
+                        loc_name = str(names.lookup_in_game(loc_id) or "")
+                except Exception:
+                    loc_name = ""
+                if not loc_name.lower().startswith("ghavoran"):
+                    continue
+            if loc_id in checked:
+                continue
+            chosen = (loc_id, key or str(entry.get("key") or ""), entry)
+            break
+        if chosen is None:
+            # Last resort: hard-known Ghavoran missile tank from vanilla ids.
+            for loc_id in (84103, 84104, 84105):
+                by_loc = keys.get("by_location_id") or {}
+                base = by_loc.get(str(loc_id))
+                if base and loc_id not in checked:
+                    chosen = (loc_id, str(base), {"location_id": loc_id, "key": base})
+                    break
+        if chosen is None:
+            output("Error: no uncollected Ghavoran map-icon location found")
+            return
+        loc_id, base_key, entry = chosen
+        self._test_hint_location_ids.add(loc_id)
+        # Force sprite to AP logo when the baked sprite is generic/unknown so
+        # the atlas cell is obviously the new logo during this smoke test.
+        sprite = map_icon_labels.normalize_sprite(entry.get("sprite"))
+        if sprite is None or sprite in (
+            map_icon_labels.GENERIC_ITEM_SPRITE,
+            map_icon_labels.UNKNOWN_SPRITE,
+        ):
+            # Mutate the in-memory sidecar so rebuild picks up the logo cell.
+            entry["sprite"] = list(map_icon_labels.AP_LOGO_SPRITE)
+        item_name = self._item_name_for_location(loc_id) or "Unknown Item"
+        icon_id = map_icon_labels.icon_id_from_base_key(base_key)
+        output(
+            f"Test hint Ghavoran: loc={loc_id} {icon_id} item={item_name!r} "
+            f"— revealing sprite + bIsGlobal. Open pause world map / Ghavoran."
+        )
+        self._map_icon_labels_sig = None
+        self._map_icon_sprites_sig = None
+        self._map_icon_globals_sig = None
+        self._schedule_map_icon_labels_push(force=True)
+        # Also poke ForceEntityIconVisible when we know the actor.
+        actor = str(entry.get("actor") or "").strip()
+        if actor and all(c.isalnum() or c in "_-" for c in actor):
+            lua = (
+                f'RL.SendApLog("AP_MAP: test_hint_ghavoran {icon_id} loc={loc_id}") '
+                f'pcall(function() Game.ForceEntityIconVisible("{actor}") end)'
+            )
+            asyncio.create_task(self.run_lua_code(lua, wait_response=False))
 
     def ui_status_payload(self) -> dict:
         # WebSocket alone is not "connected" for Hub — wait until slot auth completes.
@@ -1945,10 +2106,14 @@ class MetroidDreadContext(CommonContext):
             # Server checked_locations → collected map labels (after keys load / scout).
             self._schedule_map_icon_labels_push(force=True)
         elif cmd == "ReceivedItems":
-            # Game sync is driven by items_received + UPDATE_RECEIVED_PICKUPS
+            # Game sync is driven by items_received + ReceivedPickups index.
             self.emit_ui_status()
             # Own-world finds may clarify item names once locations_info / grants settle.
             self._schedule_map_icon_labels_push()
+            # Offline / mid-session arrivals must kick catch-up immediately (do not
+            # wait for the 1s main-loop tick or a later pickup ACK).
+            if self.game_connected:
+                asyncio.create_task(self.send_items_to_game(), name="ReceivedItemsGrant")
         elif cmd == "RoomInfo":
             if args.get("seed_name"):
                 self.seed_name = args.get("seed_name")
@@ -2765,6 +2930,10 @@ class MetroidDreadContext(CommonContext):
                     )
 
                 self.game_connected = True
+                # Connect/disconnect arm in_cooldown as "not ready"; that is not an
+                # in-flight grant. Clear so catch-up can run once ReceivedPickups +
+                # collected-indices sync arrive (transition hold still gates grants).
+                self.in_cooldown = False
                 self._death_poll_generation = 0
                 self._death_poll_death_count = 0
                 self._deathlink_handled_generation = 0
@@ -2794,6 +2963,7 @@ class MetroidDreadContext(CommonContext):
                     self._reachable_areas_sig = None
                     self._map_icon_labels_sig = None
                     self._map_icon_sprites_sig = None
+                    self._map_icon_globals_sig = None
                     self.ensure_map_icon_keys(force=True)
                     asyncio.create_task(self._push_map_after_connect_hold())
                 self.emit_ui("game_connected", **self.ui_status_payload())
@@ -3025,6 +3195,12 @@ class MetroidDreadContext(CommonContext):
             return
 
         to_send = [location_id for _, location_id in pending]
+        # Mark reported BEFORE await: LocationChecks yield the event loop and the
+        # server often replies with ReceivedItems in the same burst. If we wait to
+        # record game_reported_locations until after that await, send_items_to_game
+        # can re-grant the local pickup (progressive double-advance) before skip sees it.
+        for _, location_id in pending:
+            self.game_reported_locations.add(location_id)
         sent = await self.check_locations(to_send)
         for pickup_index, location_id in pending:
             if location_id not in sent:
@@ -3037,7 +3213,6 @@ class MetroidDreadContext(CommonContext):
                     )
                 continue
             self.locations_checked.add(location_id)
-            self.game_reported_locations.add(location_id)
             name = self._location_display_name(location_id)
             logger.info(
                 "Checked location: %s (id=%s, pickup index %s)",
@@ -3070,13 +3245,11 @@ class MetroidDreadContext(CommonContext):
             return
 
         self.received_pickups = count
-        # Ready for the next grant only when fully in-world and not mid-transition.
-        if (
-            self._game_mode == "INGAME"
-            and self.current_scenario not in (None, "MAINMENU")
-            and not self._in_transition()
-        ):
-            self.in_cooldown = False
+        # Always release grant-ACK cooldown here. Transition / MAINMENU gating is
+        # enforced by _ready_for_item_grants(); refusing to clear during settle
+        # hold deadlocks offline catch-up when the first sync ACK arrives mid-hold
+        # and no further ReceivedPickups packet is sent until the next room load.
+        self.in_cooldown = False
         logger.debug("Received pickups from game: %s", count)
         await self.send_items_to_game()
 
@@ -3219,54 +3392,22 @@ class MetroidDreadContext(CommonContext):
         return len(fallback_slots) <= 1
 
     def _should_skip_local_inworld_grant(self, item: NetworkItem) -> bool:
-        """True when this is a solo room and direct-patch already applied this pickup in-game."""
+        """True when direct-patch already applied this pickup in-game (solo or reported local)."""
         return bridge.should_skip_local_inworld_grant(
             item.player,
             item.location,
             self.slot,
             self._is_solo_world(),
+            self.game_reported_locations,
+            self.locations_checked,
         )
 
     def _inventory_already_has_unique_resources(self, resources) -> bool:
-        """True when stage-0 unique (non-tank) resources are already owned in-game."""
-        amounts = self._game_inventory_amounts
-        if not amounts or not resources:
-            return False
-        try:
-            stage0 = resources[0]
-        except Exception:
-            return False
-        if not isinstance(stage0, list) or not stage0:
-            return False
-        ids = bridge.inventory_item_ids()
-        id_to_idx = {iid: i for i, iid in enumerate(ids)}
-        stackable = {
-            "ITEM_WEAPON_MISSILE_MAX",
-            "ITEM_WEAPON_POWER_BOMB_MAX",
-            "ITEM_MAX_LIFE",
-            "ITEM_LIFE_SHARDS",
-            "ITEM_NONE",
-        }
-        checked = 0
-        for res in stage0:
-            if not isinstance(res, dict):
-                return False
-            iid = str(res.get("item_id") or "")
-            try:
-                qty = int(res.get("quantity") or 0)
-            except Exception:
-                qty = 0
-            if not iid or qty <= 0:
-                continue
-            if iid in stackable:
-                return False
-            idx = id_to_idx.get(iid)
-            if idx is None or idx >= len(amounts):
-                return False
-            if int(amounts[idx] or 0) < qty:
-                return False
-            checked += 1
-        return checked > 0
+        """True when granting these resources would be a Lua no-op (reconnect dedup)."""
+        return bridge.inventory_grant_would_be_noop(
+            self._game_inventory_amounts,
+            resources,
+        )
 
     async def _send_item_to_game(self, item: NetworkItem):
         item_name = self._resolve_item_name(item.item)

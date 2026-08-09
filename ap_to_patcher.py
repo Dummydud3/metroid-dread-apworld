@@ -490,25 +490,33 @@ def create_pickup_entry(
         "actor": actor_data["actor"]
     }
 
-    # Randovania often includes original_actor on map_icon for actor pickups
+    # Minimap icon actor may differ from the world pickup actor. The 12 major-item
+    # spheres (ItemSphere_ChargeBeam, IT_VARIA_GEN_001, …) live under powerup_*
+    # names in the scenario .bmmap `items` category — same map_icon_actor extras
+    # Randovania uses. Without this, ODR never replaces the vanilla major icons
+    # (world-map visible + full-zoom pulse).
+    map_actor_name = actor_data.get("map_icon_actor") or actor_data["actor"]
     original_actor = {
         "scenario": actor_data["scenario"],
-        "actor": actor_data["actor"],
+        "actor": map_actor_name,
     }
 
     resources, caption, item_data = _pickup_resources_and_caption(
         item_name, is_foreign, player_name, dna_artifact_index=dna_artifact_index
     )
 
-    # Phase 1 spoiler-hide: all actor pickups use ODR unknown (? sprite) + "Unknown Item".
-    # ODR MapIconEditor assigns a unique ItemCustom{n} icon id per custom_icon entry
-    # (BTXT key MAP_ICON_ItemCustom{n}) in pickups-array order — Phase 2 emits
-    # map_icon_keys.json from that same order for runtime OdrText overrides.
-    # Do not use shared icon_id here or labels cannot be set per location.
+    # Spoiler-hide: unique ItemCustom{n} per location, ? sprite, "Unknown Item".
+    # Use coords + is_global/full_zoom_scale instead of base_icon="unknown":
+    # MapIconEditor.copy-from-base keeps unknown's True flags (world map + pulse).
+    # Tanks use False/False; majors use True/True — we want tank-like AP unknowns.
+    # ODR MapIconEditor numbers custom_icon entries in pickups-array order when
+    # original_actor is in that scenario's vanilla items list (Phase 2 sidecar).
     map_icon = {
         "custom_icon": {
             "label": "Unknown Item",
-            "base_icon": "unknown",
+            "coords": {"row": 7, "col": 15},  # ODR "unknown" atlas cell
+            "is_global": False,
+            "full_zoom_scale": False,
         },
         "original_actor": original_actor,
     }
@@ -1361,7 +1369,7 @@ def create_patcher_json(
     skipped_dupes = 0
     # pickup_index → reveal name for MAP_ICON_ItemCustom{n}_R / _R_IL text_patches.
     # Keyed by pickup_index, never by a local counter: only the sidecar knows which
-    # pickups ODR actually numbers (major-item spheres get no custom icon).
+    # pickups ODR actually numbers (via original_actor ∈ vanilla bmmap items).
     map_icon_item_by_pickup: dict[int, str] = {}
     # pickup_index → (row, col) the icon reveals to on collect / AP hint.
     map_icon_sprite_by_pickup: dict[int, tuple[int, int]] = {}

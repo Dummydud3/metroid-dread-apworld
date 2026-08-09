@@ -117,7 +117,8 @@
       "x": -8740.0,
       "y": -9390.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_chargebeam"
   },
   "5": {
     "scenario": "s010_cave",
@@ -201,7 +202,8 @@
       "x": -10440.0,
       "y": 10410.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_variasuit"
   },
   "25": {
     "scenario": "s010_cave",
@@ -213,7 +215,8 @@
       "x": 9540.0,
       "y": 5710.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_grapplebeam"
   },
   "6": {
     "scenario": "s010_cave",
@@ -357,7 +360,8 @@
       "x": -20960.0,
       "y": -2990.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_screwattack"
   },
   "28": {
     "scenario": "s010_cave",
@@ -597,7 +601,8 @@
       "x": 3240.0,
       "y": -10590.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_gravitysuit"
   },
   "85": {
     "scenario": "s040_aqua",
@@ -789,7 +794,8 @@
       "x": -11840.0,
       "y": -5690.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_diffusionbeam"
   },
   "51": {
     "scenario": "s020_magma",
@@ -921,7 +927,8 @@
       "x": 5540.0,
       "y": 3010.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_widebeam"
   },
   "64": {
     "scenario": "s030_baselab",
@@ -1029,7 +1036,8 @@
       "x": -4460.0,
       "y": 7110.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_bomb"
   },
   "62": {
     "scenario": "s030_baselab",
@@ -1173,7 +1181,8 @@
       "x": 4940.0,
       "y": -1190.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_plasmabeam"
   },
   "117": {
     "scenario": "s060_quarantine",
@@ -1281,7 +1290,8 @@
       "x": -14040.0,
       "y": 3410.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_spacejump"
   },
   "129": {
     "scenario": "s070_basesanc",
@@ -1449,7 +1459,8 @@
       "x": -4540.0,
       "y": -5590.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_supermissile"
   },
   "96": {
     "scenario": "s050_forest",
@@ -1569,7 +1580,8 @@
       "x": 2460.0,
       "y": 1110.0,
       "z": 0.0
-    }
+    },
+    "map_icon_actor": "powerup_doublejump"
   },
   "110": {
     "scenario": "s050_forest",

@@ -18,7 +18,8 @@ Archipelago Metroid Dread — Direct Patcher (bypasses Randovania Export UI)
    minimap data into the mod
 5. finalize_mod() brands credits.txt (Metroid Bread + Archipelago Implementation /
    Dummydude before Major Item Locations), strips leftover HK autosave bootstrap,
-   installs ApWarp hotkeys, then ships reachable-map data into RomFS
+   installs ApWarp hotkeys, hardcodes ODR death-counter DNA-slot HUD coords
+   (Ryujinx-safe), then ships reachable-map data into RomFS
 6. Save-file dim reveal is OFF by default (reveal_minimap_save: false).
    Bright paint uses VisitBoundsSafe in-game; the offline tool remains under tools/.
 7. map_icon_keys.json maps pickup_index / location_id / actor → MAP_ICON_ItemCustom{n}
@@ -77,6 +78,7 @@ import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -230,11 +232,18 @@ def install_custom_exlaunch(exefs: Path, deploy: Optional[Path]) -> None:
     open-dread-rando always writes its stock subsdk9; without this step the
     custom VisitBounds / OdrMap binders are lost. Missing deploy is non-fatal
     (stock remote lua still works).
+
+    Uses shutil.copy2 so the destination Explorer/mtime matches the *source*
+    binary's build time (not "now"). A week-old date after a successful patch
+    usually means the bundled/custom source itself is that old — check the
+    [OK] log line (source path + size), not the file date alone.
+    Stock open-dread-rando subsdk9 is ~191054 bytes; custom OdrMap is larger.
     """
     if deploy is None:
         log(
             "[WARN] custom OdrMap exlaunch deploy not found — keeping stock ODR "
-            "subsdk9 (set custom_exlaunch_deploy in dread_direct_patch_config.json)"
+            "subsdk9 (~191054 bytes). Hub/apworld needs worlds/.../exlaunch/deploy/"
+            "subsdk9, or set custom_exlaunch_deploy in dread_direct_patch_config.json"
         )
         return
 
@@ -245,8 +254,19 @@ def install_custom_exlaunch(exefs: Path, deploy: Optional[Path]) -> None:
 
     exefs.mkdir(parents=True, exist_ok=True)
     dst_sub = exefs / "subsdk9"
+    src_stat = src_sub.stat()
+    src_mtime = datetime.fromtimestamp(src_stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
     shutil.copy2(src_sub, dst_sub)
-    log(f"[OK] installed custom OdrMap subsdk9 ({dst_sub.stat().st_size} bytes)")
+    size = dst_sub.stat().st_size
+    log(
+        f"[OK] installed custom OdrMap subsdk9 ({size} bytes) from {src_sub} "
+        f"(source mtime {src_mtime}; Explorer date follows source via copy2)"
+    )
+    if size <= 200_000:
+        log(
+            "[WARN] installed subsdk9 looks stock-sized "
+            f"({size} bytes; custom OdrMap is typically >210KB) — map binders may be missing"
+        )
 
     src_npdm = deploy / "main.npdm"
     if src_npdm.is_file():
@@ -598,6 +618,45 @@ def install_reachable_map_script(romfs: Path, src_lua: Path) -> None:
         log(f"[OK] removed oversized debug JSON {stale_json.name}")
 
 
+def install_ap_map_icon_atlas(romfs: Path) -> None:
+    """Overwrite ODR's minimap icons.bctex with the AP-logo-stamped atlas.
+
+    ODR already replaces textures/system/minimap/icons/icons.bctex via
+    add_custom_files; we drop our stamped copy on the same loose-romfs path
+    (and replacements.json entry) so foreign / unknown reveals show the
+    Archipelago cluster instead of the generic ItemSphere.
+    """
+    src = ROOT / "assets" / "icons.bctex"
+    if not src.is_file():
+        log(
+            f"[WARN] missing {src} — run dread_scripts/build_ap_map_icon_atlas.py "
+            "(foreign map icons stay on the ItemSphere cell)"
+        )
+        return
+    rel = Path("textures") / "system" / "minimap" / "icons" / "icons.bctex"
+    dst = romfs / rel
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    log(f"[OK] AP map-icon atlas -> {rel.as_posix()} ({src.stat().st_size} bytes)")
+
+    repl_path = romfs / "replacements.json"
+    asset = rel.as_posix()
+    if repl_path.is_file():
+        try:
+            with open(repl_path, encoding="utf-8") as f:
+                repl = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            repl = {"replacements": []}
+        items = repl.setdefault("replacements", [])
+        if asset not in items:
+            items.append(asset)
+            with open(repl_path, "w", encoding="utf-8") as f:
+                json.dump(repl, f, indent=2)
+            log(f"[OK] replacements.json += {asset}")
+    else:
+        log("[WARN] replacements.json missing — loose icons.bctex should still load")
+
+
 HK_AUTOSAVE_MARKER = "-- AP_HK_AUTOSAVE"
 AP_WARP_MARKER = "-- AP_WARP"
 AP_WARP_BOOTSTRAP = """
@@ -628,6 +687,28 @@ _AP_WARP_BLOCK_RE = re.compile(
     r"end\n?",
     re.MULTILINE,
 )
+
+# ODR ≥2.19 death-only HUD: move DeathCounter into the DNA row of ExtraInfoPanel.
+# Stock ODR reads DNA_Icon/DNA_Label via _Y_GetterFunction / _CenterY_GetterFunction;
+# on Ryujinx those getters often return junk/0 and park the label off-slot (below the
+# short background). Hardcode the coords from ODR's randohudcomposition.bmscp.
+_ODR_DEATH_COUNTER_REPOSITION_RE = re.compile(
+    r"(?P<indent>[ \t]*)if not showDnaInHud then\n"
+    r"[ \t]*-- Need to move the death counter icon and label up to where the DNA would normally be shown\n"
+    r"[ \t]*local dnaIconY = Scenario\.ExtraInfoPanel:FindChild\(\"DNA_Icon\"\):_Y_GetterFunction\(\)\n"
+    r"[ \t]*local dnaLabelY = Scenario\.ExtraInfoPanel:FindChild\(\"DNA_Label\"\):_CenterY_GetterFunction\(\)\n"
+    r"\n?"
+    r"[ \t]*GUI\.SetProperties\(Scenario\.ExtraInfoPanel:FindChild\(\"DeathCounter_Icon\"\), \{ Y = dnaIconY \}\)\n"
+    r"[ \t]*GUI\.SetProperties\(Scenario\.ExtraInfoPanel:FindChild\(\"DeathCounter_Label\"\), \{ CenterY = dnaLabelY \}\)\n"
+    r"(?P=indent)end",
+    re.MULTILINE,
+)
+
+# DNA_Icon.Y / DNA_Label.CenterY from open_dread_rando files/romfs/gui/scripts/randohudcomposition.bmscp
+_ODR_DNA_ICON_Y = 0.014536125585436821
+_ODR_DNA_LABEL_CENTERY = 0.014536126516759396
+
+_AP_DEATH_COUNTER_HUD_MARKER = "-- AP: hardcode ODR DNA-slot coords"
 
 
 def _read_scenario_lc(romfs: Path) -> tuple[bytes, object]:
@@ -730,6 +811,59 @@ def strip_hk_autosave_from_scenario(romfs: Path) -> None:
     data = stripped.encode("utf-8")
     _write_scenario_lc(romfs, data, pkg)
     log(f"[OK] stripped HK autosave bootstrap from scenario.lc ({len(data)} bytes)")
+
+
+def _ap_death_counter_reposition_block(indent: str) -> str:
+    """Lua that parks death-counter icon/label on ODR's DNA row (death-only HUD)."""
+    return (
+        f"{indent}if not showDnaInHud then\n"
+        f"{indent}    {_AP_DEATH_COUNTER_HUD_MARKER} (bmscp). Avoid _Y_GetterFunction on Ryujinx.\n"
+        f"{indent}    GUI.SetProperties(Scenario.ExtraInfoPanel:FindChild(\"DeathCounter_Icon\"), "
+        f"{{ Y = {_ODR_DNA_ICON_Y} }})\n"
+        f"{indent}    GUI.SetProperties(Scenario.ExtraInfoPanel:FindChild(\"DeathCounter_Label\"), "
+        f"{{ CenterY = {_ODR_DNA_LABEL_CENTERY} }})\n"
+        f"{indent}end"
+    )
+
+
+def fix_death_counter_hud_position(romfs: Path) -> None:
+    """
+    Make ODR ≥2.19 death-only HUD match DNA-slot placement without runtime getters.
+
+    ExtraInfoPanel sits at (X=0.025, Y≈0.2019) on iconshudcomposition — same band as
+    legacy GUILib death_counter (Y=0.1975). DeathCounter_* defaults are the dual-row
+    lower slot; when DNA HUD is off, ODR moves them to DNA_Icon/DNA_Label coords.
+    """
+    try:
+        existing, pkg = _read_scenario_lc(romfs)
+    except PatchError as exc:
+        log(f"[WARN] death-counter HUD fix skipped: {exc}")
+        return
+
+    text = existing.decode("utf-8", errors="replace")
+    if _AP_DEATH_COUNTER_HUD_MARKER in text:
+        log("[OK] death-counter HUD already uses hardcoded ODR DNA-slot coords")
+        return
+
+    match = _ODR_DEATH_COUNTER_REPOSITION_RE.search(text)
+    if not match:
+        # ODR ≤2.18 builds the counter via GUILib at X=0.025,Y=0.1975 — nothing to fix.
+        if "DeathCounter_Icon" in text or "_Y_GetterFunction" in text:
+            log(
+                "[WARN] death-counter HUD getter block not found — left scenario.lc unchanged"
+            )
+        else:
+            log("[OK] no ODR≥2.19 death-counter reposition block (legacy GUILib layout)")
+        return
+
+    replacement = _ap_death_counter_reposition_block(match.group("indent"))
+    new_text = text[: match.start()] + replacement + text[match.end() :]
+    data = new_text.encode("utf-8")
+    _write_scenario_lc(romfs, data, pkg)
+    log(
+        "[OK] death-counter HUD: hardcoded ODR DNA-slot coords "
+        f"(Y={_ODR_DNA_ICON_Y}, CenterY={_ODR_DNA_LABEL_CENTERY})"
+    )
 
 
 def install_ap_warp_scripts(romfs: Path) -> None:
@@ -943,11 +1077,18 @@ def finalize_mod(
     # Location-independent warp hotkeys (last checkpoint / last save).
     install_ap_warp_scripts(romfs)
 
+    # Death-only ExtraInfoPanel: park counter on ODR DNA-slot coords (no Ryujinx getters).
+    fix_death_counter_hud_position(romfs)
+
     # Reachable minimap offline data (bounds for OdrMap.VisitBounds).
     # Must be TOC + system.pkg (.lc), not loose-only — see install_reachable_map_script.
     # Order: after ODR romfs write, before custom exefs overlay.
     map_src_lua = ROOT / "data" / "reachable_map_cells.lua"
     install_reachable_map_script(romfs, map_src_lua)
+
+    # Archipelago logo cell in the minimap atlas (ODR ships progressive/DNA cells;
+    # we overwrite that same romfs path with our stamped icons.bctex).
+    install_ap_map_icon_atlas(romfs)
 
     # Optional debug JSON (not used by Game.DoFile). Skip huge full-cells exports.
     map_src_json = map_src_lua.with_suffix(".json")
@@ -982,7 +1123,7 @@ def finalize_mod(
     install_custom_exlaunch(exefs, custom_exlaunch_deploy)
     log(
         "[OK] finalize_mod complete: ApWarp + TOC/pkg map script + "
-        "custom OdrMap exefs (enable_remote_lua kept on)"
+        "AP map-icon atlas + custom OdrMap exefs (enable_remote_lua kept on)"
     )
 
 

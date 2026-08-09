@@ -1,6 +1,6 @@
 {
  "version": 1,
- "comment": "Vanilla Metroid Dread minimap categories. `items` drives ODR's ItemCustom{n} numbering: a pickup whose map actor is absent from its scenario's `items` list gets no custom icon.",
+    "comment": "Vanilla Metroid Dread minimap categories. `items` drives ODR's ItemCustom{n} numbering via map_icon.original_actor (else pickup_actor). Major spheres use powerup_* names here; world actors are ItemSphere_*/IT_*. `ability_labels` are popped by ODR when that map actor is patched.",
  "items": {
   "s010_cave": [
    "Item_EnergyTank001",

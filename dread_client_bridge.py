@@ -974,6 +974,10 @@ function RL.UpdateRDVClient(new_scenario)
             and next(RL.LastMapIconSprites) ~= nil then
             Game.AddSF(3.0, "RL.ReapplyLastMapIconSprites", "")
         end
+        if RL.ReapplyLastMapIconGlobals and RL.LastMapIconGlobals
+            and next(RL.LastMapIconGlobals) ~= nil then
+            Game.AddSF(3.0, "RL.ReapplyLastMapIconGlobals", "")
+        end
         RL.CheckDeath()
         local playerSection =  Game.GetPlayerBlackboardSectionName()
         local currentSaveRandoIdentifier = Blackboard.GetProp(playerSection, "THIS_RANDO_IDENTIFIER")
@@ -1069,6 +1073,11 @@ function RL.MarkLocalDeath(reason)
         and next(RL.LastMapIconSprites) ~= nil then
         Game.AddSF(1.0, "RL.ReapplyLastMapIconSprites", "")
         Game.AddSF(3.0, "RL.ReapplyLastMapIconSprites", "")
+    end
+    if RL.ReapplyLastMapIconGlobals and RL.LastMapIconGlobals
+        and next(RL.LastMapIconGlobals) ~= nil then
+        Game.AddSF(1.0, "RL.ReapplyLastMapIconGlobals", "")
+        Game.AddSF(3.0, "RL.ReapplyLastMapIconGlobals", "")
     end
     return true
 end
@@ -1661,6 +1670,78 @@ function RL.MapIconSpriteStatus()
     end
     return version .. "|true|" .. status
 end
+-- Phase 4 bonus: flip SMapIconDef.bIsGlobal so hinted icons appear on the
+-- pause / world-map region selector. Cleared again when the icon is no longer
+-- in the hinted set (collect still keeps the sprite; global is hint-driven).
+RL.LastMapIconGlobals = RL.LastMapIconGlobals or {{}}
+RL.MapIconGlobalsRetryLeft = RL.MapIconGlobalsRetryLeft or 0
+RL.MapIconGlobalsLastSig = RL.MapIconGlobalsLastSig or ""
+function RL.ApplyMapIconGlobals(globals_map)
+    if type(globals_map) ~= "table" then
+        return "bad-arg"
+    end
+    for icon, flag in pairs(globals_map) do
+        RL.LastMapIconGlobals[icon] = flag and true or false
+    end
+    if not OdrMap or not OdrMap.SetIconGlobal then
+        RL.SendApLog("AP_MAP: globals FAIL no-SetIconGlobal (old subsdk9)")
+        return "no-api"
+    end
+    local ok_n = 0
+    local fail_n = 0
+    local sample = nil
+    local retryable = false
+    for icon, flag in pairs(globals_map) do
+        local pack = {{pcall(function()
+            return OdrMap.SetIconGlobal(tostring(icon), flag and true or false)
+        end)}}
+        if pack[1] and pack[2] then
+            ok_n = ok_n + 1
+        else
+            fail_n = fail_n + 1
+            local reason = pack[1] and tostring(pack[3] or "soft-fail") or ("err=" .. tostring(pack[2]))
+            if reason == "mgr-nil" or reason == "no-def" or reason == "bad-count" or reason == "bad-arrays" then
+                retryable = true
+            end
+            if sample == nil then sample = tostring(icon) .. " reason=" .. reason end
+        end
+    end
+    local prior_tries = RL.MapIconGlobalsRetryLeft or 0
+    local sig = tostring(ok_n) .. "|" .. tostring(fail_n)
+    if sig ~= RL.MapIconGlobalsLastSig or fail_n == 0 or (prior_tries % 5 == 0) then
+        RL.MapIconGlobalsLastSig = sig
+        RL.SendApLog(
+            "AP_MAP: globals apply ok n=" .. tostring(ok_n)
+            .. " fail=" .. tostring(fail_n)
+            .. " sample=" .. tostring(sample or "-")
+        )
+    end
+    if ok_n > 0 then
+        pcall(function()
+            if minimap and minimap.SetProfileDataDirty then
+                minimap.SetProfileDataDirty()
+            end
+        end)
+    end
+    if fail_n > 0 and retryable then
+        RL.MapIconGlobalsRetryLeft = prior_tries + 1
+        local delay = 2.0
+        if RL.MapIconGlobalsRetryLeft > 5 then delay = 4.0 end
+        if RL.MapIconGlobalsRetryLeft > 15 then delay = 8.0 end
+        if Game.AddSF then
+            Game.AddSF(delay, "RL.ReapplyLastMapIconGlobals", "")
+        end
+    elseif fail_n == 0 then
+        RL.MapIconGlobalsRetryLeft = 0
+    end
+    return tostring(ok_n)
+end
+function RL.ReapplyLastMapIconGlobals()
+    if RL.LastMapIconGlobals and next(RL.LastMapIconGlobals) ~= nil then
+        return RL.ApplyMapIconGlobals(RL.LastMapIconGlobals)
+    end
+    return "empty"
+end
 -- Map-label smoke: OdrText.SetLocalized on one MAP_ICON_ItemCustom* key.
 -- Does NOT touch VisitBoundsSafe / MapNativePaintEnabled / bright paint.
 -- Default key: first existing MAP_ICON_ItemCustomN, else MAP_ICON_ItemCustom0.
@@ -2054,6 +2135,8 @@ def should_skip_local_inworld_grant(
     item_location: int,
     slot: Optional[int],
     is_solo_world: bool,
+    game_reported_locations: Optional[Set[int]] = None,
+    locations_checked: Optional[Set[int]] = None,
 ) -> bool:
     """
     Direct-patch local Dread items already apply resources on pickup
@@ -2065,34 +2148,115 @@ def should_skip_local_inworld_grant(
     player can ever check is their own, so any item the server echoes back
     for a location we found (item_player == slot) was, by construction,
     already granted in-game the instant it was collected — there is no
-    "foreign" pickup in a solo room. Skip unconditionally in that case
-    rather than gating on a locally-tracked "already collected in-game" set:
-    that bookkeeping is fed by a polling loop reading the in-game
-    collected-bits, and relying on it previously raced/desynced (e.g. across
-    reconnects, when a location was already known-checked from a prior
-    session but the tracking set had just been reset), letting the server
-    re-grant — and silently double — progressive items sometime after the
-    fact. Solo has no such ambiguity, so this check no longer needs it.
+    "foreign" pickup in a solo room. Skip unconditionally in that case.
 
-    Multiworld (more than one real player): allow every pickup sent by the
-    server, matching normal Archipelago multiworld client behavior — the
-    local player's own finds are still handled the same way in-game, but
-    items can also legitimately arrive for locations in other players'
-    worlds (never physically patched into this player's ROM), so those must
-    always be granted over the network.
+    Multiworld: skip when this client saw the location collected in-game
+    (``game_reported_locations``) OR the AP server already has it checked
+    (``locations_checked``). The latter covers reconnect catch-up after
+    ``game_reported_locations`` is cleared on Dread reconnect — without it,
+    stackable local tanks can be re-granted while waiting for bitfield sync.
+    Items from other players' worlds use ``item_player != slot`` and must
+    always grant.
 
     Start inventory / non-location items (location <= 0) and items found by
     other players always grant, in both solo and multiworld rooms.
     """
-    if not is_solo_world:
-        return False
     if slot is None:
         return False
     if item_player != slot:
         return False
     if item_location <= 0:
         return False
-    return True
+    if is_solo_world:
+        return True
+    if game_reported_locations and item_location in game_reported_locations:
+        return True
+    if locations_checked and item_location in locations_checked:
+        return True
+    return False
+
+
+def inventory_grant_would_be_noop(
+    amounts: Optional[List[int]],
+    resources: Optional[Union[List[dict], ResourceProgression]],
+    inventory_ids: Optional[List[str]] = None,
+) -> bool:
+    """
+    True when Lua ``HandlePickupResources`` would grant nothing for ``resources``.
+
+    Multi-stage progressives must inspect every stage (not only stage 0): owning
+    Wide/Varia/Charge must not block the next Progressive Beam/Suit/Charge tier.
+    Single-stage stackables (tanks, Flash Shift chains, Speed Booster charges)
+    always grant in Lua and must never be treated as already-owned duplicates.
+    """
+    if not amounts or not resources:
+        return False
+    stages = _normalize_progression(resources)
+    if not stages:
+        return False
+
+    ids = inventory_ids if inventory_ids is not None else inventory_item_ids()
+    id_to_idx = {iid: i for i, iid in enumerate(ids)}
+    stackable = {
+        "ITEM_WEAPON_MISSILE_MAX",
+        "ITEM_WEAPON_POWER_BOMB_MAX",
+        "ITEM_MAX_LIFE",
+        "ITEM_LIFE_SHARDS",
+        "ITEM_NONE",
+        # Stacking upgrades (Lua alwaysGrant for single-stage).
+        "ITEM_UPGRADE_FLASH_SHIFT_CHAIN",
+        "ITEM_UPGRADE_SPEED_BOOST_CHARGE",
+    }
+
+    # Single-stage: skip only when every unique resource is already owned.
+    # Any stackable in the stage means Lua would still apply quantity → grant.
+    if len(stages) == 1:
+        checked = 0
+        for res in stages[0]:
+            if not isinstance(res, dict):
+                return False
+            iid = str(res.get("item_id") or "")
+            try:
+                qty = int(res.get("quantity") or 0)
+            except Exception:
+                qty = 0
+            if not iid or qty <= 0:
+                continue
+            if iid in stackable:
+                return False
+            idx = id_to_idx.get(iid)
+            if idx is None or idx >= len(amounts):
+                return False
+            if int(amounts[idx] or 0) < qty:
+                return False
+            checked += 1
+        return checked > 0
+
+    # Multi-stage: Lua grants the first stage whose gate item is missing.
+    # Only a full clear of every stage is a true no-op / reconnect duplicate.
+    saw_stage = False
+    for stage in stages:
+        if not stage:
+            continue
+        first = stage[0]
+        if not isinstance(first, dict):
+            return False
+        iid = str(first.get("item_id") or "")
+        try:
+            qty = int(first.get("quantity") or 0)
+        except Exception:
+            qty = 0
+        if not iid or qty <= 0:
+            continue
+        if iid in stackable:
+            return False
+        idx = id_to_idx.get(iid)
+        if idx is None or idx >= len(amounts):
+            return False
+        if int(amounts[idx] or 0) < qty:
+            return False
+        saw_stage = True
+    return saw_stage
 
 
 def format_skip_local_pickup_lua(received_pickups: int) -> str:
@@ -2100,11 +2264,14 @@ def format_skip_local_pickup_lua(received_pickups: int) -> str:
     Advance ReceivedPickups without granting or showing a popup.
 
     Keeps AP index sync when an in-world local pickup already applied the item.
+    Clears PendingPickup so a mid-popup remote grant cannot block index catch-up
+    (previously the skip no-op'd while PendingPickup was set, stalling reconnect).
     """
     return (
         "do "
         f"local idx = {int(received_pickups)}; "
-        "if not RL.PendingPickup and RL.ReceivedPickups and idx == RL.ReceivedPickups() then "
+        "if RL.ReceivedPickups and idx == RL.ReceivedPickups() then "
+        "RL.PendingPickup = nil; "
         'Scenario.WriteToPlayerBlackboard("ReceivedPickups","f",idx + 1); '
         "if RL.SendReceivedPickups then RL.SendReceivedPickups(tostring(idx + 1)) end; "
         "elseif RL.GetReceivedPickupsAndSend then "

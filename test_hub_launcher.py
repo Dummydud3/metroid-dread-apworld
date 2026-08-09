@@ -328,6 +328,31 @@ class EnsurePackagesDryRunTests(unittest.TestCase):
             self.assertTrue(hl.electron_is_healthy(hub, platform="win32"))
 
 
+class LoadClientModuleTests(unittest.TestCase):
+    def test_load_registers_sys_modules_for_dataclass(self):
+        """Hub file-load must register sys.modules before exec (PEP 563 dataclasses)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            world = Path(tmp)
+            client = world / "MetroidDreadClient.py"
+            client.write_text(
+                "from __future__ import annotations\n"
+                "from dataclasses import dataclass\n"
+                "@dataclass\n"
+                "class DreadSocketHolder:\n"
+                "    x: int\n",
+                encoding="utf-8",
+            )
+            # Clear any prior stub so we exercise the register-before-exec path.
+            sys.modules.pop("metroid_dread_client_impl", None)
+            with mock.patch.object(hl, "runtime_world_dir", return_value=world):
+                with mock.patch.object(hl, "world_package_dir", return_value=world):
+                    with mock.patch.object(hl, "find_containing_apworld", return_value=None):
+                        mod = hl._load_metroid_dread_client_module(world)
+            self.assertIs(sys.modules.get("metroid_dread_client_impl"), mod)
+            self.assertTrue(hasattr(mod, "DreadSocketHolder"))
+            self.assertEqual(mod.DreadSocketHolder(1).x, 1)
+
+
 def main() -> None:
     suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=2).run(suite)

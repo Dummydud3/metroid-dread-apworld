@@ -2,11 +2,11 @@
 Generate dread_map_icon_actors.json: per-scenario minimap "items" actors.
 
 open-dread-rando's MapIconEditor only consumes an ItemCustom{n} number when the
-pickup's map actor exists in that scenario's vanilla .bmmap `items` category
-(see open_dread_rando/pickups/pickup.py::patch_minimap_icon). Major-item spheres
-(ItemSphere_*, IT_VARIA_GEN_001, ...) have no minimap item entry, so they are
-skipped and every later pickup shifts down by one. dread_map_icon_labels needs
-this table to reproduce the real numbering without the base ROM.
+pickup's map actor (map_icon.original_actor, else pickup_actor) exists in that
+scenario's vanilla .bmmap `items` category (pickup.py::patch_minimap_icon).
+Major-item spheres use a separate world actor; AP sets original_actor to the
+powerup_* map name so they do get a custom icon. This table is the gate
+dread_map_icon_labels uses to reproduce ODR numbering without the base ROM.
 
 Usage (needs open-dread-rando's interpreter and an extracted Dread RomFS):
     py -3.11 dread_scripts/gen_map_icon_actors.py "C:/path/to/extracted/romfs"

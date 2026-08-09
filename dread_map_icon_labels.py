@@ -14,14 +14,15 @@ that scenario's vanilla .bmmap `items` category:
         icon = map_def.items.pop(map_actor["actor"])
         icon.sIconId = editor.map_icon_editor.get_data(self.pickup)
 
-The 12 major-item spheres (ItemSphere_ChargeBeam, IT_VARIA_GEN_001,
-itemsphere_gravitysuit, powerup-label pickups, ...) have no minimap `items`
-entry, so they get no custom icon and consume no number. Numbering them anyway
-shifts every later pickup (Waterfall Energy Part drifted +3: the client wrote its
-label into MAP_ICON_ItemCustom22 while the game reads MAP_ICON_ItemCustom19),
-which shows the wrong in/out-of-logic state AND the wrong revealed item name.
-dread_map_icon_actors.json carries the vanilla `items` lists so this module can
-reproduce ODR's numbering without the base ROM.
+The 12 major-item spheres use a different world actor (ItemSphere_ChargeBeam,
+IT_VARIA_GEN_001, …) than their minimap `items` entry (powerup_chargebeam, …).
+ap_to_patcher sets map_icon.original_actor to that powerup_* name (from
+dread_pickup_actors.json map_icon_actor) so ODR replaces the vanilla major icon
+and consumes an ItemCustom{n}. If original_actor is wrong/missing, ODR leaves
+the pulsing world-map-visible major icon and this module must skip the slot —
+numbering a skip shifts every later pickup (wrong logic state + reveal name).
+dread_map_icon_actors.json carries the vanilla `items` lists so numbering can
+be reproduced without the base ROM.
 
 Patch-time BTXT (via ODR text_patches) bakes four keys per icon:
   MAP_ICON_ItemCustom{n}      → [OUT OF LOGIC] Unknown Item  (default / display key)
@@ -61,7 +62,8 @@ MapIconKeys = Dict[str, Any]
 
 # v3 reproduced ODR's real ItemCustom{n} numbering (v2 numbered pickups ODR skips).
 # v4 adds entries[].sprite — the atlas cell each icon reveals to.
-KEYS_VERSION = 4
+# v5 includes the 12 major-item spheres via map_icon.original_actor → powerup_*.
+KEYS_VERSION = 5
 
 PREFIX_IN = "[IN LOGIC]"
 PREFIX_OUT = "[OUT OF LOGIC]"
@@ -78,6 +80,9 @@ Sprite = Tuple[int, int]
 # ItemMissileTank def has uSpriteRow=0, uSpriteCol=7.
 UNKNOWN_SPRITE: Sprite = (7, 15)  # ODR "unknown" — the ? cell every icon starts on
 GENERIC_ITEM_SPRITE: Sprite = (0, 4)  # vanilla ItemSphere; used when nothing better fits
+# Empty cell in ODR's icons.bctex that finalize_mod stamps with the AP cluster logo
+# (see dread_scripts/build_ap_map_icon_atlas.py → assets/icons.bctex).
+AP_LOGO_SPRITE: Sprite = (5, 10)
 
 ICON_SPRITES: Dict[str, Sprite] = {
     "item_energytank": (0, 5),
@@ -119,6 +124,7 @@ ICON_SPRITES: Dict[str, Sprite] = {
     "DNA": (7, 13),
     "itemsphere": GENERIC_ITEM_SPRITE,
     "unknown": UNKNOWN_SPRITE,
+    "archipelago": AP_LOGO_SPRITE,
 }
 
 # patcher.json `model` values that do not name an ALL_ICONS entry. These are 3D
@@ -195,19 +201,19 @@ def sprite_for_item(item_name: Optional[str], *, is_foreign: bool = False) -> Sp
     """
     Atlas cell for an AP item name.
 
-    Foreign items still resolve when the other world happens to use a Dread
-    item name; anything unrecognised falls back to the generic item sphere
-    rather than the ? cell, so a revealed icon always looks revealed.
+    Foreign / unrecognised items use the Archipelago logo cell (stamped into
+    ODR's minimap atlas at patch finalize). Known Dread names still resolve to
+    their vanilla/ODR major icons even when the sender is another world.
     """
     name = (item_name or "").strip()
     if not name:
-        return GENERIC_ITEM_SPRITE
+        return AP_LOGO_SPRITE if is_foreign else GENERIC_ITEM_SPRITE
     if name.startswith("Metroid DNA"):
         return ICON_SPRITES["DNA"]
     icon = ITEM_TO_ICON.get(name)
     if icon is None:
-        return GENERIC_ITEM_SPRITE
-    return ICON_SPRITES.get(icon, GENERIC_ITEM_SPRITE)
+        return AP_LOGO_SPRITE
+    return ICON_SPRITES.get(icon, AP_LOGO_SPRITE)
 
 
 def normalize_sprite(value: Any) -> Optional[Sprite]:
@@ -408,6 +414,7 @@ def build_map_icon_keys_from_pickups(
         "version": KEYS_VERSION,
         "custom_icon_count": custom_n,
         "unknown_sprite": [UNKNOWN_SPRITE[0], UNKNOWN_SPRITE[1]],
+        "ap_logo_sprite": [AP_LOGO_SPRITE[0], AP_LOGO_SPRITE[1]],
         "by_pickup_index": by_pickup_index,
         "by_location_id": by_location_id,
         "by_actor": by_actor,
@@ -854,6 +861,46 @@ def format_apply_map_icon_sprites_chunks(
     return chunks
 
 
+def format_apply_map_icon_globals_chunks(
+    globals_map: Mapping[str, bool],
+    *,
+    buffer_size: int = 4096,
+    overhead: int = 64,
+) -> List[str]:
+    """
+    Split RL.ApplyMapIconGlobals applies (OdrMap.SetIconGlobal) into chunks.
+
+    Keys may be BTXT keys or bare icon ids; both are normalised to ItemCustomN.
+    Values are booleans — true = show on the pause/world map (bIsGlobal).
+    """
+    max_len = max(256, int(buffer_size) - max(int(overhead), 5))
+    chunks: List[str] = []
+    batch: List[str] = []
+
+    def _flush() -> None:
+        nonlocal batch
+        if not batch:
+            return
+        chunks.append("RL.ApplyMapIconGlobals({" + ",".join(batch) + "})")
+        batch = []
+
+    def _fits(extra: str, existing: List[str]) -> bool:
+        table = "{" + ",".join(existing + [extra]) + "}"
+        return len(f"RL.ApplyMapIconGlobals({table})") <= max_len
+
+    for raw_key in sorted(globals_map):
+        icon = icon_id_from_base_key(str(raw_key))
+        flag = "true" if globals_map[raw_key] else "false"
+        entry = f'["{_lua_escape(icon)}"]={flag}'
+        if not _fits(entry, []):
+            continue
+        if batch and not _fits(entry, batch):
+            _flush()
+        batch.append(entry)
+    _flush()
+    return chunks
+
+
 def sprites_signature(sprites: Mapping[str, Sequence[int]]) -> Tuple[Tuple[str, Tuple[int, int]], ...]:
     out: List[Tuple[str, Tuple[int, int]]] = []
     for key in sorted(sprites):
@@ -861,6 +908,10 @@ def sprites_signature(sprites: Mapping[str, Sequence[int]]) -> Tuple[Tuple[str, 
         if sprite is not None:
             out.append((str(key), sprite))
     return tuple(out)
+
+
+def globals_signature(globals_map: Mapping[str, bool]) -> Tuple[Tuple[str, bool], ...]:
+    return tuple(sorted((str(k), bool(v)) for k, v in globals_map.items()))
 
 
 def format_set_map_icon_label_lua(key: str, text: str) -> str:
