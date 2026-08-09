@@ -7,3 +7,5 @@ pathspec>=0.12.1
 certifi>=2025.11.12
 platformdirs>=4.5.0
 jellyfish>=1.2.1
+typing_extensions>=4.15.0
+schema>=0.7.8

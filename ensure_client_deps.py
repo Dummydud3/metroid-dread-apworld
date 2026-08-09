@@ -18,6 +18,8 @@ CLIENT_IMPORTS: Tuple[Tuple[str, str], ...] = (
     ("certifi", "certifi>=2025.11.12"),
     ("platformdirs", "platformdirs>=4.5.0"),
     ("jellyfish", "jellyfish>=1.2.1"),
+    ("typing_extensions", "typing_extensions>=4.15.0"),
+    ("schema", "schema>=0.7.8"),
 )
 
 EXIT_OK = 0

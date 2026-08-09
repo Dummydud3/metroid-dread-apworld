@@ -1164,10 +1164,10 @@ RL.Bootstrap = true
 
     # Reachable minimap: ApplyReachableMap → VisitBoundsSafe dim paint (flag=4)
     # (needs OdrMap binder + ap_reachable_map_cells.lua for area bounds).
-    # Fillmaps remain optional supplement. NEVER call legacy OdrMap.VisitBounds
-    # (0xe3b1b0+6; MapNativePaintEnabled stays false). Physical-OR: never revert
-    # walk visits (bright = reachable OR walked). Dim force-save / dim-layout
-    # bootstrap is intentionally omitted.
+    # Fillmap SetMinimapRegionVisited supplement is OFF (MapFillmapPaintEnabled=false).
+    # NEVER call legacy OdrMap.VisitBounds (0xe3b1b0+6; MapNativePaintEnabled stays
+    # false). Physical-OR: never revert walk visits (bright = walked). Dim
+    # force-save / dim-layout bootstrap is intentionally omitted.
     fillmap_lua_path = ROOT / "data" / "fillmap_actors.lua"
     fillmap_embed = ""
     if fillmap_lua_path.is_file():
@@ -1187,6 +1187,9 @@ RL.LastReachable = RL.LastReachable or {{}}
 -- Legacy VisitBounds (0xe3b1b0+6) stays crash-guarded forever. Full-room paint uses
 -- VisitBoundsSafe instead; do NOT flip this on.
 if RL.MapNativePaintEnabled == nil then RL.MapNativePaintEnabled = false end
+-- Bright cut_fillmap_* via SetMinimapRegionVisited (flag=6): OFF for reachable paint.
+-- Keep VisitFillmap / /map_smoke for manual A/B; dim AABB is VisitBoundsSafe only.
+if RL.MapFillmapPaintEnabled == nil then RL.MapFillmapPaintEnabled = false end
 -- Prefer dim/visible reachable AABB (flag=4). Bright (6) remains available for A/B.
 -- No-op on older binders without the API; forces dim even if binary default drifts.
 if OdrMap and OdrMap.SetVisitBoundsSafeFlag then
@@ -1957,9 +1960,9 @@ function RL.ApplyReachableMap(by_scenario)
             RL.SendApLog("AP_MAP: reachable bounds paint ok n="..tostring(painted).." fail="..tostring(failed).." status="..flag)
         end
     end
-    -- Fillmaps: optional supplement / fallback for rooms with mapped actors.
+    -- Fillmaps: optional bright supplement (flag=6). Default OFF — dim AABB only.
     local fill_n = 0
-    if RL.PaintReachableFillmaps then
+    if RL.MapFillmapPaintEnabled and RL.PaintReachableFillmaps then
         fill_n = RL.PaintReachableFillmaps(by_scenario) or 0
     end
     if fill_n > 0 then
@@ -1982,8 +1985,8 @@ function RL.ReapplyLastReachable()
     return "empty"
 end
 -- Physical-OR policy: do NOT hook/revert guicallbacks.OnMinimapCellVisited.
--- Native walk visits stay; AP OR-reveals via VisitBoundsSafe dim (+ fillmap supplement).
--- Bright = AP-reachable OR physically visited.
+-- Native walk visits stay; AP OR-reveals via VisitBoundsSafe dim only.
+-- Bright = physically visited (or manual /map_smoke fillmap); not AP fillmap paint.
 RL.EnsureMapBounds()
 Game.AddSF(2.0, "RL.EnsureMapBounds", "")
 """.strip()
