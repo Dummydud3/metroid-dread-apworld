@@ -44,8 +44,6 @@ components.append(
         cli=False,
         description=(
             "Launch the Metroid Dread Client Hub (patcher + tracker + connect UI). "
-            "Downloads Hub packages when needed and falls back to the Python client "
-            "if Electron/Node is unavailable."
         ),
     )
 )
