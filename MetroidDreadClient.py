@@ -3338,7 +3338,13 @@ class MetroidDreadContext(CommonContext):
                 )
                 return
             logger.info("DeathLink: local death detected, sending... (via %s)", via)
-            await self.send_death("died in Metroid Dread")
+            # cause is what other clients display; include slot name (AP convention).
+            name = (
+                self.player_names.get(self.slot)
+                if self.slot is not None
+                else None
+            ) or self.auth or "Player"
+            await self.send_death(f"{name} died in Metroid Dread")
 
     async def _death_poll_loop(self) -> None:
         # Slow poll on purpose: DeathLink latency of ~1–2s is fine, and awaiting
