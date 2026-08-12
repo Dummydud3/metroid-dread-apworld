@@ -20,6 +20,12 @@ logs/
 .vite/
 .cache/
 
+# Linux Hub client virtualenv (created at runtime; never ship)
+_metroid_dread_venv/
+**/_metroid_dread_venv/
+.venv/
+**/.venv/
+
 # Electron / frontend build artifacts (if produced locally)
 dread-client-app/dist/
 dread-client-app/out/

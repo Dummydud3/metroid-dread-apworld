@@ -9,3 +9,5 @@ output/
 .DS_Store
 dread_client_ui_config.json
 dread_direct_patch_config.json
+_metroid_dread_venv/
+.venv/

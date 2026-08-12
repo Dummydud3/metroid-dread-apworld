@@ -11,21 +11,29 @@ fi
 
 ENSURE_SCRIPT="$(cd .. && pwd)/ensure_client_deps.py"
 WORLD_DIR="$(cd .. && pwd)"
+VENV_DIR="$WORLD_DIR/_metroid_dread_venv"
 if [[ -f "$ENSURE_SCRIPT" ]]; then
   echo "Checking Python client dependencies..."
+  echo "Linux: packages install into local venv: $VENV_DIR"
   runner=""
-  for py in python3 python; do
-    if command -v "$py" >/dev/null 2>&1; then
-      runner=$py
-      break
-    fi
-  done
+  # Prefer an existing Hub venv if present.
+  if [[ -x "$VENV_DIR/bin/python" ]]; then
+    runner="$VENV_DIR/bin/python"
+    echo "Using venv Python: $runner"
+  else
+    for py in python3.12 python3.11 python3.13 python3 python; do
+      if command -v "$py" >/dev/null 2>&1; then
+        runner=$py
+        break
+      fi
+    done
+  fi
   if [[ -z "$runner" ]]; then
     echo
     echo "No usable Python 3.11–3.13 found for the Hub client."
     echo "Archipelago Text Client uses its own bundled Python — Hub needs a system install."
-    echo "Install Python 3.12 from https://www.python.org/downloads/ (add to PATH),"
-    echo "then re-run this launcher."
+    echo "Install Python 3.12 (Arch: pacman -S python), then re-run this launcher."
+    echo "Client deps will be installed into $VENV_DIR (not systemwide)."
     exit 2
   fi
   set +e
@@ -35,7 +43,8 @@ if [[ -f "$ENSURE_SCRIPT" ]]; then
   if [[ "$rc" -ne 0 ]]; then
     echo
     echo "Python client dependency check failed (exit $rc)."
-    echo "Hub Connect will also retry — or install Python from python.org and add it to PATH."
+    echo "Hub Connect will also retry — ensure python -m venv works, then re-run."
+    echo "Deps are installed into $VENV_DIR only (never systemwide / pip --user)."
     exit "$rc"
   fi
   echo

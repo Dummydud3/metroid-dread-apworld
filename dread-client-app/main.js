@@ -360,14 +360,19 @@ function saveConfig(partial) {
 
   // Keep patcher config in sync for CLI / legacy tools.
   try {
+    const patchDefaults = loadPatchDefaults();
     const patchCfg = {
-      ...loadPatchDefaults(),
+      ...patchDefaults,
       base_rom_path: cfg.base_rom_path,
       output_path: cfg.output_path,
-      player_name: cfg.slot || loadPatchDefaults().player_name || "DreadPlayer",
+      player_name: cfg.slot || patchDefaults.player_name || "DreadPlayer",
       clean_output: Boolean(cfg.clean_output),
       freesink: Boolean(cfg.freesink),
       games_folder: cfg.games_folder || DEFAULT_OUTPUT_SCAN,
+      // Frozen Hub / apworld ship exlaunch/deploy next to the world package.
+      // Preserve an existing key; never drop it when rewriting patcher config.
+      custom_exlaunch_deploy:
+        patchDefaults.custom_exlaunch_deploy || "exlaunch/deploy",
     };
     fs.writeFileSync(PATCH_CONFIG_PATH, JSON.stringify(patchCfg, null, 2), "utf8");
   } catch (err) {
@@ -384,6 +389,23 @@ function findPythonLauncher() {
     return cachedPythonLauncher;
   }
   if (process.platform !== "win32") {
+    const versionOk =
+      "import sys; raise SystemExit(0 if (3,11,9) <= sys.version_info < (3,14) else 1)";
+    const probeUnix = (candidate, code) =>
+      spawnSync(candidate.cmd, [...candidate.prefixArgs, "-c", code], {
+        timeout: 30000,
+      }).status === 0;
+
+    // Linux Hub client deps live in a local venv (never systemwide pip).
+    const venvPython = path.join(WORLD_DIR, "_metroid_dread_venv", "bin", "python");
+    if (process.platform === "linux" && fs.existsSync(venvPython)) {
+      const venvLauncher = { cmd: venvPython, prefixArgs: [] };
+      if (probeUnix(venvLauncher, versionOk)) {
+        cachedPythonLauncher = venvLauncher;
+        return cachedPythonLauncher;
+      }
+    }
+
     const unixCandidates = [
       { cmd: "python3.12", prefixArgs: [] },
       { cmd: "python3.11", prefixArgs: [] },
@@ -391,12 +413,6 @@ function findPythonLauncher() {
       { cmd: "python3", prefixArgs: [] },
       { cmd: "python", prefixArgs: [] },
     ];
-    const probeUnix = (candidate, code) =>
-      spawnSync(candidate.cmd, [...candidate.prefixArgs, "-c", code], {
-        timeout: 30000,
-      }).status === 0;
-    const versionOk =
-      "import sys; raise SystemExit(0 if (3,11,9) <= sys.version_info < (3,14) else 1)";
     const foundUnix =
       unixCandidates.find((c) => probeUnix(c, "import open_dread_rando")) ||
       unixCandidates.find((c) => probeUnix(c, versionOk));
@@ -436,8 +452,9 @@ function findPythonLauncher() {
 }
 
 /**
- * Install websockets/etc. into the same interpreter findPythonLauncher() returns.
+ * Install websockets/etc. for the Hub client.
  * Shares worlds/metroid_dread/ensure_client_deps.py with hub_launcher / bat / sh.
+ * On Linux, ensure_client_deps creates/uses ``_metroid_dread_venv`` (not system pip).
  */
 function ensureClientDeps(launcher) {
   if (!launcher) {
@@ -493,6 +510,10 @@ function ensureClientDeps(launcher) {
         combined ||
         `Failed to install Python client packages (exit ${result.status}).`,
     };
+  }
+  // Linux: ensure may have just created _metroid_dread_venv — prefer it for launch.
+  if (process.platform === "linux") {
+    cachedPythonLauncher = null;
   }
   return { ok: true, message: combined };
 }
@@ -821,6 +842,13 @@ function startClient(opts) {
     "stdout",
     `[app] Checking Python client packages (${formatPythonCmd(launcher)})…\n`
   );
+  if (process.platform === "linux") {
+    appendLog(
+      "stdout",
+      `[app] Linux: client packages install into local venv ` +
+        `${path.join(WORLD_DIR, "_metroid_dread_venv")} (not systemwide).\n`
+    );
+  }
   const deps = ensureClientDeps(launcher);
   if (!deps.ok) {
     appendLog("stderr", `\n[app] ${String(deps.error || "").replace(/\n/g, "\n[app] ")}\n`);
@@ -830,7 +858,9 @@ function startClient(opts) {
     appendLog("stdout", `[app] ${deps.message.replace(/\n/g, "\n[app] ")}\n`);
   }
 
-  const { cmd, prefixArgs } = launcher;
+  // Re-resolve after ensure so Linux launches with the venv python.
+  const launchPy = findPythonLauncher() || launcher;
+  const { cmd, prefixArgs } = launchPy;
   const args = [
     ...prefixArgs,
     CLIENT_SCRIPT,
@@ -1458,6 +1488,12 @@ function runPatch(opts) {
   ];
   if (cfg.clean_output) args.push("--clean");
   args.push(cfg.freesink ? "--freesink" : "--no-freesink");
+  // Always point frozen/source Hub at the world-bundled deploy when present so
+  // cwd/config quirks cannot fall through to a missing absolute-dev path.
+  const bundledDeploy = path.join(WORLD_DIR, "exlaunch", "deploy");
+  if (fs.existsSync(path.join(bundledDeploy, "subsdk9"))) {
+    args.push("--custom-exlaunch-deploy", bundledDeploy);
+  }
 
   return new Promise((resolve) => {
     let settled = false;

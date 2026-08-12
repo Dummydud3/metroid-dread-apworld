@@ -129,7 +129,9 @@ def load_config() -> Dict[str, Any]:
         "player_name": "DreadPlayer",
         "clean_output": False,
         "freesink": False,
-        "custom_exlaunch_deploy": str(DEFAULT_CUSTOM_EXLAUNCH_DEPLOY),
+        # Prefer world-relative deploy (apworld / Hub runtime). Absolute local
+        # exlaunch OUT remains a last-resort candidate in resolve_custom_exlaunch_deploy.
+        "custom_exlaunch_deploy": str(dread_paths.BUNDLED_EXLAUNCH_DEPLOY).replace("\\", "/"),
         # Offline samus.bmssv dim reveal — OFF (bright path is VisitBoundsSafe in-game).
         "reveal_minimap_save": False,
     }
@@ -1328,8 +1330,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "custom_exlaunch_deploy": str(
                     args.custom_exlaunch_deploy
                     or cfg.get("custom_exlaunch_deploy")
-                    or DEFAULT_CUSTOM_EXLAUNCH_DEPLOY
-                ),
+                    or dread_paths.BUNDLED_EXLAUNCH_DEPLOY
+                ).replace("\\", "/"),
                 "reveal_minimap_save": bool(args.reveal_minimap_save),
             }
         )
