@@ -83,6 +83,7 @@ from CommonClient import (
     handle_url_arg,
     server_loop,
 )
+from MultiServer import mark_raw
 from NetUtils import ClientStatus, JSONtoTextParser, NetworkItem, SlotType, status_colors
 import Utils
 
@@ -267,13 +268,19 @@ class MetroidDreadClientCommandProcessor(ClientCommandProcessor):
         self.output("Requesting seed placements from the Archipelago server…")
         asyncio.create_task(self.ctx.download_patch_spoiler(force=True))
 
-    def _cmd_lua(self, *code: str):
-        """Execute Lua in Dread. Usage: /lua <code>"""
+    @mark_raw
+    def _cmd_lua(self, code: str = ""):
+        """Execute Lua in Dread. Usage: /lua <code>
+
+        Uses @mark_raw so quotes in the Lua source are preserved. Without it,
+        CommandProcessor's shlex.split strips quotes and string args become nil
+        globals (e.g. SetTunableValue(\"Cat\", \"Prop\", 0.2) → bare Cat, Prop).
+        """
         if not self.ctx.game_connected:
             self.output("Error: Not connected to Metroid Dread")
             return
-        lua_code = " ".join(code)
-        if not lua_code.strip():
+        lua_code = (code or "").strip()
+        if not lua_code:
             self.output("Error: No Lua code provided")
             return
         self.output(f"Executing: {lua_code}")
@@ -374,6 +381,107 @@ class MetroidDreadClientCommandProcessor(ClientCommandProcessor):
     def _cmd_map_hint_test(self):
         """Alias for /test_hint_ghavoran."""
         self._cmd_test_hint_ghavoran()
+
+    def _cmd_volume_smoke(self, *args: str):
+        """Smoke-test vanilla Game volume APIs over Remote Lua.
+
+        Usage: /volume_smoke [0-100] [keep]
+          - Reads music/sfx/(env)/(master) where getters exist
+          - Sets each channel to the test level (default 20 = 0.20)
+          - Restores previous values unless 'keep' is passed
+          - Logs AP_VOL: lines with which signatures worked
+        Prefer INGAME with /connect_dread first.
+        """
+        keep = False
+        percent: Optional[float] = None
+        for raw in args:
+            tok = (raw or "").strip().lower()
+            if not tok:
+                continue
+            if tok in ("keep", "--keep", "norestore", "no-restore"):
+                keep = True
+                continue
+            try:
+                percent = float(tok)
+            except ValueError:
+                self.output(
+                    "Usage: /volume_smoke [0-100] [keep]  "
+                    "(default 20; restore unless keep)"
+                )
+                return
+        if percent is None:
+            percent = 20.0
+        if percent < 0.0 or percent > 100.0:
+            self.output("Error: volume percent must be 0–100")
+            return
+        self._run_volume_smoke(percent / 100.0, keep=keep)
+
+    def _cmd_volume_set(self, channel: str = "", level: str = ""):
+        """Set one volume channel (tunable + Game). Usage: /volume_set music|sfx|env|master <0-100>
+
+        Values are slider-style 0–100 (mapped to 0.0–1.0). Writes
+        CTunableSoundSystemATK (with category pcall fallback) then Game.Set*
+        for immediate effect — same approach as /volume_tunable_smoke.
+        Logs AP_VOL: results.
+        """
+        ch = (channel or "").strip().lower()
+        aliases = {
+            "music": "music",
+            "bgm": "music",
+            "sfx": "sfx",
+            "sound": "sfx",
+            "env": "env",
+            "environment": "env",
+            "ambiences": "env",
+            "ambience": "env",
+            "master": "master",
+        }
+        if ch not in aliases or not (level or "").strip():
+            self.output("Usage: /volume_set music|sfx|env|master <0-100>")
+            return
+        try:
+            percent = float(level.strip())
+        except ValueError:
+            self.output("Error: level must be a number 0–100")
+            return
+        if percent < 0.0 or percent > 100.0:
+            self.output("Error: volume percent must be 0–100")
+            return
+        self._run_volume_set(aliases[ch], percent / 100.0)
+
+    def _cmd_volume_get(self):
+        """Read Game + tunable volume values. Usage: /volume_get
+
+        Logs AP_VOL: get lines for Game.* getters and any reachable
+        CTunableSoundSystemATK fields via msemenu.GetTunableData / Scenario.
+        Prefer after pause/unpause when testing tunable persistence.
+        """
+        self._run_volume_get()
+
+    def _cmd_volume_tunable_smoke(self, *args: str):
+        """Probe SoundSystemATK tunables + Game volume setters.
+
+        Usage: /volume_tunable_smoke [0-100]
+          - pcalls Scenario.SetTunableValue and direct msemenu.GetTunableData
+          - tries alternate category strings (short + fully-qualified)
+          - sets music/sfx/env tunables, then Game.Set* for immediate effect
+          - logs AP_VOL: for each attempt (never nil-concats / never crashes RL)
+          - ends with get-after; pause/unpause then /volume_get to check survival
+        """
+        percent = 20.0
+        for raw in args:
+            tok = (raw or "").strip().lower()
+            if not tok:
+                continue
+            try:
+                percent = float(tok)
+            except ValueError:
+                self.output("Usage: /volume_tunable_smoke [0-100]  (default 20)")
+                return
+        if percent < 0.0 or percent > 100.0:
+            self.output("Error: volume percent must be 0–100")
+            return
+        self._run_volume_tunable_smoke(percent / 100.0)
 
     def _default_map_icon_smoke_actor(self) -> str:
         """Known Artaria pickup actor from dread_pickup_actors.json (Charge Tutorial ET)."""
@@ -665,9 +773,523 @@ class MetroidDreadClientCommandProcessor(ClientCommandProcessor):
         )
         asyncio.create_task(self._execute_map_label_smoke(lua))
 
+    def _run_volume_smoke(self, test_frac: float, *, keep: bool = False):
+        if not self.ctx.game_connected:
+            self.output("Error: Not connected to Metroid Dread. Use /connect_dread [ip]")
+            return
+        # Defensive Remote Lua probe: pcall each Get/Set signature, report AP_VOL lines.
+        keep_lua = "true" if keep else "false"
+        lua = (
+            "if not RL then RL = {} end\n"
+            "function RL.VolumeSmoke(testFrac, keep)\n"
+            "  local mode, scen = '?', '?'\n"
+            "  pcall(function() mode = tostring(Game.GetCurrentGameModeID()) end)\n"
+            "  pcall(function() scen = tostring(Game.GetScenarioID()) end)\n"
+            "  if mode ~= 'INGAME' then\n"
+            "    RL.SendApLog('AP_VOL: warn mode='..mode..' (prefer INGAME; continuing)')\n"
+            "  end\n"
+            "  RL.SendApLog('AP_VOL: smoke start mode='..mode..' scen='..scen\n"
+            "    ..' test='..tostring(testFrac)..' keep='..tostring(keep))\n"
+            "  local function try_get(name, fn)\n"
+            "    if type(fn) ~= 'function' then\n"
+            "      RL.SendApLog('AP_VOL: get '..name..' FAIL no-api')\n"
+            "      return nil\n"
+            "    end\n"
+            "    local ok, v = pcall(fn)\n"
+            "    if ok then\n"
+            "      RL.SendApLog('AP_VOL: get '..name..' ok val='..tostring(v)..' sig=0arg')\n"
+            "      return v\n"
+            "    end\n"
+            "    RL.SendApLog('AP_VOL: get '..name..' FAIL err='..tostring(v))\n"
+            "    return nil\n"
+            "  end\n"
+            "  local function try_set(name, attempts)\n"
+            "    for i = 1, #attempts do\n"
+            "      local a = attempts[i]\n"
+            "      if type(a.fn) ~= 'function' then\n"
+            "        RL.SendApLog('AP_VOL: set '..name..' try '..a.sig..' FAIL no-api')\n"
+            "      else\n"
+            "        local ok, err = pcall(a.fn)\n"
+            "        if ok then\n"
+            "          RL.SendApLog('AP_VOL: set '..name..' ok sig='..a.sig..' val='..tostring(a.val))\n"
+            "          return true, a.sig\n"
+            "        end\n"
+            "        RL.SendApLog('AP_VOL: set '..name..' try '..a.sig..' FAIL err='..tostring(err))\n"
+            "      end\n"
+            "    end\n"
+            "    return false, nil\n"
+            "  end\n"
+            "  local function set_music(v)\n"
+            "    return try_set('music', {\n"
+            "      {sig='1arg', val=v, fn=function() Game.SetMusicVolume(v) end},\n"
+            "      {sig='2arg_fade0', val=v, fn=function() Game.SetMusicVolume(v, 0) end},\n"
+            "    })\n"
+            "  end\n"
+            "  local function set_sfx(v)\n"
+            "    return try_set('sfx', {\n"
+            "      {sig='2arg_fade0', val=v, fn=function() Game.SetSFXVolume(v, 0) end},\n"
+            "      {sig='1arg', val=v, fn=function() Game.SetSFXVolume(v) end},\n"
+            "    })\n"
+            "  end\n"
+            "  local function set_env(v)\n"
+            "    return try_set('env', {\n"
+            "      {sig='1arg', val=v, fn=function() Game.SetEnvironmentVolume(v) end},\n"
+            "      {sig='2arg_fade0', val=v, fn=function() Game.SetEnvironmentVolume(v, 0) end},\n"
+            "    })\n"
+            "  end\n"
+            "  local function set_master(v)\n"
+            "    return try_set('master', {\n"
+            "      {sig='1arg', val=v, fn=function() Game.SetMasterVolume(v) end},\n"
+            "      {sig='2arg_fade0', val=v, fn=function() Game.SetMasterVolume(v, 0) end},\n"
+            "    })\n"
+            "  end\n"
+            "  local prev = {\n"
+            "    music = try_get('music', Game.GetMusicVolume),\n"
+            "    sfx = try_get('sfx', Game.GetSFXVolume),\n"
+            "    env = try_get('env', Game.GetEnvironmentVolume),\n"
+            "    master = try_get('master', Game.GetMasterVolume),\n"
+            "  }\n"
+            "  local ok_music = set_music(testFrac)\n"
+            "  local ok_sfx = set_sfx(testFrac)\n"
+            "  local ok_env = set_env(testFrac)\n"
+            "  local ok_master = set_master(testFrac)\n"
+            "  RL.SendApLog('AP_VOL: after-set get')\n"
+            "  try_get('music', Game.GetMusicVolume)\n"
+            "  try_get('sfx', Game.GetSFXVolume)\n"
+            "  try_get('env', Game.GetEnvironmentVolume)\n"
+            "  try_get('master', Game.GetMasterVolume)\n"
+            "  if keep then\n"
+            "    RL.SendApLog('AP_VOL: keep=true — left at test='..tostring(testFrac))\n"
+            "  else\n"
+            "    RL.SendApLog('AP_VOL: restore start')\n"
+            "    if prev.music ~= nil then set_music(prev.music)\n"
+            "    elseif ok_music then\n"
+            "      RL.SendApLog('AP_VOL: restore music SKIP no-prev (left at test)')\n"
+            "    end\n"
+            "    if prev.sfx ~= nil then set_sfx(prev.sfx)\n"
+            "    elseif ok_sfx then\n"
+            "      RL.SendApLog('AP_VOL: restore sfx SKIP no-prev (left at test)')\n"
+            "    end\n"
+            "    if prev.env ~= nil then set_env(prev.env)\n"
+            "    elseif ok_env then\n"
+            "      -- GetEnvironmentVolume often missing; snap back to 1.0\n"
+            "      RL.SendApLog('AP_VOL: restore env no-prev -> 1.0')\n"
+            "      set_env(1.0)\n"
+            "    end\n"
+            "    if prev.master ~= nil then set_master(prev.master)\n"
+            "    elseif ok_master then\n"
+            "      RL.SendApLog('AP_VOL: restore master SKIP no-prev (left at test)')\n"
+            "    end\n"
+            "    RL.SendApLog('AP_VOL: after-restore get')\n"
+            "    try_get('music', Game.GetMusicVolume)\n"
+            "    try_get('sfx', Game.GetSFXVolume)\n"
+            "    try_get('env', Game.GetEnvironmentVolume)\n"
+            "    try_get('master', Game.GetMasterVolume)\n"
+            "  end\n"
+            "  RL.SendApLog('AP_VOL: smoke done mode='..mode\n"
+            "    ..' music='..tostring(ok_music)..' sfx='..tostring(ok_sfx)\n"
+            "    ..' env='..tostring(ok_env)..' master='..tostring(ok_master))\n"
+            "  return 'ok'\n"
+            "end\n"
+            f"RL.VolumeSmoke({test_frac:.4f}, {keep_lua})\n"
+        )
+        pct = int(round(test_frac * 100))
+        mode = "keep" if keep else "pulse+restore"
+        self.output(
+            f"Volume smoke: test={pct}% ({test_frac:.2f}) mode={mode} — "
+            "watch AP_VOL: … (INGAME preferred)"
+        )
+        asyncio.create_task(self._execute_volume_smoke(lua))
+
+    def _run_volume_set(self, channel: str, frac: float):
+        if not self.ctx.game_connected:
+            self.output("Error: Not connected to Metroid Dread. Use /connect_dread [ip]")
+            return
+        if channel not in ("music", "sfx", "env", "master"):
+            self.output("Error: channel must be music|sfx|env|master")
+            return
+        prop_map = {
+            "music": "fMusicVolume",
+            "sfx": "fSfxVolume",
+            "env": "fEnvironmentStreamsVolume",
+            "master": "fMainVolume",
+        }
+        prop = prop_map[channel]
+        # Prefer short category name that won_cat in /volume_tunable_smoke, then FQ fallbacks.
+        lua = (
+            "if not RL then RL = {} end\n"
+            "function RL.VolumeSet(channel, prop, frac)\n"
+            "  local mode = '?'\n"
+            "  pcall(function() mode = tostring(Game.GetCurrentGameModeID()) end)\n"
+            "  RL.SendApLog('AP_VOL: set-cmd start ch='..tostring(channel)\n"
+            "    ..' prop='..tostring(prop)..' val='..tostring(frac)..' mode='..mode)\n"
+            "  local cats = {\n"
+            "    'CTunableSoundSystemATK',\n"
+            "    'base::snd::CSoundSystemATK::CTunableSoundSystemATK',\n"
+            "    'CTunableSoundSystem',\n"
+            "    'base::snd::CSoundSystem::CTunableSoundSystem',\n"
+            "  }\n"
+            "  local function try_direct(cat, p, val)\n"
+            "    if type(msemenu) ~= 'table' or type(msemenu.GetTunableData) ~= 'function' then\n"
+            "      return false\n"
+            "    end\n"
+            "    local ok, td = pcall(msemenu.GetTunableData, cat, p)\n"
+            "    if not ok or td == nil then return false end\n"
+            "    local ok2, err = pcall(function()\n"
+            "      if td.category == nil or td.property == nil then\n"
+            "        error('td missing category/property')\n"
+            "      end\n"
+            "      td.category[td.property] = val\n"
+            "    end)\n"
+            "    if ok2 then\n"
+            "      RL.SendApLog('AP_VOL: direct set ok cat='..tostring(cat)\n"
+            "        ..' prop='..tostring(p)..' val='..tostring(val))\n"
+            "      return true\n"
+            "    end\n"
+            "    RL.SendApLog('AP_VOL: direct set FAIL cat='..tostring(cat)\n"
+            "      ..' prop='..tostring(p)..' err='..tostring(err))\n"
+            "    return false\n"
+            "  end\n"
+            "  local function try_scenario(cat, p, val)\n"
+            "    if type(Scenario) ~= 'table' or type(Scenario.SetTunableValue) ~= 'function' then\n"
+            "      return false\n"
+            "    end\n"
+            "    local ok, err = pcall(Scenario.SetTunableValue, cat, p, val)\n"
+            "    if ok then\n"
+            "      RL.SendApLog('AP_VOL: scenario set ok cat='..tostring(cat)\n"
+            "        ..' prop='..tostring(p)..' val='..tostring(val))\n"
+            "      return true\n"
+            "    end\n"
+            "    return false\n"
+            "  end\n"
+            "  local won_cat = nil\n"
+            "  local tun_ok = false\n"
+            "  for ci = 1, #cats do\n"
+            "    local cat = cats[ci]\n"
+            "    local ok_d = try_direct(cat, prop, frac)\n"
+            "    local ok_s = try_scenario(cat, prop, frac)\n"
+            "    if ok_d or ok_s then\n"
+            "      won_cat = cat\n"
+            "      tun_ok = true\n"
+            "      break\n"
+            "    end\n"
+            "  end\n"
+            "  RL.SendApLog('AP_VOL: set-cmd tunable ch='..tostring(channel)\n"
+            "    ..' ok='..tostring(tun_ok)..' won_cat='..tostring(won_cat))\n"
+            "  local function try_game_set(ch, val)\n"
+            "    local attempts = {}\n"
+            "    if ch == 'music' then\n"
+            "      attempts = {\n"
+            "        {sig='2arg_fade0', fn=function() Game.SetMusicVolume(val, 0) end},\n"
+            "        {sig='1arg', fn=function() Game.SetMusicVolume(val) end},\n"
+            "      }\n"
+            "    elseif ch == 'sfx' then\n"
+            "      attempts = {\n"
+            "        {sig='2arg_fade0', fn=function() Game.SetSFXVolume(val, 0) end},\n"
+            "        {sig='1arg', fn=function() Game.SetSFXVolume(val) end},\n"
+            "      }\n"
+            "    elseif ch == 'env' then\n"
+            "      attempts = {\n"
+            "        {sig='1arg', fn=function() Game.SetEnvironmentVolume(val) end},\n"
+            "        {sig='2arg_fade0', fn=function() Game.SetEnvironmentVolume(val, 0) end},\n"
+            "      }\n"
+            "    elseif ch == 'master' then\n"
+            "      attempts = {\n"
+            "        {sig='1arg', fn=function() Game.SetMasterVolume(val) end},\n"
+            "        {sig='2arg_fade0', fn=function() Game.SetMasterVolume(val, 0) end},\n"
+            "      }\n"
+            "    end\n"
+            "    for i = 1, #attempts do\n"
+            "      local a = attempts[i]\n"
+            "      if type(a.fn) == 'function' then\n"
+            "        local ok, err = pcall(a.fn)\n"
+            "        if ok then\n"
+            "          RL.SendApLog('AP_VOL: game-set '..ch..' ok sig='..a.sig\n"
+            "            ..' val='..tostring(val))\n"
+            "          return true\n"
+            "        end\n"
+            "        RL.SendApLog('AP_VOL: game-set '..ch..' try '..a.sig\n"
+            "          ..' FAIL err='..tostring(err))\n"
+            "      end\n"
+            "    end\n"
+            "    return false\n"
+            "  end\n"
+            "  local game_ok = try_game_set(channel, frac)\n"
+            "  RL.SendApLog('AP_VOL: set-cmd done ch='..tostring(channel)\n"
+            "    ..' tun='..tostring(tun_ok)..' game='..tostring(game_ok)..' mode='..mode)\n"
+            "  return (tun_ok or game_ok) and 'ok' or 'fail'\n"
+            "end\n"
+            f'RL.VolumeSet("{channel}", "{prop}", {frac:.4f})\n'
+        )
+        pct = int(round(frac * 100))
+        self.output(
+            f"Volume set: {channel}={pct}% ({frac:.2f}) tunable+Game — watch AP_VOL: …"
+        )
+        asyncio.create_task(self._execute_volume_set(lua))
+
+    def _run_volume_get(self):
+        if not self.ctx.game_connected:
+            self.output("Error: Not connected to Metroid Dread. Use /connect_dread [ip]")
+            return
+        lua = (
+            "if not RL then RL = {} end\n"
+            "function RL.VolumeGet()\n"
+            "  local mode = '?'\n"
+            "  pcall(function() mode = tostring(Game.GetCurrentGameModeID()) end)\n"
+            "  RL.SendApLog('AP_VOL: get-cmd start mode='..tostring(mode))\n"
+            "  local function try_game_get(name, fn)\n"
+            "    if type(fn) ~= 'function' then\n"
+            "      RL.SendApLog('AP_VOL: get '..name..' FAIL no-api')\n"
+            "      return\n"
+            "    end\n"
+            "    local ok, v = pcall(fn)\n"
+            "    if ok then\n"
+            "      RL.SendApLog('AP_VOL: get '..name..' ok val='..tostring(v))\n"
+            "    else\n"
+            "      RL.SendApLog('AP_VOL: get '..name..' FAIL err='..tostring(v))\n"
+            "    end\n"
+            "  end\n"
+            "  try_game_get('music', Game.GetMusicVolume)\n"
+            "  try_game_get('sfx', Game.GetSFXVolume)\n"
+            "  try_game_get('env', Game.GetEnvironmentVolume)\n"
+            "  try_game_get('master', Game.GetMasterVolume)\n"
+            "  local cats = {\n"
+            "    'CTunableSoundSystemATK',\n"
+            "    'base::snd::CSoundSystemATK::CTunableSoundSystemATK',\n"
+            "    'CTunableSoundSystem',\n"
+            "    'base::snd::CSoundSystem::CTunableSoundSystem',\n"
+            "  }\n"
+            "  local props = {\n"
+            "    'fMainVolume','fSfxVolume','fMusicVolume','fSpeechVolume',\n"
+            "    'fGruntVolume','fGUIVolume','fEnvironmentStreamsVolume',\n"
+            "  }\n"
+            "  local function read_tunable(cat, prop)\n"
+            "    if type(msemenu) ~= 'table' or type(msemenu.GetTunableData) ~= 'function' then\n"
+            "      return nil, 'no-msemenu'\n"
+            "    end\n"
+            "    local ok, td = pcall(msemenu.GetTunableData, cat, prop)\n"
+            "    if not ok then return nil, tostring(td) end\n"
+            "    if td == nil then return nil, 'nil-td' end\n"
+            "    local ok2, val = pcall(function()\n"
+            "      if td.category == nil or td.property == nil then\n"
+            "        error('bad-td')\n"
+            "      end\n"
+            "      return td.category[td.property]\n"
+            "    end)\n"
+            "    if ok2 then return val, nil end\n"
+            "    return nil, tostring(val)\n"
+            "  end\n"
+            "  for ci = 1, #cats do\n"
+            "    local cat = cats[ci]\n"
+            "    local any = false\n"
+            "    for pi = 1, #props do\n"
+            "      local prop = props[pi]\n"
+            "      local val, err = read_tunable(cat, prop)\n"
+            "      if err == nil then\n"
+            "        any = true\n"
+            "        RL.SendApLog('AP_VOL: tunable-get ok cat='..tostring(cat)\n"
+            "          ..' prop='..tostring(prop)..' val='..tostring(val))\n"
+            "      elseif err ~= 'nil-td' and err ~= 'no-msemenu' then\n"
+            "        RL.SendApLog('AP_VOL: tunable-get FAIL cat='..tostring(cat)\n"
+            "          ..' prop='..tostring(prop)..' err='..tostring(err))\n"
+            "      end\n"
+            "    end\n"
+            "    if not any then\n"
+            "      RL.SendApLog('AP_VOL: tunable-get miss cat='..tostring(cat))\n"
+            "    end\n"
+            "  end\n"
+            "  RL.SendApLog('AP_VOL: get-cmd done mode='..tostring(mode))\n"
+            "  return 'ok'\n"
+            "end\n"
+            "RL.VolumeGet()\n"
+        )
+        self.output("Volume get — watch AP_VOL: get… / tunable-get…")
+        asyncio.create_task(self._execute_volume_get(lua))
+
+    def _run_volume_tunable_smoke(self, test_frac: float):
+        if not self.ctx.game_connected:
+            self.output("Error: Not connected to Metroid Dread. Use /connect_dread [ip]")
+            return
+        lua = (
+            "if not RL then RL = {} end\n"
+            "function RL.VolumeTunableSmoke(testFrac)\n"
+            "  local mode, scen = '?', '?'\n"
+            "  pcall(function() mode = tostring(Game.GetCurrentGameModeID()) end)\n"
+            "  pcall(function() scen = tostring(Game.GetScenarioID()) end)\n"
+            "  RL.SendApLog('AP_VOL: tunable-smoke start mode='..tostring(mode)\n"
+            "    ..' scen='..tostring(scen)..' test='..tostring(testFrac))\n"
+            "  local cats = {\n"
+            "    'CTunableSoundSystemATK',\n"
+            "    'base::snd::CSoundSystemATK::CTunableSoundSystemATK',\n"
+            "    'CTunableSoundSystem',\n"
+            "    'base::snd::CSoundSystem::CTunableSoundSystem',\n"
+            "  }\n"
+            "  local props = {\n"
+            "    {name='fMusicVolume', ch='music'},\n"
+            "    {name='fSfxVolume', ch='sfx'},\n"
+            "    {name='fEnvironmentStreamsVolume', ch='env'},\n"
+            "    {name='fMainVolume', ch='master'},\n"
+            "  }\n"
+            "  local function try_direct(cat, prop, val)\n"
+            "    if type(msemenu) ~= 'table' or type(msemenu.GetTunableData) ~= 'function' then\n"
+            "      RL.SendApLog('AP_VOL: direct FAIL no-msemenu cat='..tostring(cat)\n"
+            "        ..' prop='..tostring(prop))\n"
+            "      return false\n"
+            "    end\n"
+            "    local ok, td = pcall(msemenu.GetTunableData, cat, prop)\n"
+            "    if not ok then\n"
+            "      RL.SendApLog('AP_VOL: direct GetTunableData FAIL cat='..tostring(cat)\n"
+            "        ..' prop='..tostring(prop)..' err='..tostring(td))\n"
+            "      return false\n"
+            "    end\n"
+            "    if td == nil then\n"
+            "      RL.SendApLog('AP_VOL: direct GetTunableData nil cat='..tostring(cat)\n"
+            "        ..' prop='..tostring(prop))\n"
+            "      return false\n"
+            "    end\n"
+            "    local ok2, err = pcall(function()\n"
+            "      if td.category == nil or td.property == nil then\n"
+            "        error('td missing category/property')\n"
+            "      end\n"
+            "      td.category[td.property] = val\n"
+            "    end)\n"
+            "    if ok2 then\n"
+            "      local ok3, cur = pcall(function() return td.category[td.property] end)\n"
+            "      RL.SendApLog('AP_VOL: direct set ok cat='..tostring(cat)\n"
+            "        ..' prop='..tostring(prop)..' val='..tostring(val)\n"
+            "        ..' readback='..tostring(ok3 and cur or err))\n"
+            "      return true\n"
+            "    end\n"
+            "    RL.SendApLog('AP_VOL: direct set FAIL cat='..tostring(cat)\n"
+            "      ..' prop='..tostring(prop)..' err='..tostring(err))\n"
+            "    return false\n"
+            "  end\n"
+            "  local function try_scenario(cat, prop, val)\n"
+            "    if type(Scenario) ~= 'table' or type(Scenario.SetTunableValue) ~= 'function' then\n"
+            "      RL.SendApLog('AP_VOL: scenario FAIL no-api cat='..tostring(cat)\n"
+            "        ..' prop='..tostring(prop))\n"
+            "      return false\n"
+            "    end\n"
+            "    local ok, err = pcall(Scenario.SetTunableValue, cat, prop, val)\n"
+            "    if ok then\n"
+            "      RL.SendApLog('AP_VOL: scenario set ok cat='..tostring(cat)\n"
+            "        ..' prop='..tostring(prop)..' val='..tostring(val))\n"
+            "      return true\n"
+            "    end\n"
+            "    RL.SendApLog('AP_VOL: scenario set FAIL cat='..tostring(cat)\n"
+            "      ..' prop='..tostring(prop)..' err='..tostring(err))\n"
+            "    return false\n"
+            "  end\n"
+            "  local function try_game_set(ch, val)\n"
+            "    local attempts = {}\n"
+            "    if ch == 'music' then\n"
+            "      attempts = {\n"
+            "        {sig='2arg_fade0', fn=function() Game.SetMusicVolume(val, 0) end},\n"
+            "        {sig='1arg', fn=function() Game.SetMusicVolume(val) end},\n"
+            "      }\n"
+            "    elseif ch == 'sfx' then\n"
+            "      attempts = {\n"
+            "        {sig='2arg_fade0', fn=function() Game.SetSFXVolume(val, 0) end},\n"
+            "        {sig='1arg', fn=function() Game.SetSFXVolume(val) end},\n"
+            "      }\n"
+            "    elseif ch == 'env' then\n"
+            "      attempts = {\n"
+            "        {sig='1arg', fn=function() Game.SetEnvironmentVolume(val) end},\n"
+            "        {sig='2arg_fade0', fn=function() Game.SetEnvironmentVolume(val, 0) end},\n"
+            "      }\n"
+            "    elseif ch == 'master' then\n"
+            "      attempts = {\n"
+            "        {sig='1arg', fn=function() Game.SetMasterVolume(val) end},\n"
+            "        {sig='2arg_fade0', fn=function() Game.SetMasterVolume(val, 0) end},\n"
+            "      }\n"
+            "    end\n"
+            "    for i = 1, #attempts do\n"
+            "      local a = attempts[i]\n"
+            "      if type(a.fn) == 'function' then\n"
+            "        local ok, err = pcall(a.fn)\n"
+            "        if ok then\n"
+            "          RL.SendApLog('AP_VOL: game-set '..ch..' ok sig='..a.sig\n"
+            "            ..' val='..tostring(val))\n"
+            "          return true\n"
+            "        end\n"
+            "        RL.SendApLog('AP_VOL: game-set '..ch..' try '..a.sig\n"
+            "          ..' FAIL err='..tostring(err))\n"
+            "      end\n"
+            "    end\n"
+            "    return false\n"
+            "  end\n"
+            "  local won_cat = nil\n"
+            "  for ci = 1, #cats do\n"
+            "    local cat = cats[ci]\n"
+            "    local hits = 0\n"
+            "    for pi = 1, #props do\n"
+            "      local p = props[pi]\n"
+            "      local ok_d = try_direct(cat, p.name, testFrac)\n"
+            "      local ok_s = try_scenario(cat, p.name, testFrac)\n"
+            "      if ok_d or ok_s then hits = hits + 1 end\n"
+            "    end\n"
+            "    if hits > 0 then\n"
+            "      won_cat = cat\n"
+            "      RL.SendApLog('AP_VOL: tunable-smoke category-hit cat='..tostring(cat)\n"
+            "        ..' hits='..tostring(hits))\n"
+            "      break\n"
+            "    else\n"
+            "      RL.SendApLog('AP_VOL: tunable-smoke category-miss cat='..tostring(cat))\n"
+            "    end\n"
+            "  end\n"
+            "  RL.SendApLog('AP_VOL: tunable-smoke game-set pass')\n"
+            "  try_game_set('music', testFrac)\n"
+            "  try_game_set('sfx', testFrac)\n"
+            "  try_game_set('env', testFrac)\n"
+            "  try_game_set('master', testFrac)\n"
+            "  RL.SendApLog('AP_VOL: tunable-smoke after-set get')\n"
+            "  local function try_game_get(name, fn)\n"
+            "    if type(fn) ~= 'function' then\n"
+            "      RL.SendApLog('AP_VOL: get '..name..' FAIL no-api')\n"
+            "      return\n"
+            "    end\n"
+            "    local ok, v = pcall(fn)\n"
+            "    if ok then\n"
+            "      RL.SendApLog('AP_VOL: get '..name..' ok val='..tostring(v))\n"
+            "    else\n"
+            "      RL.SendApLog('AP_VOL: get '..name..' FAIL err='..tostring(v))\n"
+            "    end\n"
+            "  end\n"
+            "  try_game_get('music', Game.GetMusicVolume)\n"
+            "  try_game_get('sfx', Game.GetSFXVolume)\n"
+            "  try_game_get('env', Game.GetEnvironmentVolume)\n"
+            "  try_game_get('master', Game.GetMasterVolume)\n"
+            "  if won_cat then\n"
+            "    for pi = 1, #props do\n"
+            "      local p = props[pi]\n"
+            "      try_direct(won_cat, p.name, testFrac)\n"
+            "      if type(msemenu) == 'table' and type(msemenu.GetTunableData) == 'function' then\n"
+            "        local ok, td = pcall(msemenu.GetTunableData, won_cat, p.name)\n"
+            "        if ok and td and td.category and td.property then\n"
+            "          local ok2, cur = pcall(function() return td.category[td.property] end)\n"
+            "          RL.SendApLog('AP_VOL: tunable-get-after cat='..tostring(won_cat)\n"
+            "            ..' prop='..tostring(p.name)..' val='..tostring(ok2 and cur or 'err'))\n"
+            "        end\n"
+            "      end\n"
+            "    end\n"
+            "  end\n"
+            "  RL.SendApLog('AP_VOL: tunable-smoke done won_cat='..tostring(won_cat)\n"
+            "    ..' — pause/unpause then /volume_get to check survival')\n"
+            "  return 'ok'\n"
+            "end\n"
+            f"RL.VolumeTunableSmoke({test_frac:.4f})\n"
+        )
+        pct = int(round(test_frac * 100))
+        self.output(
+            f"Volume tunable smoke: test={pct}% ({test_frac:.2f}) — "
+            "watch AP_VOL: … then pause/unpause + /volume_get"
+        )
+        asyncio.create_task(self._execute_volume_tunable_smoke(lua))
+
     async def _execute_lua(self, code: str):
         try:
-            await self.ctx.run_lua_code(code)
+            # Fire-and-forget: Lua errors must not tear down the read loop.
+            await self.ctx.run_lua_code(code, wait_response=False)
             self.output("Lua sent (response handled by read loop)")
         except Exception as e:
             self.output(f"Error: {e}")
@@ -697,6 +1319,34 @@ class MetroidDreadClientCommandProcessor(ClientCommandProcessor):
         try:
             await self.ctx.run_lua_code(code, wait_response=False)
             self.output("Map label smoke Lua sent — watch AP_MAP: label-smoke …")
+        except Exception as e:
+            self.output(f"Error: {e}")
+
+    async def _execute_volume_smoke(self, code: str):
+        try:
+            await self.ctx.run_lua_code(code, wait_response=False)
+            self.output("Volume smoke Lua sent — watch AP_VOL: …")
+        except Exception as e:
+            self.output(f"Error: {e}")
+
+    async def _execute_volume_set(self, code: str):
+        try:
+            await self.ctx.run_lua_code(code, wait_response=False)
+            self.output("Volume set Lua sent — watch AP_VOL: …")
+        except Exception as e:
+            self.output(f"Error: {e}")
+
+    async def _execute_volume_get(self, code: str):
+        try:
+            await self.ctx.run_lua_code(code, wait_response=False)
+            self.output("Volume get Lua sent — watch AP_VOL: …")
+        except Exception as e:
+            self.output(f"Error: {e}")
+
+    async def _execute_volume_tunable_smoke(self, code: str):
+        try:
+            await self.ctx.run_lua_code(code, wait_response=False)
+            self.output("Volume tunable smoke Lua sent — watch AP_VOL: …")
         except Exception as e:
             self.output(f"Error: {e}")
 
@@ -861,6 +1511,7 @@ class MetroidDreadContext(CommonContext):
         self._test_hint_location_ids: set = set()
 
         self._lua_response_future: Optional[asyncio.Future] = None
+        self._last_lua_error: Optional[BaseException] = None
         self.death_poll_task: Optional[asyncio.Task] = None
         self.keep_alive_task: Optional[asyncio.Task] = None
         self.read_task: Optional[asyncio.Task] = None
@@ -2490,12 +3141,16 @@ class MetroidDreadContext(CommonContext):
             length = struct.unpack("<l", header[1:4] + b"\x00")[0]
             data = await asyncio.wait_for(self._socket.reader.read(length), timeout=15)
             if not is_success:
-                logger.warning(
-                    "Lua execution failed: %s", data.decode("utf-8", errors="ignore")
-                )
+                err_text = data.decode("utf-8", errors="ignore")
+                logger.warning("Lua execution failed: %s", err_text)
+                exc = DreadLuaException(f"Lua execution failed: {err_text}")
                 if self._lua_response_future and not self._lua_response_future.done():
-                    self._lua_response_future.set_exception(DreadLuaException("Lua execution failed"))
-                raise DreadLuaException("Lua execution failed")
+                    self._lua_response_future.set_exception(exc)
+                # Do NOT raise: background _read_loop must survive failed EXEC
+                # (e.g. bad /lua). Awaiters get the exception via the future.
+                self._last_lua_error = exc
+                return None
+            self._last_lua_error = None
             if self._lua_response_future and not self._lua_response_future.done():
                 self._lua_response_future.set_result(data)
             return data
@@ -2550,6 +3205,7 @@ class MetroidDreadContext(CommonContext):
                 self._lua_response_future = future
 
             try:
+                self._last_lua_error = None
                 self._socket.writer.write(
                     self._build_packet(PacketType.PACKET_REMOTE_LUA_EXEC, code.encode("utf-8"))
                 )
@@ -2559,7 +3215,10 @@ class MetroidDreadContext(CommonContext):
                     return None
 
                 if self.read_task is None or self.read_task.done():
-                    return await self._read_response()
+                    data = await self._read_response()
+                    if self._last_lua_error is not None:
+                        raise self._last_lua_error
+                    return data
 
                 return await asyncio.wait_for(future, timeout=timeout)
             finally:

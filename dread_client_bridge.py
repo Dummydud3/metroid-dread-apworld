@@ -847,6 +847,27 @@ function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
     RandomizerPowerup.OnPickedUp(actor, progression)
 end
 if not RL then RL = {{}} end
+-- Harden ODR Scenario.SetTunableValue: nil category/property (or failed
+-- GetTunableData) used to nil-concat inside the engine helper and abort EXEC.
+if Scenario and not Scenario._APSafeSetTunable then
+    Scenario._APSafeSetTunable = true
+    function Scenario.SetTunableValue(category, property, value)
+        if category == nil or property == nil then
+            error("SetTunableValue: category/property must be strings, got "
+                .. tostring(category) .. ", " .. tostring(property))
+        end
+        if type(msemenu) ~= "table" or type(msemenu.GetTunableData) ~= "function" then
+            error("SetTunableValue: msemenu.GetTunableData missing")
+        end
+        local ok, td = pcall(msemenu.GetTunableData, category, property)
+        if (not ok) or td == nil or td.category == nil or td.property == nil then
+            error("SetTunableValue: GetTunableData failed for "
+                .. tostring(category) .. "." .. tostring(property)
+                .. " (" .. tostring(td) .. ")")
+        end
+        td.category[td.property] = value
+    end
+end
 RL.Pickups = {{}}
 RL.BossPickupIndexByLocation = {boss_index_lua}
 function RL.GetCollectedIndicesAndSend()

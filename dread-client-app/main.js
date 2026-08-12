@@ -20,6 +20,20 @@ const {
 const WORLD_DIR = path.resolve(__dirname, "..");
 const AP_CORE_DIRNAME = "ap_core";
 
+/** Strip UTF-8 BOM (`\uFEFF` / EF BB BF) so JSON.parse accepts Windows-saved files. */
+function stripBom(text) {
+  return String(text ?? "").replace(/^\uFEFF/, "");
+}
+
+function readJsonFile(filePath) {
+  return JSON.parse(stripBom(fs.readFileSync(filePath, "utf8")));
+}
+
+/** UTF-8 without BOM (Node's default `utf8` write). */
+function writeJsonFile(filePath, data) {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+}
+
 function hasCommonClient(dir) {
   return Boolean(dir && fs.existsSync(path.join(dir, "CommonClient.py")));
 }
@@ -72,7 +86,7 @@ function inferApRootFromWorldConfig(worldDir) {
   try {
     const cfgPath = path.join(worldDir, "dread_client_ui_config.json");
     if (!fs.existsSync(cfgPath)) return "";
-    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    const cfg = readJsonFile(cfgPath);
     for (const key of ["games_folder", "yaml_path", "base_rom_path"]) {
       const raw = cfg && cfg[key];
       if (!raw) continue;
@@ -227,7 +241,7 @@ function createWindow() {
 function loadPatchDefaults() {
   try {
     if (fs.existsSync(PATCH_CONFIG_PATH)) {
-      return JSON.parse(fs.readFileSync(PATCH_CONFIG_PATH, "utf8"));
+      return readJsonFile(PATCH_CONFIG_PATH);
     }
   } catch (err) {
     console.error("Failed to load patch config:", err);
@@ -309,10 +323,10 @@ function migratePlaceholderDreadIp(cfg) {
   cfg.dread_ip = DEFAULT_CONFIG.dread_ip;
   try {
     if (fs.existsSync(CONFIG_PATH)) {
-      const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+      const raw = readJsonFile(CONFIG_PATH);
       if (String(raw.dread_ip || "").trim() === "1.2.3.4") {
         raw.dread_ip = DEFAULT_CONFIG.dread_ip;
-        fs.writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2), "utf8");
+        writeJsonFile(CONFIG_PATH, raw);
       }
     }
   } catch (err) {
@@ -333,7 +347,7 @@ function loadConfig() {
   };
   try {
     if (fs.existsSync(CONFIG_PATH)) {
-      Object.assign(cfg, JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")));
+      Object.assign(cfg, readJsonFile(CONFIG_PATH));
     }
   } catch (err) {
     console.error("Failed to load config:", err);
@@ -356,7 +370,7 @@ function loadConfig() {
 function saveConfig(partial) {
   const cfg = { ...loadConfig(), ...partial };
   delete cfg.poptracker_path;
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), "utf8");
+  writeJsonFile(CONFIG_PATH, cfg);
 
   // Keep patcher config in sync for CLI / legacy tools.
   try {
@@ -374,7 +388,7 @@ function saveConfig(partial) {
       custom_exlaunch_deploy:
         patchDefaults.custom_exlaunch_deploy || "exlaunch/deploy",
     };
-    fs.writeFileSync(PATCH_CONFIG_PATH, JSON.stringify(patchCfg, null, 2), "utf8");
+    writeJsonFile(PATCH_CONFIG_PATH, patchCfg);
   } catch (err) {
     console.error("Failed to sync patch config:", err);
   }
@@ -562,7 +576,7 @@ function readRyujinxGameDirs() {
   const cfgPath = path.join(process.env.APPDATA || "", "Ryujinx", "Config.json");
   try {
     if (!fs.existsSync(cfgPath)) return [];
-    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    const cfg = readJsonFile(cfgPath);
     return Array.isArray(cfg.game_dirs) ? cfg.game_dirs.filter(Boolean) : [];
   } catch {
     return [];
@@ -1832,7 +1846,7 @@ ipcMain.handle("is-running", () => Boolean(clientProcess));
 ipcMain.handle("open-tracker", () => openTrackerWindow());
 ipcMain.handle("get-tracker-catalog", () => {
   try {
-    return JSON.parse(fs.readFileSync(CATALOG_PATH, "utf8"));
+    return readJsonFile(CATALOG_PATH);
   } catch (err) {
     return {
       error: String(err.message || err),

@@ -132,6 +132,17 @@
     scrollLog($("log"));
   }
 
+  function handleClientLog(payload) {
+    if (!payload) return;
+    if (payload.stream === "cmd") {
+      appendCommandEcho(payload.text || "");
+      return;
+    }
+    const text = payload.text || "";
+    appendPlainLine(text);
+    ingestVolumeLog(text);
+  }
+
   function appendPrintJson(parts) {
     const line = document.createElement("div");
     line.className = "log-line log-chat";
@@ -513,6 +524,7 @@
     if (st.game_connected != null) {
       state.gameConnected = Boolean(st.game_connected);
       setPill($("pill-game"), state.gameConnected);
+      if (volumeModalOpen) updateVolumeStatusFromConnection();
     }
     if (st.scenario != null) {
       $("pill-scenario").textContent = `Scenario: ${st.scenario || "—"}`;
@@ -739,14 +751,7 @@
 
     if (state.unsubLog) state.unsubLog();
     if (state.unsubStatus) state.unsubStatus();
-    state.unsubLog = hub.onLog((payload) => {
-      if (!payload) return;
-      if (payload.stream === "cmd") {
-        appendCommandEcho(payload.text || "");
-        return;
-      }
-      appendPlainLine(payload.text || "");
-    });
+    state.unsubLog = hub.onLog(handleClientLog);
     state.unsubStatus = hub.onStatus((st) => applyStatus(st));
 
     const result = await hub.startClient({
@@ -877,6 +882,166 @@
     appendPlainLine("[app] Patch complete — opening client.", $("patch-log"));
     setStage("client");
   }
+
+  /* ---------- Set Volume modal ---------- */
+
+  const VOLUME_CHANNELS = [
+    { id: "vol-master", channel: "master", prop: "fMainVolume" },
+    { id: "vol-music", channel: "music", prop: "fMusicVolume" },
+    { id: "vol-sfx", channel: "sfx", prop: "fSfxVolume" },
+    { id: "vol-env", channel: "env", prop: "fEnvironmentStreamsVolume" },
+  ];
+  const volumeTimers = Object.create(null);
+  let volumeModalOpen = false;
+  let volumeSuppressSend = false;
+
+  function setVolumeStatus(text, isError) {
+    const el = $("volume-status");
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = isError ? "var(--warn)" : "";
+  }
+
+  function clampVolumePercent(raw) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    return Math.min(100, Math.max(0, Math.round(n * 10) / 10));
+  }
+
+  function updateVolumeStatusFromConnection() {
+    if (!state.running) {
+      setVolumeStatus("Client not running — edits stay local until you connect.", true);
+      return;
+    }
+    if (!state.gameConnected) {
+      setVolumeStatus("Not connected to the game — Connect Game first. Edits will not send.", true);
+      return;
+    }
+    setVolumeStatus("Connected — changes send over Remote Lua (tunable + Game.Set*).");
+  }
+
+  function ingestVolumeLog(text) {
+    if (!volumeModalOpen) return;
+    const cleaned = String(text || "").replace(ANSI_RE, "");
+    for (const line of cleaned.split(/\r?\n/)) {
+      let m = line.match(/AP_VOL:\s*get\s+(music|sfx|env|master)\s+ok\s+val=([0-9.]+)/i);
+      if (m) {
+        applyVolumeReadback(m[1].toLowerCase(), Number(m[2]));
+        continue;
+      }
+      m = line.match(
+        /AP_VOL:\s*tunable-get\s+ok\s+cat=\S+\s+prop=(fMusicVolume|fSfxVolume|fEnvironmentStreamsVolume|fMainVolume)\s+val=([0-9.]+)/i
+      );
+      if (m) {
+        const prop = m[1];
+        const ch =
+          prop === "fMusicVolume"
+            ? "music"
+            : prop === "fSfxVolume"
+              ? "sfx"
+              : prop === "fEnvironmentStreamsVolume"
+                ? "env"
+                : "master";
+        applyVolumeReadback(ch, Number(m[2]));
+      }
+    }
+  }
+
+  function applyVolumeReadback(channel, frac) {
+    if (!Number.isFinite(frac)) return;
+    const entry = VOLUME_CHANNELS.find((c) => c.channel === channel);
+    if (!entry) return;
+    const input = $(entry.id);
+    if (!input) return;
+    const pct = clampVolumePercent(frac * 100);
+    if (pct == null) return;
+    volumeSuppressSend = true;
+    input.value = String(pct);
+    volumeSuppressSend = false;
+  }
+
+  async function sendVolumeChannel(channel, percent) {
+    if (!state.running || !state.gameConnected) {
+      updateVolumeStatusFromConnection();
+      return;
+    }
+    const result = await hub.sendCommand(`/volume_set ${channel} ${percent}`);
+    if (!result || !result.ok) {
+      setVolumeStatus((result && result.error) || "Failed to send volume command.", true);
+      return;
+    }
+    setVolumeStatus(`Sent ${channel} = ${percent}% (tunable + Game.Set*).`);
+  }
+
+  function scheduleVolumeSend(channel, percent) {
+    if (volumeTimers[channel]) clearTimeout(volumeTimers[channel]);
+    volumeTimers[channel] = setTimeout(() => {
+      volumeTimers[channel] = null;
+      sendVolumeChannel(channel, percent).catch((err) => {
+        setVolumeStatus(String(err), true);
+      });
+    }, 75);
+  }
+
+  function openVolumeModal() {
+    const modal = $("volume-modal");
+    if (!modal) return;
+    volumeModalOpen = true;
+    modal.hidden = false;
+    updateVolumeStatusFromConnection();
+    if (state.running && state.gameConnected) {
+      setVolumeStatus("Reading current volumes…");
+      hub.sendCommand("/volume_get").then((result) => {
+        if (!result || !result.ok) {
+          setVolumeStatus((result && result.error) || "Could not read volumes.", true);
+          return;
+        }
+        updateVolumeStatusFromConnection();
+      });
+    }
+    const first = $("vol-music");
+    if (first) first.focus();
+  }
+
+  function closeVolumeModal() {
+    const modal = $("volume-modal");
+    if (!modal) return;
+    volumeModalOpen = false;
+    modal.hidden = true;
+    for (const key of Object.keys(volumeTimers)) {
+      if (volumeTimers[key]) clearTimeout(volumeTimers[key]);
+      volumeTimers[key] = null;
+    }
+  }
+
+  for (const entry of VOLUME_CHANNELS) {
+    const input = $(entry.id);
+    if (!input) continue;
+    const onChange = () => {
+      if (volumeSuppressSend) return;
+      const pct = clampVolumePercent(input.value);
+      if (pct == null) {
+        setVolumeStatus("Enter a number from 0 to 100.", true);
+        return;
+      }
+      if (String(pct) !== String(input.value).trim()) {
+        volumeSuppressSend = true;
+        input.value = String(pct);
+        volumeSuppressSend = false;
+      }
+      scheduleVolumeSend(entry.channel, pct);
+    };
+    input.addEventListener("input", onChange);
+    input.addEventListener("change", onChange);
+  }
+
+  $("btn-set-volume").addEventListener("click", () => openVolumeModal());
+  document.querySelectorAll("[data-volume-close]").forEach((el) => {
+    el.addEventListener("click", () => closeVolumeModal());
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && volumeModalOpen) closeVolumeModal();
+  });
 
   /* ---------- Main client actions ---------- */
 
@@ -1044,14 +1209,7 @@
     const running = await hub.isRunning();
     state.running = Boolean(running);
     if (state.running) {
-      state.unsubLog = hub.onLog((payload) => {
-        if (!payload) return;
-        if (payload.stream === "cmd") {
-          appendCommandEcho(payload.text || "");
-          return;
-        }
-        appendPlainLine(payload.text || "");
-      });
+      state.unsubLog = hub.onLog(handleClientLog);
       state.unsubStatus = hub.onStatus((st) => applyStatus(st));
       const st = await hub.getStatus();
       applyStatus(st);

@@ -278,6 +278,7 @@
               <button id="btn-connect-game" type="button">Connect Game</button>
               <button id="btn-deathlink" type="button" disabled>DeathLink: —</button>
               <button id="btn-tracker" type="button">Map Tracker</button>
+              <button id="btn-set-volume" type="button">Set Volume</button>
               <button id="btn-disconnect" type="button">Disconnect</button>
               <button id="btn-back-patch" type="button" class="ghost">Re-patch</button>
             </div>
@@ -302,6 +303,75 @@
         </div>
       </section>
     </div>
+
+    <div id="volume-modal" class="modal" hidden>
+      <div class="modal-backdrop" data-volume-close></div>
+      <div
+        class="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="volume-modal-title"
+      >
+        <div class="modal-head">
+          <h2 id="volume-modal-title">Set Volume</h2>
+          <button type="button" class="ghost" id="btn-volume-close" data-volume-close>
+            Close
+          </button>
+        </div>
+        <p id="volume-status" class="hint volume-status">Adjust levels 0–100. Changes send immediately when connected.</p>
+        <div class="volume-grid">
+          <label>
+            Master
+            <input
+              id="vol-master"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value="100"
+              inputmode="decimal"
+            />
+          </label>
+          <label>
+            Music
+            <input
+              id="vol-music"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value="100"
+              inputmode="decimal"
+            />
+          </label>
+          <label>
+            SFX
+            <input
+              id="vol-sfx"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value="100"
+              inputmode="decimal"
+            />
+          </label>
+          <label>
+            Ambience
+            <input
+              id="vol-env"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value="100"
+              inputmode="decimal"
+            />
+          </label>
+        </div>
+      </div>
+    </div>
+
     <script src="app.js"></script>
   </body>
 </html>
