@@ -1,0 +1,177 @@
+[
+  {
+    "key": "artaria_intro_room_start_point",
+    "label": "Artaria - Intro Room - Start Point",
+    "default": true
+  },
+  {
+    "key": "artaria_map_station_save_station",
+    "label": "Artaria - Map Station - Save Station",
+    "default": false
+  },
+  {
+    "key": "artaria_navigation_station_north_save_station",
+    "label": "Artaria - Navigation Station North - Save Station",
+    "default": false
+  },
+  {
+    "key": "artaria_navigation_station_south_save_station",
+    "label": "Artaria - Navigation Station South - Save Station",
+    "default": false
+  },
+  {
+    "key": "artaria_save_station_east_save_station",
+    "label": "Artaria - Save Station East - Save Station",
+    "default": false
+  },
+  {
+    "key": "artaria_save_station_north_save_station",
+    "label": "Artaria - Save Station North - Save Station",
+    "default": false
+  },
+  {
+    "key": "artaria_save_station_south_save_station",
+    "label": "Artaria - Save Station South - Save Station",
+    "default": false
+  },
+  {
+    "key": "artaria_save_station_west_save_station",
+    "label": "Artaria - Save Station West - Save Station",
+    "default": false
+  },
+  {
+    "key": "burenia_map_station_save_station",
+    "label": "Burenia - Map Station - Save Station",
+    "default": false
+  },
+  {
+    "key": "burenia_navigation_station_north_save_station",
+    "label": "Burenia - Navigation Station North - Save Station",
+    "default": false
+  },
+  {
+    "key": "burenia_navigation_station_south_save_station",
+    "label": "Burenia - Navigation Station South - Save Station",
+    "default": false
+  },
+  {
+    "key": "burenia_save_station_middle_save_station",
+    "label": "Burenia - Save Station Middle - Save Station",
+    "default": false
+  },
+  {
+    "key": "burenia_save_station_north_save_station",
+    "label": "Burenia - Save Station North - Save Station",
+    "default": false
+  },
+  {
+    "key": "burenia_save_station_south_save_station",
+    "label": "Burenia - Save Station South - Save Station",
+    "default": false
+  },
+  {
+    "key": "cataris_map_station_save_station",
+    "label": "Cataris - Map Station - Save Station",
+    "default": false
+  },
+  {
+    "key": "cataris_navigation_station_northwest_save_station",
+    "label": "Cataris - Navigation Station Northwest - Save Station",
+    "default": false
+  },
+  {
+    "key": "cataris_navigation_station_southeast_save_station",
+    "label": "Cataris - Navigation Station Southeast - Save Station",
+    "default": false
+  },
+  {
+    "key": "cataris_save_station_east_save_station",
+    "label": "Cataris - Save Station East - Save Station",
+    "default": false
+  },
+  {
+    "key": "cataris_save_station_west_save_station",
+    "label": "Cataris - Save Station West - Save Station",
+    "default": false
+  },
+  {
+    "key": "dairon_map_station_save_station",
+    "label": "Dairon - Map Station - Save Station",
+    "default": false
+  },
+  {
+    "key": "dairon_navigation_station_north_save_station",
+    "label": "Dairon - Navigation Station North - Save Station",
+    "default": false
+  },
+  {
+    "key": "dairon_navigation_station_south_save_station",
+    "label": "Dairon - Navigation Station South - Save Station",
+    "default": false
+  },
+  {
+    "key": "dairon_save_station_east_save_station",
+    "label": "Dairon - Save Station East - Save Station",
+    "default": false
+  },
+  {
+    "key": "dairon_save_station_west_save_station",
+    "label": "Dairon - Save Station West - Save Station",
+    "default": false
+  },
+  {
+    "key": "elun_save_station_save_station",
+    "label": "Elun - Save Station - Save Station",
+    "default": false
+  },
+  {
+    "key": "ferenia_map_station_save_station",
+    "label": "Ferenia - Map Station - Save Station",
+    "default": false
+  },
+  {
+    "key": "ferenia_navigation_station_save_station",
+    "label": "Ferenia - Navigation Station - Save Station",
+    "default": false
+  },
+  {
+    "key": "ferenia_save_station_north_save_station",
+    "label": "Ferenia - Save Station North - Save Station",
+    "default": false
+  },
+  {
+    "key": "ferenia_save_station_southeast_save_station",
+    "label": "Ferenia - Save Station Southeast - Save Station",
+    "default": false
+  },
+  {
+    "key": "ghavoran_map_station_save_station",
+    "label": "Ghavoran - Map Station - Save Station",
+    "default": false
+  },
+  {
+    "key": "ghavoran_navigation_station_save_station",
+    "label": "Ghavoran - Navigation Station - Save Station",
+    "default": false
+  },
+  {
+    "key": "ghavoran_save_station_center_save_station",
+    "label": "Ghavoran - Save Station Center - Save Station",
+    "default": false
+  },
+  {
+    "key": "ghavoran_save_station_east_save_station",
+    "label": "Ghavoran - Save Station East - Save Station",
+    "default": false
+  },
+  {
+    "key": "hanubia_navigation_station_save_station",
+    "label": "Hanubia - Navigation Station - Save Station",
+    "default": false
+  },
+  {
+    "key": "itorash_transport_to_hanubia_elevator_to_hanubia",
+    "label": "Itorash - Transport to Hanubia - Elevator to Hanubia",
+    "default": false
+  }
+]

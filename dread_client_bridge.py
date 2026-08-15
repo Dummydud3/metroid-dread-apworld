@@ -12,7 +12,7 @@ import os
 import zipfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 # Package directory (worlds/metroid_dread) — logic + client data live here.
 # When loaded from a .apworld zip, Path(__file__) is a virtual path; readers
@@ -230,8 +230,49 @@ def _resources_for_item_name(item_name: str) -> Optional[ResourceProgression]:
     return None
 
 
-def get_item_resources(item_name: str, item_id: Optional[int] = None) -> Optional[ResourceProgression]:
+def get_item_resources(
+    item_name: str,
+    item_id: Optional[int] = None,
+    *,
+    extras: Optional[Dict[str, Any]] = None,
+) -> Optional[ResourceProgression]:
     """Return resource progression [[{item_id, quantity}, ...], ...] for an AP item name or ID."""
+    if item_name in ("Flash Shift", "Flash Shift Upgrade"):
+        try:
+            from flash_shift import main_resources, plan_from_extras, upgrade_resources
+
+            plan = plan_from_extras(extras)
+            if item_name == "Flash Shift":
+                return _normalize_progression(
+                    main_resources(int(plan.get("included_ammo", 2) or 2))
+                )
+            return _normalize_progression(
+                upgrade_resources(int(plan.get("upgrade_amount", 1) or 1))
+            )
+        except Exception:
+            pass
+    if item_name in (
+        "Missile Tank",
+        "Missile+ Tank",
+        "Power Bomb Tank",
+        "Energy Tank",
+        "Energy Part",
+    ):
+        try:
+            from dread_item_mapping import (
+                apply_yield_overrides,
+                get_dread_item_data,
+                yields_from_extras,
+            )
+
+            raw = get_dread_item_data(item_name)
+            if raw:
+                adjusted = apply_yield_overrides(
+                    item_name, raw, yields_from_extras(extras)
+                )
+                return _normalize_progression(adjusted["resources"])
+        except Exception:
+            pass
     progression = _resources_for_item_name(item_name)
     if progression:
         return progression
@@ -246,7 +287,7 @@ def get_item_resources(item_name: str, item_id: Optional[int] = None) -> Optiona
     if resolved_id is not None:
         local_name = ap_item_id_to_name().get(resolved_id)
         if local_name and local_name != item_name:
-            return _resources_for_item_name(local_name)
+            return get_item_resources(local_name, extras=extras)
 
     return None
 
@@ -395,6 +436,39 @@ def format_dna_receive_lua(message: str, received_pickups: int, inventory_index:
     )
 
 
+def format_metroidnization_grant_lua(*, reason: str = "All Bosses") -> str:
+    """Grant ITEM_METROIDNIZATION so ODR's Itorash ADAM door unlocks.
+
+    Idempotent: no-op when already owned. Used for All Bosses (and All Bosses
+    + DNA) once the AP client confirms the gate conditions.
+    """
+    safe_reason = str(reason or "All Bosses").replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        "do "
+        "local ok, err = pcall(function() "
+        "  if not RandomizerPowerup or not RandomizerPowerup.SetItemAmount then "
+        "    error('RandomizerPowerup.SetItemAmount missing') "
+        "  end "
+        "  if RandomizerPowerup.HasItem and RandomizerPowerup.HasItem('ITEM_METROIDNIZATION') then "
+        "    return "
+        "  end "
+        "  if RandomizerPowerup.GetItemAmount "
+        "and (RandomizerPowerup.GetItemAmount('ITEM_METROIDNIZATION') or 0) > 0 then "
+        "    return "
+        "  end "
+        "  RandomizerPowerup.SetItemAmount('ITEM_METROIDNIZATION', 1) "
+        f'  Game.LogWarn(0, "AP: granted ITEM_METROIDNIZATION ({safe_reason})") '
+        "  if RL and RL.SendApLog then "
+        f'    RL.SendApLog("AP_ALL_BOSSES: Metroidnization granted ({safe_reason})") '
+        "  end "
+        "end); "
+        "if not ok then "
+        "  Game.LogWarn(0, 'AP Metroidnization grant failed: '..tostring(err)) "
+        "end "
+        "end"
+    )
+
+
 def format_debug_give_lua(item_name: str, progression: Union[List[dict], ResourceProgression]) -> str:
     """
     Build Lua for the client's local /give debug command.
@@ -491,7 +565,11 @@ def _item_id_to_ap_rules() -> Dict[str, Tuple[str, int]]:
     return rules
 
 
-def counts_from_inventory_amounts(amounts: List[int]) -> Dict[str, int]:
+def counts_from_inventory_amounts(
+    amounts: List[int],
+    *,
+    extras: Optional[Dict[str, Any]] = None,
+) -> Dict[str, int]:
     """Convert RL inventory quantity array into AP item-name counts for logic."""
     ids = inventory_item_ids()
     rules = _item_id_to_ap_rules()
@@ -513,23 +591,53 @@ def counts_from_inventory_amounts(amounts: List[int]) -> Dict[str, int]:
         if item_id == "ITEM_MAX_LIFE":
             # Base energy is 99; each Energy Tank adds 100.
             n = max(0, (amount - 99) // 100)
+        elif item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN":
+            # Chain stacks are not AP "Flash Shift Upgrade" pickup copies.
+            # Pickup counts come from items_received; Ghost Aura drives ability.
+            continue
         else:
             n = amount // unit
         if n <= 0:
             continue
         counts[ap_name] = max(counts.get(ap_name, 0), n)
-    # Flash Shift Upgrade implies Flash Shift ability for logic.
-    if counts.get("Flash Shift Upgrade", 0) >= 1:
-        counts["Flash Shift"] = max(counts.get("Flash Shift", 0), 1)
+    apply_flash_shift_logic_counts(counts, extras=extras)
     return counts
 
 
-def counts_from_starting_items(starting_items: Dict[str, int]) -> Dict[str, int]:
+def apply_flash_shift_logic_counts(
+    counts: Dict[str, int],
+    *,
+    extras: Optional[Dict[str, Any]] = None,
+) -> Dict[str, int]:
+    """Set Flash Shift ability from inventory counts using seed Flash Shift options."""
+    try:
+        from flash_shift import logical_ability_and_chains, plan_from_extras
+    except ImportError:
+        if counts.get("Flash Shift Upgrade", 0) >= 1:
+            counts["Flash Shift"] = max(counts.get("Flash Shift", 0), 1)
+        return counts
+    plan = plan_from_extras(extras)
+    main_qty = int(counts.get("Flash Shift", 0) or 0)
+    has_ability, _chains = logical_ability_and_chains(counts, plan)
+    if has_ability:
+        counts["Flash Shift"] = max(main_qty, 1)
+    elif main_qty <= 0:
+        counts.pop("Flash Shift", None)
+    return counts
+
+
+def counts_from_starting_items(
+    starting_items: Dict[str, int],
+    *,
+    extras: Optional[Dict[str, Any]] = None,
+) -> Dict[str, int]:
     """Convert ODR patch_extras starting_items {ITEM_*: qty} → AP logic counts."""
     rules = _item_id_to_ap_rules()
     counts: Dict[str, int] = {}
     if not isinstance(starting_items, dict):
         return counts
+    ghost = 0
+    chains = 0
     for item_id, qty in starting_items.items():
         try:
             amount = int(qty or 0)
@@ -537,7 +645,14 @@ def counts_from_starting_items(starting_items: Dict[str, int]) -> Dict[str, int]
             amount = 0
         if amount <= 0:
             continue
-        rule = rules.get(str(item_id))
+        iid = str(item_id)
+        if iid == "ITEM_GHOST_AURA":
+            ghost = max(ghost, amount)
+            continue
+        if iid == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN":
+            chains = max(chains, amount)
+            continue
+        rule = rules.get(iid)
         if not rule:
             continue
         ap_name, unit = rule
@@ -546,8 +661,45 @@ def counts_from_starting_items(starting_items: Dict[str, int]) -> Dict[str, int]
         if n <= 0:
             continue
         counts[ap_name] = max(counts.get(ap_name, 0), n)
-    if counts.get("Flash Shift Upgrade", 0) >= 1:
+
+    try:
+        from flash_shift import plan_from_extras
+
+        plan = plan_from_extras(extras)
+    except ImportError:
+        plan = {
+            "vanilla": False,
+            "require_main": False,
+            "included_ammo": 2,
+            "upgrade_amount": 1,
+        }
+    included = int(plan.get("included_ammo", 2) or 0)
+    up_amt = max(1, int(plan.get("upgrade_amount", 1) or 1))
+    if ghost > 0:
         counts["Flash Shift"] = max(counts.get("Flash Shift", 0), 1)
+    if plan.get("vanilla"):
+        pass
+    elif plan.get("require_main"):
+        extra_chains = max(0, chains - (included if ghost > 0 else 0))
+        if extra_chains > 0:
+            counts["Flash Shift Upgrade"] = max(
+                counts.get("Flash Shift Upgrade", 0), extra_chains // up_amt
+            )
+        elif chains > 0 and ghost <= 0:
+            counts["Flash Shift Upgrade"] = max(
+                counts.get("Flash Shift Upgrade", 0), max(1, chains // up_amt)
+            )
+    else:
+        # Progressive: ghost ⇒ at least one upgrade; remaining chains ⇒ extra copies.
+        if ghost > 0:
+            counts["Flash Shift Upgrade"] = max(
+                counts.get("Flash Shift Upgrade", 0), 1 + (chains // up_amt)
+            )
+        elif chains > 0:
+            counts["Flash Shift Upgrade"] = max(
+                counts.get("Flash Shift Upgrade", 0), max(1, chains // up_amt)
+            )
+    apply_flash_shift_logic_counts(counts, extras=extras)
     return counts
 
 
@@ -812,14 +964,25 @@ def build_bootstrap_chunks(buffer_size: int = 4096) -> List[str]:
     # installed randomizer_powerup.lua is stock ODR (no RandomizerFlashShiftUpgrade).
     # Without this class, RL.ConfirmPickup errors → ReceivedPickups never advances →
     # the client re-sends the same RL.ReceivePickup forever (popup loop).
+    # RL.FlashShiftRequiresMain is set from seed patch_extras when the client connects.
     part0 = f"""
 Game.DoFile('actors/items/randomizer_powerup/scripts/randomizer_powerup.lua')
+if not RL then RL = {{}} end
+if RL.FlashShiftRequiresMain == nil then
+    RL.FlashShiftRequiresMain = AP_FLASH_SHIFT_REQUIRES_MAIN or false
+end
+local function ap_flash_shift_requires_main()
+    if RL and RL.FlashShiftRequiresMain ~= nil then
+        return RL.FlashShiftRequiresMain and true or false
+    end
+    return AP_FLASH_SHIFT_REQUIRES_MAIN and true or false
+end
 if RandomizerPowerup and not RandomizerPowerup._APFlashUpgradeHooked then
     RandomizerPowerup._APFlashUpgradeHooked = true
     local _APIncreaseItemAmount = RandomizerPowerup.IncreaseItemAmount
     function RandomizerPowerup.IncreaseItemAmount(item_id, quantity, capacity)
         if item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and quantity and quantity > 0 then
-            if not RandomizerPowerup.HasItem("ITEM_GHOST_AURA") then
+            if not RandomizerPowerup.HasItem("ITEM_GHOST_AURA") and not ap_flash_shift_requires_main() then
                 RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
                 Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
                 quantity = 0
@@ -833,7 +996,7 @@ setmetatable(RandomizerFlashShiftUpgrade, {{__index = RandomizerPowerup}})
 function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
     progression = progression or {{{{{{item_id = "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", quantity = 1}}}}}}
     local first = not RandomizerPowerup.HasItem("ITEM_GHOST_AURA")
-    if first then
+    if first and not ap_flash_shift_requires_main() then
         RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
         Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
         for _, resource_list in ipairs(progression) do
@@ -955,17 +1118,179 @@ function RL.ReceivePickup(msg,cls,progression_string,receivedPickupIndex,invento
 end
 """.strip()
 
-    part3 = """
+    # Event-only / robot / chozo bosses: persist SPAWNGROUP deaths + GAME_PROGRESS
+    # props onto the player blackboard, then append beaten keys to game-state.
+    try:
+        from worlds.metroid_dread import bosses as _bosses_mod
+    except Exception:
+        try:
+            import bosses as _bosses_mod  # type: ignore
+        except Exception:
+            _bosses_mod = None  # type: ignore
+
+    spawn_entries: List[str] = []
+    progress_entries: List[str] = []
+    bb_keys: List[str] = []
+    if _bosses_mod is not None:
+        for boss in _bosses_mod.boss_spawn_checks():
+            bb = _bosses_mod.boss_blackboard_prop(boss.key)
+            bb_keys.append(boss.key)
+            spawn_entries.append(
+                "{"
+                f'key="{boss.key}",'
+                f'scenario="{boss.spawn_scenario}",'
+                f'actor="{boss.spawn_group}",'
+                f"min={int(boss.min_deaths)},"
+                f'bb="{bb}"'
+                "}"
+            )
+        for boss in _bosses_mod.boss_progress_prop_checks():
+            bb = _bosses_mod.boss_blackboard_prop(boss.key)
+            bb_keys.append(boss.key)
+            progress_entries.append(
+                "{"
+                f'key="{boss.key}",'
+                f'prop="{boss.progress_prop}",'
+                f'bb="{bb}"'
+                "}"
+            )
+    seen_bb: Set[str] = set()
+    bb_key_lua: List[str] = []
+    for key in bb_keys:
+        if key in seen_bb:
+            continue
+        seen_bb.add(key)
+        bb_key_lua.append(f'"{key}"')
+
+    # Story gates for map-tracker (Quiet Robe uses boss progress; X release is separate).
+    story_entries: List[str] = []
+    story_keys_lua: List[str] = []
+    try:
+        from worlds.metroid_dread import tracker_gate_events as _gate_mod
+    except Exception:
+        try:
+            import tracker_gate_events as _gate_mod  # type: ignore
+        except Exception:
+            _gate_mod = None  # type: ignore
+    if _gate_mod is not None:
+        for gate in _gate_mod.story_progress_checks():
+            story_keys_lua.append(f'"{gate.key}"')
+            story_entries.append(
+                "{"
+                f'key="{gate.key}",'
+                f'prop="{gate.progress_prop}",'
+                f'bb="{gate.blackboard_prop}"'
+                "}"
+            )
+
+    spawn_lua = "{" + ",".join(spawn_entries) + "}"
+    progress_lua = "{" + ",".join(progress_entries) + "}"
+    bb_keys_lua = "{" + ",".join(bb_key_lua) + "}"
+    story_lua = "{" + ",".join(story_entries) + "}"
+    story_keys_joined = "{" + ",".join(story_keys_lua) + "}"
+
+    # Boss probe tables are interpolated; DeathLink Lua below stays a plain string
+    # so `{bb_health, ...}` is not treated as Python format fields.
+    part3_boss = f"""
+RL.BossSpawnChecks = {spawn_lua}
+RL.BossProgressChecks = {progress_lua}
+RL.BossBlackboardKeys = {bb_keys_lua}
+RL.StoryProgressChecks = {story_lua}
+RL.StoryBlackboardKeys = {story_keys_joined}
+function RL.BossBlackboardProp(key)
+    return "AP_BossBeaten_" .. tostring(key)
+end
+function RL.IsElunXReleased()
+    -- ODR writes X_RELEASE_TRUE via Scenario.WriteToBlackboard (Elun scenario BB).
+    -- Also accept GAME_PROGRESS mirrors, quarantine-opened, and seed default.
+    if Init and Init.bDefaultXRelease then return true end
+    if Blackboard.GetProp("GAME_PROGRESS", "X_RELEASE_TRUE") then return true end
+    if Blackboard.GetProp("GAME_PROGRESS", "QUARENTINE_OPENED") then return true end
+    if Scenario and Scenario.RandoTrueXRelease and Scenario.ReadFromBlackboard then
+        local ok, v = pcall(Scenario.ReadFromBlackboard, Scenario.RandoTrueXRelease, false)
+        if ok and v then return true end
+    end
+    if Game.GetScenarioBlackboardSectionID then
+        local sec = Game.GetScenarioBlackboardSectionID("s060_quarantine")
+        if sec and Blackboard.GetProp(sec, "X_RELEASE_TRUE") then return true end
+    end
+    return false
+end
+function RL.SyncBossSpawnDeaths()
+    -- Persist spawn-group / GAME_PROGRESS evidence so tracker identity cannot
+    -- leak across bosses via region fallbacks or shared-room pickups.
+    if Game.GetCurrentGameModeID() ~= "INGAME" then return end
+    local p = Game.GetPlayerBlackboardSectionName()
+    if not p then return end
+    local scen = Game.GetScenarioID() or ""
+    for _,c in ipairs(RL.BossSpawnChecks or {{}}) do
+        if scen == c.scenario then
+            local a = Game.GetActor(c.actor)
+            local deaths = 0
+            if a and a.SPAWNGROUP and a.SPAWNGROUP.iNumDeaths then
+                deaths = a.SPAWNGROUP.iNumDeaths
+            end
+            if deaths >= c.min then
+                Blackboard.SetProp(p, c.bb, "b", true)
+            end
+        end
+    end
+    for _,c in ipairs(RL.BossProgressChecks or {{}}) do
+        local v = Blackboard.GetProp("GAME_PROGRESS", c.prop)
+        if v then
+            Blackboard.SetProp(p, c.bb, "b", true)
+        end
+    end
+    -- Story gates (map tracker): Elun X release, etc.
+    for _,c in ipairs(RL.StoryProgressChecks or {{}}) do
+        local hit = false
+        if c.key == "elun_release_x" then
+            hit = RL.IsElunXReleased()
+        else
+            local v = Blackboard.GetProp("GAME_PROGRESS", c.prop)
+            hit = not not v
+        end
+        if hit then
+            Blackboard.SetProp(p, c.bb, "b", true)
+        end
+    end
+end
+function RL.CollectBeatenBossKeys()
+    local p = Game.GetPlayerBlackboardSectionName()
+    local out = {{}}
+    if not p then return out end
+    for _,key in ipairs(RL.BossBlackboardKeys or {{}}) do
+        local prop = RL.BossBlackboardProp(key)
+        if Blackboard.GetProp(p, prop) then
+            table.insert(out, key)
+        end
+    end
+    return out
+end
+function RL.CollectStoryKeys()
+    local p = Game.GetPlayerBlackboardSectionName()
+    local out = {{}}
+    if not p then return out end
+    for _,c in ipairs(RL.StoryProgressChecks or {{}}) do
+        if Blackboard.GetProp(p, c.bb) then
+            table.insert(out, c.key)
+        end
+    end
+    return out
+end
 function RL.GetGameStateAndSend()
     local current_state = Game.GetCurrentGameModeID()
     local current_scenario = ""
     local has_beaten = Init.bBeatenSinceLastReboot
     if current_state == 'INGAME' then
         current_scenario = Game.GetScenarioID()
+        pcall(RL.SyncBossSpawnDeaths)
     else
         current_scenario = current_state
     end
-    RL.SendNewGameState(current_scenario .. ";" .. tostring(has_beaten))
+    local boss_part = table.concat(RL.CollectBeatenBossKeys(), ",")
+    local story_part = table.concat(RL.CollectStoryKeys(), ",")
+    RL.SendNewGameState(current_scenario .. ";" .. tostring(has_beaten) .. ";" .. boss_part .. ";" .. story_part)
 end
 function RL.UpdateRDVClient(new_scenario)
     RL.GetGameStateAndSend()
@@ -999,6 +1324,10 @@ function RL.UpdateRDVClient(new_scenario)
             and next(RL.LastMapIconGlobals) ~= nil then
             Game.AddSF(3.0, "RL.ReapplyLastMapIconGlobals", "")
         end
+        -- Re-probe spawn groups after room transitions (deaths often apply then).
+        pcall(RL.SyncBossSpawnDeaths)
+        Game.AddSF(0.5, "RL.SyncBossSpawnDeaths", "")
+        Game.AddSF(2.0, "RL.GetGameStateAndSend", "")
         RL.CheckDeath()
         local playerSection =  Game.GetPlayerBlackboardSectionName()
         local currentSaveRandoIdentifier = Blackboard.GetProp(playerSection, "THIS_RANDO_IDENTIFIER")
@@ -1011,6 +1340,9 @@ function RL.UpdateRDVClient(new_scenario)
         end
     end
 end
+""".strip()
+
+    part3_rest = """
 -- DeathLink state: NEVER clear DeathHookInstalled / DeathCheckScheduled on
 -- reconnect bootstrap — that nests OnPlayerDead wrappers and stacks AddSF loops
 -- (double DeathLink + double ODR death-counter increments).
@@ -1191,6 +1523,8 @@ RL.SendApLog("AP: DeathLink detection active (poll + OnPlayerDead hook)")
 RL.APConnected = true
 RL.Bootstrap = true
 """.strip()
+    part3 = (part3_boss + "\n" + part3_rest).strip()
+
 
     # Reachable minimap: ApplyReachableMap → VisitBoundsSafe dim paint (flag=4)
     # (needs OdrMap binder + ap_reachable_map_cells.lua for area bounds).

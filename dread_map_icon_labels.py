@@ -44,10 +44,11 @@ one location is a single write of that definition's sprite-atlas cell:
 
     OdrMap.SetIconSprite("ItemCustom19", row, col)
 
-Unrevealed icons are pushed back to UNKNOWN_SPRITE (the ? cell ODR bakes in at
-patch time), so un-hinting or a fresh connect restores the hidden state. The
-atlas cell for each location's real item is baked into the sidecar at patch
-time (entries[].sprite) from the same placement the _R label variants use.
+Unrevealed icons use UNKNOWN_SPRITE (ODR's default ?) when out of logic, and
+IN_LOGIC_UNKNOWN_SPRITE (green ? stamped next to the AP logo) when reachable.
+Revealed icons swap to the placement's item / AP-logo cell. The atlas cell for
+each location's real item is baked into the sidecar at patch time
+(entries[].sprite) from the same placement the _R label variants use.
 """
 
 from __future__ import annotations
@@ -78,11 +79,14 @@ Sprite = Tuple[int, int]
 # coords[0] — so every entry here is that tuple reversed. Cross-checked against
 # the vanilla bmmdef: item_missiletank coords=(7, 0) and the shipped
 # ItemMissileTank def has uSpriteRow=0, uSpriteCol=7.
-UNKNOWN_SPRITE: Sprite = (7, 15)  # ODR "unknown" — the ? cell every icon starts on
+UNKNOWN_SPRITE: Sprite = (7, 15)  # ODR "unknown" — default ? (out-of-logic / unreachable)
 GENERIC_ITEM_SPRITE: Sprite = (0, 4)  # vanilla ItemSphere; used when nothing better fits
-# Empty cell in ODR's icons.bctex that finalize_mod stamps with the AP cluster logo
-# (see dread_scripts/build_ap_map_icon_atlas.py → assets/icons.bctex).
+# Empty cells in ODR's icons.bctex that finalize_mod stamps via
+# dread_scripts/build_ap_map_icon_atlas.py → assets/icons.bctex:
+#   (5, 10) AP cluster logo — foreign / unknown revealed items
+#   (5, 11) green in-logic ? — reachable uncollected / unknown checks
 AP_LOGO_SPRITE: Sprite = (5, 10)
+IN_LOGIC_UNKNOWN_SPRITE: Sprite = (5, 11)
 
 ICON_SPRITES: Dict[str, Sprite] = {
     "item_energytank": (0, 5),
@@ -124,6 +128,7 @@ ICON_SPRITES: Dict[str, Sprite] = {
     "DNA": (7, 13),
     "itemsphere": GENERIC_ITEM_SPRITE,
     "unknown": UNKNOWN_SPRITE,
+    "unknown_in_logic": IN_LOGIC_UNKNOWN_SPRITE,
     "archipelago": AP_LOGO_SPRITE,
 }
 
@@ -414,6 +419,10 @@ def build_map_icon_keys_from_pickups(
         "version": KEYS_VERSION,
         "custom_icon_count": custom_n,
         "unknown_sprite": [UNKNOWN_SPRITE[0], UNKNOWN_SPRITE[1]],
+        "in_logic_unknown_sprite": [
+            IN_LOGIC_UNKNOWN_SPRITE[0],
+            IN_LOGIC_UNKNOWN_SPRITE[1],
+        ],
         "ap_logo_sprite": [AP_LOGO_SPRITE[0], AP_LOGO_SPRITE[1]],
         "by_pickup_index": by_pickup_index,
         "by_location_id": by_location_id,
@@ -810,12 +819,30 @@ def revealed_sprites_by_location_id(keys: Mapping[str, Any]) -> Dict[int, Sprite
 
 
 def unknown_sprite(keys: Optional[Mapping[str, Any]] = None) -> Sprite:
-    """The hidden-state atlas cell, honouring a sidecar override if present."""
+    """Out-of-logic / default hidden-state atlas cell (?), with sidecar override."""
     if isinstance(keys, Mapping):
         override = normalize_sprite(keys.get("unknown_sprite"))
         if override is not None:
             return override
     return UNKNOWN_SPRITE
+
+
+def in_logic_unknown_sprite(keys: Optional[Mapping[str, Any]] = None) -> Sprite:
+    """In-logic hidden-state atlas cell (green ?), with sidecar override."""
+    if isinstance(keys, Mapping):
+        override = normalize_sprite(keys.get("in_logic_unknown_sprite"))
+        if override is not None:
+            return override
+    return IN_LOGIC_UNKNOWN_SPRITE
+
+
+def unknown_sprite_for_logic(
+    in_logic: bool, keys: Optional[Mapping[str, Any]] = None
+) -> Sprite:
+    """Pick the unrevealed ? cell for current reachability."""
+    if in_logic:
+        return in_logic_unknown_sprite(keys)
+    return unknown_sprite(keys)
 
 
 def format_apply_map_icon_sprites_chunks(

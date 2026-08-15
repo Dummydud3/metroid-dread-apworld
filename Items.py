@@ -45,7 +45,8 @@ item_table: Dict[str, ItemData] = {
     
     # Aeion abilities
     "Phantom Cloak": ItemData(base_id + 20, ItemClassification.progression),
-    "Flash Shift": ItemData(base_id + 21, ItemClassification.progression),  # deprecated alias; not pooled
+    # Main ability (vanilla / require-main modes). Progressive alias when upgrades unlock.
+    "Flash Shift": ItemData(base_id + 21, ItemClassification.progression),
     "Pulse Radar": ItemData(base_id + 22, ItemClassification.progression),
     
     # Suits
@@ -80,8 +81,9 @@ item_table: Dict[str, ItemData] = {
     "Missile Tank": ItemData(base_id + 100, ItemClassification.filler, 35),
     "Missile+ Tank": ItemData(base_id + 101, ItemClassification.useful, 10),
     "Power Bomb Tank": ItemData(base_id + 102, ItemClassification.filler, 12),
-    # Progressive Flash Shift: first unlocks ability; each adds one chain (max 7 uses)
-    "Flash Shift Upgrade": ItemData(base_id + 103, ItemClassification.progression, 7),
+    # Flash Shift Upgrade: chain ammo filler (like Missile Tank). When Require Main is
+    # off, create_items promotes the first copy to progression (ability unlock).
+    "Flash Shift Upgrade": ItemData(base_id + 103, ItemClassification.filler, 5),
     
     # DNA (for DNA Hunt goal)
     "Metroid DNA": ItemData(base_id + 200, ItemClassification.progression_skip_balancing, 12),
@@ -125,7 +127,7 @@ item_name_groups: Dict[str, set[str]] = {
         "Energy Tank", "Energy Part"
     },
     "Expansions": {
-        "Missile Tank", "Missile+ Tank", "Power Bomb Tank"
+        "Missile Tank", "Missile+ Tank", "Power Bomb Tank", "Flash Shift Upgrade",
     },
     "Events": set(),  # filled below from event_item_table when available
 }

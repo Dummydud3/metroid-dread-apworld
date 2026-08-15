@@ -30,7 +30,8 @@ class MetroidDreadAccessibility(ItemsAccessibility):
 
     Metroid Dread always enforces a stronger world rule regardless of this setting:
     when Raven Beak becomes reachable, at least 90% of clearable pickup checks must
-    already be reachable with that same collection state.
+    already be reachable with that same collection state (100% when Game Goal is
+    100%).
 
     During generation, Minimal is upgraded to Items. Full is kept only when every
     AP pickup/event is in logic under the rolled tricks; otherwise it is
@@ -49,16 +50,26 @@ LIGHT_REGIONS = (
 
 class TrickDifficulty(Choice):
     """
-    Base class for trick difficulty levels.
-    Disabled = Trick not required
-    Beginner/Easy/Medium/Hard/Expert = Trick may be required at that difficulty
+    Base class for trick difficulty levels (Randovania LayoutTrickLevel names).
+
+    Numeric values match RDV ``LayoutTrickLevel.as_number`` so logic database
+    requirements compare correctly:
+
+    Disabled=0, Beginner=1, Intermediate=2, Advanced=3, Expert=4, Ludicrous=5.
+
+    Legacy YAML aliases (easy/medium/hard) map to Intermediate/Advanced/Expert.
+    Pre-rename ``expert`` meant value 5; prefer ``ludicrous`` for that level now.
     """
     option_disabled = 0
     option_beginner = 1
-    option_easy = 2  
-    option_medium = 3
-    option_hard = 4
-    option_expert = 5
+    option_intermediate = 2
+    option_advanced = 3
+    option_expert = 4
+    option_ludicrous = 5
+    # Back-compat with older Hub / Seed Manager YAML wording
+    alias_easy = 2
+    alias_medium = 3
+    alias_hard = 4
     default = 0
 
 
@@ -67,7 +78,7 @@ class KnowledgeTricks(TrickDifficulty):
     Some destructible objects have vulnerabilities other than those which the player is informed of.
     For example, Power Bomb can be used to destroy Enkys or open charge beam doors.
     """
-    display_name = "Knowledge Tricks"
+    display_name = "Knowledge"
 
 
 class MovementTricks(TrickDifficulty):
@@ -75,7 +86,7 @@ class MovementTricks(TrickDifficulty):
     Non-obvious movement which can't easily be classified using other tricks.
     Players may be expected to perform precise jumps and other niche movement optimizations.
     """
-    display_name = "Movement Tricks"
+    display_name = "Movement"
 
 
 class CombatTricks(TrickDifficulty):
@@ -84,7 +95,7 @@ class CombatTricks(TrickDifficulty):
     Defaults to Beginner so early bosses (e.g. Corpius) are logically clearable without
     collecting Energy Tanks during accessibility checks.
     """
-    display_name = "Combat Tricks"
+    display_name = "Combat"
     default = 1
 
 
@@ -99,28 +110,28 @@ class InfiniteBombJump(TrickDifficulty):
     """
     By chaining and timing bomb jumps it's possible to reach the top of a room.
     """
-    display_name = "Infinite Bomb Jump (IBJ)"
+    display_name = "Infinite Bomb Jump"
 
 
 class WaterBombJump(TrickDifficulty):
     """
     Performing a WBJ will make higher bomb jumps underwater possible.
     """
-    display_name = "Water Bomb Jump (WBJ)"
+    display_name = "Water Bomb Jump"
 
 
 class WaterSpaceJump(TrickDifficulty):
     """
     Used to gain height underwater in certain places without Gravity Suit.
     """
-    display_name = "Water Space Jump (WSJ)"
+    display_name = "Water Space Jump"
 
 
 class SingleWallWallJump(TrickDifficulty):
     """
     With this technique it is possible to jump up a single wall all the way up. Requires Morph Ball.
     """
-    display_name = "Single-wall Wall Jump (SWJ)"
+    display_name = "Single-wall Wall Jump"
 
 
 class SlideJump(TrickDifficulty):
@@ -141,14 +152,14 @@ class WallJumpTricks(TrickDifficulty):
     """
     Basic movement ability which can be abused in unintended ways.
     """
-    display_name = "Wall Jump Tricks"
+    display_name = "Wall Jump"
 
 
 class HeatColdRuns(TrickDifficulty):
     """
     You can run through heat and cold rooms without a suit. It depends on your health how long you can stay.
     """
-    display_name = "Heat/Cold Runs (Suitless)"
+    display_name = "Heat/Cold Runs"
 
 
 class ReverseGrappleBlock(Toggle):
@@ -218,7 +229,7 @@ class DiagonalBombJump(TrickDifficulty):
     """
     A special kind of bomb jump where you gain diagonal momentum from bombs that explode slightly to the side.
     """
-    display_name = "Diagonal Bomb Jump (DBJ)"
+    display_name = "Diagonal Bomb Jump"
 
 
 class LedgeWarp(TrickDifficulty):
@@ -232,7 +243,7 @@ class CrossBombLaunch(TrickDifficulty):
     """
     By sliding and morphing as the Cross Bomb is exploding, Samus gains a lot of horizontal momentum.
     """
-    display_name = "Cross Bomb Launch (CBL)"
+    display_name = "Cross Bomb Launch"
 
 
 class FloorClip(TrickDifficulty):
@@ -250,7 +261,40 @@ class ClimbSlopedSurfaces(TrickDifficulty):
 
 
 # ===== DNA / GOAL OPTIONS =====
-# Goal is always defeat Raven Beak. Required DNA gates the Itorash artifact door.
+# Required DNA gates the Itorash artifact door. Game Goal chooses the win condition.
+
+class GameGoal(Choice):
+    """
+    How to complete your Metroid Dread slot.
+
+    **Defeat Raven Beak:** kill Raven Beak (Itorash). Generation still requires
+    >=90% of clearable pickup checks in logic when Raven Beak opens.
+
+    **100%:** collect every check in your slot, then kill Raven Beak. Generation
+    requires 100% of clearable checks in logic before Raven Beak opens; the
+    client only sends goal when all checks are collected and Raven Beak is beaten.
+
+    **All Bosses:** defeat every combat/story boss (see bosses.py), including
+    Z-57 via its pickup check, then kill Raven Beak. Generation keeps the 90%
+    clearance gate and also requires every boss node in logic when Raven Beak
+    opens; the client only sends goal when all bosses are beaten and the game
+    beaten flag is set.
+    """
+    display_name = "Game Goal"
+    option_defeat_raven_beak = 0
+    option_one_hundred_percent = 1
+    option_all_bosses = 2
+    default = 0
+
+    @classmethod
+    def get_option_name(cls, value) -> str:
+        if value == cls.option_one_hundred_percent:
+            return "100%"
+        if value == cls.option_all_bosses:
+            return "All Bosses"
+        name = cls.name_lookup[value]
+        return name.replace("_", " ").title()
+
 
 class RequiredDNA(Range):
     """
@@ -350,7 +394,44 @@ class ShowEnemyDamage(Toggle):
 
 
 class ShowPlayerDamage(DefaultOnToggle):
+    """Show floating damage numbers when Samus takes damage (ODR config.ini
+    ``AIManager.bShowPlayerDamage``). Off = hidden, same as Randovania/ODR."""
     display_name = "Show Player Damage"
+
+
+class ImmediateEnergyParts(DefaultOnToggle):
+    """When enabled, each Energy Part immediately raises max energy by 1/4 of
+    Energy Per Tank (ODR ``immediate_energy_parts`` / ``Init.bImmediateEnergyParts``).
+    When off, four parts are needed before energy increases (vanilla fragment
+    behavior). Matches Randovania's Immediate Energy Part setting."""
+    display_name = "Immediate Energy Parts"
+
+
+class ConstantHeatDamage(Range):
+    """Constant heated-room damage per second (ODR ``constant_environment_damage.heat``).
+    0 = vanilla scaling damage. Randovania starter uses 20."""
+    display_name = "Constant Heat Damage"
+    range_start = 0
+    range_end = 1000
+    default = 20
+
+
+class ConstantColdDamage(Range):
+    """Constant cold-room damage per second (ODR ``constant_environment_damage.cold``).
+    0 = vanilla scaling damage. Randovania starter uses 20."""
+    display_name = "Constant Cold Damage"
+    range_start = 0
+    range_end = 1000
+    default = 20
+
+
+class ConstantLavaDamage(Range):
+    """Constant lava damage per second (ODR ``constant_environment_damage.lava``).
+    0 = vanilla scaling damage. Randovania starter uses 20."""
+    display_name = "Constant Lava Damage"
+    range_start = 0
+    range_end = 1000
+    default = 20
 
 
 class EnableDeathCounter(DefaultOnToggle):
@@ -442,8 +523,19 @@ class PowerBombTankAmmo(Range):
     default = 1
 
 
+class VanillaFlashShiftBehaviour(DefaultOnToggle):
+    """
+    When enabled, the pool contains a single **Flash Shift** item that grants the
+    full vanilla ability (Ghost Aura + 2 chain dashes), matching Randovania / ODR.
+
+    When disabled, Flash Shift uses the upgrade-based system controlled by
+    Flash Shift Upgrade Count and Require Main Item.
+    """
+    display_name = "Vanilla Flash Shift Behaviour"
+
+
 class FlashShiftUpgradeAmount(Range):
-    """How many Flash Shift charges the main item / each upgrade grants."""
+    """How many chain dashes each Flash Shift Upgrade pickup grants (after the base flash)."""
     display_name = "Flash Shift Upgrade Amount"
     range_start = 1
     range_end = 10
@@ -451,11 +543,22 @@ class FlashShiftUpgradeAmount(Range):
 
 
 class FlashShiftUpgradeCount(Range):
-    """Number of Flash Shift Upgrade pickups in the pool (first unlocks Flash Shift)."""
+    """
+    Number of Flash Shift Upgrade pickups in the pool (1–5).
+
+    Only used when Vanilla Flash Shift Behaviour is off.
+    All N upgrades are always added to the item pool and displace Missile Tank
+    filler 1:1 (same padding bucket), so they are guaranteed placements — not
+    optional leftovers that can be dropped when the pool is full.
+    Classification is filler (chain ammo) like Missile Tanks; they do not consume
+    major progression capacity. When Require Main Item is also off, the first
+    upgrade unlocks Flash Shift (progressive) and is promoted to progression;
+    later upgrades add chains only.
+    """
     display_name = "Flash Shift Upgrade Count"
     range_start = 1
-    range_end = 10
-    default = 7
+    range_end = 5
+    default = 3
 
 
 class SpeedBoosterUpgradeCount(Range):
@@ -466,6 +569,10 @@ class SpeedBoosterUpgradeCount(Range):
 
 
 class FlashShiftIncludedAmmo(Range):
+    """
+    Chain dashes bundled with the main Flash Shift item (vanilla is 2).
+    Used when Vanilla Flash Shift Behaviour is on, or when Require Main Item is on.
+    """
     display_name = "Flash Shift Included Ammo"
     range_start = 0
     range_end = 10
@@ -473,7 +580,16 @@ class FlashShiftIncludedAmmo(Range):
 
 
 class FlashShiftUpgradeRequiresMainItem(DefaultOnToggle):
-    display_name = "Flash Shift Upgrade Requires Main Item"
+    """
+    Only used when Vanilla Flash Shift Behaviour is off.
+
+    **On:** Flash Shift Upgrades may be collected early and stack chains, but the
+    ability does not unlock until the main Flash Shift item is collected.
+
+    **Off:** the first Flash Shift Upgrade unlocks the ability (progressive major);
+    later upgrades add chains only.
+    """
+    display_name = "Require Main Item"
 
 
 # ===== ITEM POOL OPTIONS =====
@@ -618,12 +734,14 @@ class MetroidDreadOptions(PerGameCommonOptions):
     """
     Complete options for Metroid Dread with all tricks and glitches
     """
-    # Victory implies 90% clearance; Minimal/Items are forced to Full in generate_early.
+    # Victory implies 90% clearance (100% for one_hundred_percent; all bosses
+    # adds a boss-node gate on top of 90%).
     accessibility: MetroidDreadAccessibility
     start_inventory_from_pool: StartInventoryPool
     death_link: DeathLink
 
-    # DNA gate (goal is always defeat Raven Beak)
+    # Goal + DNA gate
+    game_goal: GameGoal
     required_dna: RequiredDNA
     dna_placement: DNAPlacement
     hint_all_dna: HintAllDNA
@@ -643,6 +761,10 @@ class MetroidDreadOptions(PerGameCommonOptions):
     show_enemy_life: ShowEnemyLife
     show_enemy_damage: ShowEnemyDamage
     show_player_damage: ShowPlayerDamage
+    immediate_energy_parts: ImmediateEnergyParts
+    constant_heat_damage: ConstantHeatDamage
+    constant_cold_damage: ConstantColdDamage
+    constant_lava_damage: ConstantLavaDamage
     enable_death_counter: EnableDeathCounter
     show_dna_in_hud: ShowDnaInHud
     room_name_display: RoomNameDisplay
@@ -665,6 +787,7 @@ class MetroidDreadOptions(PerGameCommonOptions):
     missile_tank_ammo: MissileTankAmmo
     missile_plus_tank_ammo: MissilePlusTankAmmo
     power_bomb_tank_ammo: PowerBombTankAmmo
+    vanilla_flash_shift_behaviour: VanillaFlashShiftBehaviour
     flash_shift_upgrade_amount: FlashShiftUpgradeAmount
     flash_shift_upgrade_count: FlashShiftUpgradeCount
     speed_booster_upgrade_count: SpeedBoosterUpgradeCount
@@ -715,6 +838,7 @@ class MetroidDreadOptions(PerGameCommonOptions):
 # Option groups for better organization on the website
 metroid_dread_option_groups = [
     OptionGroup("Goal & DNA", [
+        GameGoal,
         RequiredDNA,
         DNAPlacement,
         HintAllDNA,
@@ -731,6 +855,10 @@ metroid_dread_option_groups = [
         ShowEnemyLife,
         ShowEnemyDamage,
         ShowPlayerDamage,
+        ImmediateEnergyParts,
+        ConstantHeatDamage,
+        ConstantColdDamage,
+        ConstantLavaDamage,
         EnableDeathCounter,
         RoomNameDisplay,
         RavenBeakDamageTable,
@@ -750,8 +878,14 @@ metroid_dread_option_groups = [
         MissileTanks,
         MissilePlusTanks,
         PowerBombTanks,
-        FlashShiftUpgradeCount,
         SpeedBoosterUpgradeCount,
+    ]),
+    OptionGroup("Flash Shift", [
+        VanillaFlashShiftBehaviour,
+        FlashShiftUpgradeCount,
+        FlashShiftUpgradeRequiresMainItem,
+        FlashShiftIncludedAmmo,
+        FlashShiftUpgradeAmount,
     ]),
     OptionGroup("Ammo & Energy Yields", [
         EnergyPerTank,
@@ -760,9 +894,6 @@ metroid_dread_option_groups = [
         MissileTankAmmo,
         MissilePlusTankAmmo,
         PowerBombTankAmmo,
-        FlashShiftUpgradeAmount,
-        FlashShiftIncludedAmmo,
-        FlashShiftUpgradeRequiresMainItem,
     ]),
     OptionGroup("Progressive Items", [
         ProgressiveBeams,

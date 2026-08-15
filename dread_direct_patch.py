@@ -624,18 +624,19 @@ def install_reachable_map_script(romfs: Path, src_lua: Path) -> None:
 
 
 def install_ap_map_icon_atlas(romfs: Path) -> None:
-    """Overwrite ODR's minimap icons.bctex with the AP-logo-stamped atlas.
+    """Overwrite ODR's minimap icons.bctex with the AP-stamped atlas.
 
     ODR already replaces textures/system/minimap/icons/icons.bctex via
     add_custom_files; we drop our stamped copy on the same loose-romfs path
-    (and replacements.json entry) so foreign / unknown reveals show the
-    Archipelago cluster instead of the generic ItemSphere.
+    (and replacements.json entry) so:
+      - foreign / unknown reveals use the Archipelago cluster cell
+      - in-logic uncollected checks can use the green '?' cell at runtime
     """
     src = ROOT / "assets" / "icons.bctex"
     if not src.is_file():
         log(
             f"[WARN] missing {src} — run dread_scripts/build_ap_map_icon_atlas.py "
-            "(foreign map icons stay on the ItemSphere cell)"
+            "(foreign map icons stay on the ItemSphere cell; in-logic ? unavailable)"
         )
         return
     rel = Path("textures") / "system" / "minimap" / "icons" / "icons.bctex"
@@ -1066,6 +1067,51 @@ def finalize_mod(
         if overrides.is_file():
             text = text.rstrip() + "\n\n" + overrides.read_text(encoding="utf-8")
             log(f"[OK] Appended AP overrides from {overrides.name}")
+        # Bake Require-Main + All Bosses gate flags from pickup layout / extras.
+        requires_main = False
+        all_bosses_gate = False
+        try:
+            with open(patcher_json, encoding="utf-8") as f:
+                pdata = json.load(f)
+            from flash_shift import infer_requires_main_from_pickups, plan_from_extras
+
+            meta = pdata.get("_ap_flash_shift") if isinstance(pdata, dict) else None
+            extras_path = patcher_json.with_name(
+                patcher_json.name.replace("_patcher.json", "_extras.json")
+            )
+            extras = {}
+            if extras_path.is_file():
+                with open(extras_path, encoding="utf-8") as ef:
+                    extras = json.load(ef) or {}
+            if not isinstance(extras, dict):
+                extras = {}
+            if isinstance(meta, dict) and "requires_main" in meta:
+                requires_main = bool(meta.get("requires_main"))
+            else:
+                plan = plan_from_extras(extras)
+                if extras:
+                    requires_main = bool(plan.get("require_main")) and not bool(
+                        plan.get("vanilla")
+                    )
+                else:
+                    requires_main = infer_requires_main_from_pickups(
+                        (pdata or {}).get("pickups") or []
+                    )
+            try:
+                all_bosses_gate = int(extras.get("game_goal", 0) or 0) == 2
+            except Exception:
+                all_bosses_gate = False
+        except Exception as exc:
+            log(f"[WARN] Flash Shift / All Bosses flag detect failed: {exc}")
+        flag = "true" if requires_main else "false"
+        bosses_flag = "true" if all_bosses_gate else "false"
+        text = (
+            f"AP_FLASH_SHIFT_REQUIRES_MAIN = {flag}\n"
+            f"AP_ALL_BOSSES_GATE = {bosses_flag}\n"
+            + text
+        )
+        log(f"[OK] AP_FLASH_SHIFT_REQUIRES_MAIN = {flag}")
+        log(f"[OK] AP_ALL_BOSSES_GATE = {bosses_flag}")
         lua_dst.write_text(text, encoding="utf-8", newline="\n")
         log(f"[OK] randomizer_powerup.lua -> {lua_dst}")
     else:
@@ -1091,8 +1137,9 @@ def finalize_mod(
     map_src_lua = ROOT / "data" / "reachable_map_cells.lua"
     install_reachable_map_script(romfs, map_src_lua)
 
-    # Archipelago logo cell in the minimap atlas (ODR ships progressive/DNA cells;
-    # we overwrite that same romfs path with our stamped icons.bctex).
+    # Archipelago logo + green in-logic ? cells in the minimap atlas
+    # (ODR ships progressive/DNA cells; we overwrite that same romfs path
+    # with our stamped icons.bctex).
     install_ap_map_icon_atlas(romfs)
 
     # Optional debug JSON (not used by Game.DoFile). Skip huge full-cells exports.

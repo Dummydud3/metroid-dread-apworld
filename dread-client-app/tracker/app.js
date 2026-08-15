@@ -6,6 +6,7 @@
     slot: $("slot-label"),
     counts: $("counts"),
     itemGrid: $("item-grid"),
+    bossList: $("boss-list"),
     regionTabs: $("region-tabs"),
     regionTitle: $("region-title"),
     regionCounts: $("region-counts"),
@@ -22,6 +23,7 @@
     items_received: 0,
     checked_locations: 0,
     missing_locations: 0,
+    bosses: [],
     slot: "",
   };
   let activeRegion = "Artaria";
@@ -113,6 +115,49 @@
         rowEl.appendChild(cell);
       }
       els.itemGrid.appendChild(rowEl);
+    }
+  }
+
+  function bossListSortKey(boss) {
+    // 0 = in-logic unbeaten (top), 1 = out-of-logic unbeaten, 2 = beaten (bottom)
+    if (Boolean(boss.beaten)) return 2;
+    if (Boolean(boss.in_logic)) return 0;
+    return 1;
+  }
+
+  function renderBosses() {
+    if (!els.bossList) return;
+    const bosses = Array.isArray(status.bosses) ? status.bosses.slice() : [];
+    bosses.sort((a, b) => bossListSortKey(a) - bossListSortKey(b));
+    els.bossList.innerHTML = "";
+    if (!bosses.length) {
+      const li = document.createElement("li");
+      li.className = "muted";
+      li.textContent = status.ap_connected
+        ? "Waiting for boss status…"
+        : "Connect to see bosses";
+      els.bossList.appendChild(li);
+      return;
+    }
+    for (const boss of bosses) {
+      const li = document.createElement("li");
+      const beaten = Boolean(boss.beaten);
+      const inLogic = Boolean(boss.in_logic);
+      if (beaten) li.classList.add("beaten");
+      else if (inLogic) li.classList.add("in-logic");
+      const mark = document.createElement("span");
+      mark.className = "mark";
+      mark.textContent = beaten ? "✓" : inLogic ? "●" : "";
+      const label = document.createElement("span");
+      label.textContent = boss.name || boss.key || "?";
+      li.title = beaten
+        ? "Beaten"
+        : inLogic
+          ? "In logic (reachable)"
+          : "Not yet in logic";
+      li.appendChild(mark);
+      li.appendChild(label);
+      els.bossList.appendChild(li);
     }
   }
 
@@ -236,6 +281,7 @@
     if (!catalog) return;
     renderMeta();
     renderItems();
+    renderBosses();
     renderRegionTabs();
     renderLocations();
   }

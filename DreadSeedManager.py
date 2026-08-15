@@ -185,7 +185,17 @@ class DreadSeedManager(tk.Tk):
         ttk.Label(frame, text="Player Name:").grid(row=row, column=0, sticky=tk.W, pady=5)
         self.player_name_var = tk.StringVar(value=self.settings.get("name", "Player1"))
         ttk.Entry(frame, textvariable=self.player_name_var, width=30).grid(row=row, column=1, sticky=tk.W, pady=5)
-        
+
+        # Game Goal
+        row += 1
+        ttk.Label(frame, text="Game Goal:").grid(row=row, column=0, sticky=tk.W, pady=5)
+        self.game_goal_var = tk.StringVar(
+            value=self.settings.get("Metroid Dread", {}).get("game_goal", "defeat_raven_beak")
+        )
+        goal_combo = ttk.Combobox(frame, textvariable=self.game_goal_var, width=27, state="readonly")
+        goal_combo["values"] = ("defeat_raven_beak", "one_hundred_percent", "all_bosses")
+        goal_combo.grid(row=row, column=1, sticky=tk.W, pady=5)
+
         # Required Metroid DNA (gates Raven Beak; 0 = no DNA gate)
         row += 1
         ttk.Label(frame, text="Required Metroid DNA:").grid(row=row, column=0, sticky=tk.W, pady=5)
@@ -298,47 +308,49 @@ class DreadSeedManager(tk.Tk):
         # Tricks configuration
         self.trick_vars = {}
         
+        # Labels / allowed levels match RDV long_name + used_trick_levels
+        # (Disabled always available; Reverse Grapple Block is checkbox-only).
         tricks = [
             ("Basic Tricks", [
-                ("knowledge_tricks", "Knowledge Tricks", "Use knowledge of hidden weaknesses"),
-                ("movement_tricks", "Movement Tricks", "Precise jumps and movement"),
-                ("combat_tricks", "Combat Tricks", "Defeat enemies with fewer items"),
-                ("slide_jump", "Slide Jump", "Jump further by sliding off cliffs"),
-                ("wall_jump_tricks", "Wall Jump Tricks", "Advanced wall jump techniques"),
+                ("knowledge_tricks", "Knowledge", ("disabled", "beginner", "intermediate", "advanced"), "Hidden object weaknesses"),
+                ("movement_tricks", "Movement", ("disabled", "beginner", "intermediate", "advanced", "ludicrous"), "Precise jumps and niche movement"),
+                ("combat_tricks", "Combat", ("disabled", "beginner", "intermediate", "advanced", "expert", "ludicrous"), "Fewer items / less health"),
+                ("slide_jump", "Slide Jump", ("disabled", "beginner", "intermediate", "advanced"), "Jump further by sliding off cliffs"),
+                ("wall_jump_tricks", "Wall Jump", ("disabled", "beginner", "intermediate", "advanced"), "Abuse wall jump movement"),
             ]),
             ("Advanced Movement", [
-                ("infinite_bomb_jump", "Infinite Bomb Jump (IBJ)", "Chain bomb jumps to reach high places"),
-                ("water_bomb_jump", "Water Bomb Jump (WBJ)", "Higher bomb jumps underwater"),
-                ("water_space_jump", "Water Space Jump (WSJ)", "Gain height underwater without Gravity"),
-                ("single_wall_wall_jump", "Single-Wall Wall Jump (SWJ)", "Climb single walls"),
-                ("diagonal_bomb_jump", "Diagonal Bomb Jump (DBJ)", "Diagonal momentum from bombs"),
-                ("cross_bomb_launch", "Cross Bomb Launch (CBL)", "Horizontal momentum from Cross Bombs"),
-                ("grapple_movement", "Grapple Movement", "Use grapple without Spider Magnet"),
+                ("infinite_bomb_jump", "Infinite Bomb Jump", ("disabled", "beginner", "intermediate", "advanced", "expert", "ludicrous"), "Chain bomb jumps to reach high places"),
+                ("water_bomb_jump", "Water Bomb Jump", ("disabled", "beginner", "intermediate"), "Higher bomb jumps underwater"),
+                ("water_space_jump", "Water Space Jump", ("disabled", "beginner", "intermediate", "advanced"), "Gain height underwater without Gravity"),
+                ("single_wall_wall_jump", "Single-wall Wall Jump", ("disabled", "intermediate", "advanced", "expert"), "Climb a single wall"),
+                ("diagonal_bomb_jump", "Diagonal Bomb Jump", ("disabled", "beginner", "intermediate", "advanced", "expert", "ludicrous"), "Diagonal momentum from bombs"),
+                ("cross_bomb_launch", "Cross Bomb Launch", ("disabled", "beginner", "intermediate", "advanced"), "Horizontal momentum from Cross Bombs"),
+                ("grapple_movement", "Grapple Movement", ("disabled", "beginner", "intermediate", "advanced"), "Use grapple without Spider Magnet"),
             ]),
             ("Speed Booster", [
-                ("speedbooster_conservation", "Speed Booster Conservation", "Maintain boost through complex areas"),
-                ("short_boost", "Short Boost", "Charge boost in smaller areas"),
-                ("flash_shift_skip", "Flash Shift Skip", "Bypass shutter gates without Flash Shift"),
+                ("speedbooster_conservation", "Speed Booster Conservation", ("disabled", "beginner", "intermediate", "advanced", "expert"), "Maintain boost through complex areas"),
+                ("short_boost", "Short Boost", ("disabled", "intermediate", "expert"), "Charge boost in smaller areas"),
+                ("flash_shift_skip", "Flash Shift Skip", ("disabled", "beginner", "intermediate"), "Bypass shutter platforms without Flash Shift"),
             ]),
             ("Environmental", [
-                ("heat_cold_runs", "Heat/Cold Runs (Suitless)", "Traverse heated/cold areas without suit"),
-                ("climb_sloped_tunnels", "Climb Sloped Tunnels", "Ascend slopes with bombs"),
-                ("climb_sloped_surfaces", "Climb Sloped Surfaces", "Gain height on slopes"),
-                ("floor_clip", "Floor Clip", "Clip through floors with Speed Booster"),
-                ("damage_boost", "Damage Boost", "Use enemy knockback for momentum"),
+                ("heat_cold_runs", "Heat/Cold Runs", ("disabled", "beginner", "intermediate", "advanced"), "Traverse heat/cold without a suit"),
+                ("climb_sloped_tunnels", "Climb Sloped Tunnels", ("disabled", "beginner", "intermediate", "advanced", "expert"), "Ascend sloped tunnels"),
+                ("climb_sloped_surfaces", "Climb Sloped Surfaces", ("disabled", "beginner", "intermediate", "advanced", "expert"), "Gain height on slopes"),
+                ("floor_clip", "Floor Clip", ("disabled", "intermediate", "advanced", "expert"), "Clip through floors"),
+                ("damage_boost", "Damage Boost", ("disabled", "beginner", "intermediate", "advanced"), "Use enemy knockback for momentum"),
             ]),
             ("Combat & Items", [
-                ("pseudo_wave", "Pseudo-Wave Beam", "Fire through walls without Wave Beam"),
-                ("diffusion_abuse", "Diffusion Abuse", "Use Diffusion in unintended ways"),
-                ("stand_on_frozen_enemy", "Stand on Frozen Enemy", "Use frozen enemies as platforms"),
-                ("cross_bomb_skip", "Cross Bomb Skip", "Skip crumble blocks without Cross Bomb"),
+                ("pseudo_wave", "Pseudo-Wave Beam", ("disabled", "beginner", "intermediate", "advanced"), "Fire through walls without Wave Beam"),
+                ("diffusion_abuse", "Diffusion Abuse", ("disabled", "beginner", "intermediate", "advanced", "ludicrous"), "Use Diffusion in unintended ways"),
+                ("stand_on_frozen_enemy", "Stand on Frozen Enemy", ("disabled", "beginner", "intermediate", "advanced", "expert"), "Use frozen enemies as platforms"),
+                ("cross_bomb_skip", "Cross Bomb Skip", ("disabled", "intermediate", "advanced", "expert"), "Skip crumble blocks without Cross Bomb"),
             ]),
             ("Expert", [
-                ("ledge_warp", "Ledge Warp", "Frame-perfect ledge warping"),
+                ("ledge_warp", "Ledge Warp", ("disabled", "intermediate"), "Frame-perfect ledge warping"),
             ])
         ]
         
-        # Reverse Grapple Block is a toggle, not difficulty-based
+        # Reverse Grapple Block is a toggle (RDV only uses Beginner), not a difficulty dropdown
         self.reverse_grapple_var = tk.BooleanVar(value=self.settings.get("Metroid Dread", {}).get("reverse_grapple_block", False))
         
         row = 0
@@ -346,21 +358,24 @@ class DreadSeedManager(tk.Tk):
             ttk.Label(scrollable_frame, text=category, font=("", 10, "bold")).grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(10, 5))
             row += 1
             
-            for key, label, tooltip in trick_list:
+            for key, label, levels, tooltip in trick_list:
                 ttk.Label(scrollable_frame, text=label + ":").grid(row=row, column=0, sticky=tk.W, padx=(20, 5), pady=2)
                 
-                var = tk.StringVar(value=self.settings.get("Metroid Dread", {}).get(key, "disabled"))
+                raw = self.settings.get("Metroid Dread", {}).get(key, "disabled")
+                if raw not in levels:
+                    raw = "disabled"
+                var = tk.StringVar(value=raw)
                 self.trick_vars[key] = var
                 
                 combo = ttk.Combobox(scrollable_frame, textvariable=var, width=15, state="readonly")
-                combo['values'] = ("disabled", "beginner", "easy", "medium", "hard", "expert")
+                combo['values'] = levels
                 combo.grid(row=row, column=1, sticky=tk.W, padx=5, pady=2)
                 
                 ttk.Label(scrollable_frame, text=tooltip, foreground="gray").grid(row=row, column=2, sticky=tk.W, padx=5, pady=2)
                 row += 1
         
-        # Reverse Grapple Block (toggle)
-        ttk.Label(scrollable_frame, text="Expert (Toggle)", font=("", 10, "bold")).grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(10, 5))
+        # Reverse Grapple Block (checkbox Toggle → Beginner when on)
+        ttk.Label(scrollable_frame, text="Toggle", font=("", 10, "bold")).grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(10, 5))
         row += 1
         ttk.Checkbutton(scrollable_frame, text="Reverse Grapple Block", variable=self.reverse_grapple_var).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=(20, 5), pady=2)
     
@@ -462,6 +477,7 @@ appear in your seed. Lower values = harder game."""
             "name": "Player1",
             "game": "Metroid Dread",
             "Metroid Dread": {
+                "game_goal": "defeat_raven_beak",
                 "required_dna": 0,
                 "dna_placement": "prefer_emmi",
                 "door_lock_rando": "vanilla",
@@ -489,6 +505,7 @@ appear in your seed. Lower values = harder game."""
             "name": self.player_name_var.get(),
             "game": "Metroid Dread",
             "Metroid Dread": {
+                "game_goal": self.game_goal_var.get(),
                 "required_dna": self.required_dna_var.get(),
                 "dna_placement": self.dna_placement_var.get(),
                 "door_lock_rando": self.door_lock_var.get(),
@@ -545,6 +562,10 @@ appear in your seed. Lower values = harder game."""
         self.player_name_var.set(self.settings.get("name", "Player1"))
         
         dread_config = self.settings.get("Metroid Dread", {})
+        goal = dread_config.get("game_goal", "defeat_raven_beak")
+        if goal == "dna_hunt":
+            goal = "defeat_raven_beak"
+        self.game_goal_var.set(goal)
         self.required_dna_var.set(dread_config.get("required_dna", 0))
         self.dna_placement_var.set(dread_config.get("dna_placement", "prefer_emmi"))
         self.door_lock_var.set(dread_config.get("door_lock_rando", "vanilla"))

@@ -76,6 +76,123 @@ class TestPatchExtrasMerge(unittest.TestCase):
         self.assertEqual(patcher["starting_items"]["ITEM_WEAPON_MISSILE_MAX"], 20)
         self.assertEqual(patcher["starting_items"]["ITEM_SONAR"], 1)
 
+    def test_all_bosses_hints_use_required_dna_not_forced_artifacts(self):
+        """All Bosses DNA=0 forces artifacts=1 for the door, but ADAM text stays boss-only."""
+        import ap_to_patcher as ap
+
+        patcher = {"objective": {}, "starting_items": {}, "cosmetic_patches": {}}
+        extras = {
+            "game_goal": 2,
+            "required_artifacts": 1,
+            "required_dna": 0,
+        }
+        ap.apply_dread_patch_extras(patcher, extras, our_player="Samus")
+        self.assertEqual(patcher["objective"]["required_artifacts"], 1)
+        self.assertEqual(
+            patcher["objective"]["hints"],
+            ["Defeat every boss, then defeat Raven Beak."],
+        )
+        self.assertEqual(patcher["starting_items"].get("ITEM_RANDO_ARTIFACT_2"), 1)
+        self.assertNotIn("ITEM_RANDO_ARTIFACT_1", patcher["starting_items"])
+
+    def test_objective_hints_all_bosses_with_dna(self):
+        import ap_to_patcher as ap
+
+        self.assertEqual(
+            ap._objective_hints_for(3, game_goal=2),
+            ["Defeat every boss, collect 3 Metroid DNA, then defeat Raven Beak."],
+        )
+
+    def test_metroidnization_grant_lua(self):
+        import dread_client_bridge as bridge
+
+        lua = bridge.format_metroidnization_grant_lua(reason="All Bosses")
+        self.assertIn("ITEM_METROIDNIZATION", lua)
+        self.assertIn("SetItemAmount", lua)
+        self.assertIn("All Bosses", lua)
+
+    def test_show_player_damage_false_writes_aimanager(self):
+        """YAML show_player_damage:false must clear ODR AIManager.bShowPlayerDamage."""
+        import ap_to_patcher as ap
+
+        patcher = {
+            "cosmetic_patches": {
+                "config": {
+                    "AIManager": {
+                        "bShowBossLifebar": True,
+                        "bShowEnemyLife": True,
+                        "bShowEnemyDamage": True,
+                        "bShowPlayerDamage": True,
+                    }
+                }
+            }
+        }
+        extras = {
+            "cosmetic_combat": {
+                "bShowBossLifebar": False,
+                "bShowEnemyLife": False,
+                "bShowEnemyDamage": False,
+                "bShowPlayerDamage": False,
+            }
+        }
+        ap.apply_dread_patch_extras(patcher, extras, our_player="Samus")
+        ai = patcher["cosmetic_patches"]["config"]["AIManager"]
+        self.assertFalse(ai["bShowPlayerDamage"])
+        self.assertFalse(ai["bShowBossLifebar"])
+        self.assertFalse(ai["bShowEnemyLife"])
+        self.assertFalse(ai["bShowEnemyDamage"])
+
+    def test_immediate_energy_parts_and_env_damage_write_odr_root(self):
+        """YAML immediate / constant env damage must hit ODR top-level keys."""
+        import ap_to_patcher as ap
+
+        patcher = {
+            "immediate_energy_parts": False,
+            "energy_per_tank": 100,
+            "constant_environment_damage": {"heat": None, "cold": None, "lava": None},
+            "cosmetic_patches": {},
+            "game_patches": {},
+        }
+        extras = {
+            "cosmetic_combat": {
+                "immediate_energy_parts": True,
+                "energy_per_tank": 120,
+                "constant_environment_damage": {
+                    "heat": 20,
+                    "cold": 15,
+                    "lava": 0,  # 0 / omitted → null (vanilla)
+                },
+            }
+        }
+        ap.apply_dread_patch_extras(patcher, extras, our_player="Samus")
+        self.assertTrue(patcher["immediate_energy_parts"])
+        self.assertEqual(patcher["energy_per_tank"], 120)
+        self.assertEqual(
+            patcher["constant_environment_damage"],
+            {"heat": 20, "cold": 15, "lava": None},
+        )
+
+    def test_immediate_energy_parts_false_forces_tank_100(self):
+        """RDV: Energy Per Tank only applies with Immediate Energy Parts."""
+        import ap_to_patcher as ap
+
+        patcher = {
+            "immediate_energy_parts": True,
+            "energy_per_tank": 200,
+            "constant_environment_damage": {},
+            "cosmetic_patches": {},
+            "game_patches": {},
+        }
+        extras = {
+            "cosmetic_combat": {
+                "immediate_energy_parts": False,
+                "energy_per_tank": 200,
+            }
+        }
+        ap.apply_dread_patch_extras(patcher, extras, our_player="Samus")
+        self.assertFalse(patcher["immediate_energy_parts"])
+        self.assertEqual(patcher["energy_per_tank"], 100.0)
+
     def test_show_dna_in_hud_omitted_for_old_odr_schema(self):
         """ODR ≤2.18 rejects show_dna_in_hud (additionalProperties: false)."""
         import ap_to_patcher as ap
@@ -347,6 +464,7 @@ class TestOptionsImport(unittest.TestCase):
 
         fields = MetroidDreadOptions.__dataclass_fields__
         for name in (
+            "game_goal",
             "required_dna",
             "dna_placement",
             "door_lock_rando",
@@ -354,9 +472,12 @@ class TestOptionsImport(unittest.TestCase):
             "energy_per_tank",
             "show_boss_lifebar",
             "include_boss_pickups",
+            "immediate_energy_parts",
+            "constant_heat_damage",
+            "constant_cold_damage",
+            "constant_lava_damage",
         ):
             self.assertIn(name, fields)
-        self.assertNotIn("game_goal", fields)
 
 
 class TestTransportRandoSpawn(unittest.TestCase):
@@ -523,6 +644,46 @@ class TestStartKitTightFit(unittest.TestCase):
         kit = StartKit.build_start_kit(world)
         self.assertEqual(kit, [])
         self.assertNotIn("Phantom Cloak", kit)
+
+
+class TestAmmoYieldOverrides(unittest.TestCase):
+    def test_yields_rewrite_pickup_resources(self):
+        import ap_to_patcher as ap
+
+        resources, caption, _ = ap._pickup_resources_and_caption(
+            "Missile Tank",
+            False,
+            yield_plan={
+                "missile_tank_ammo": 5,
+                "missile_plus_tank_ammo": 20,
+                "power_bomb_tank_ammo": 3,
+                "energy_per_tank": 200,
+            },
+        )
+        self.assertEqual(resources[0][0]["quantity"], 5)
+        self.assertIn("5", caption)
+
+        resources, caption, _ = ap._pickup_resources_and_caption(
+            "Energy Tank",
+            False,
+            yield_plan={
+                "missile_tank_ammo": 2,
+                "missile_plus_tank_ammo": 10,
+                "power_bomb_tank_ammo": 1,
+                "energy_per_tank": 200,
+            },
+        )
+        self.assertEqual(resources[0][0]["quantity"], 200)
+        self.assertIn("200", caption)
+
+    def test_client_bridge_uses_extras_yields(self):
+        import dread_client_bridge as bridge
+
+        prog = bridge.get_item_resources(
+            "Power Bomb Tank",
+            extras={"power_bomb_tank_ammo": 4},
+        )
+        self.assertEqual(prog[0][0]["quantity"], 4)
 
 
 if __name__ == "__main__":

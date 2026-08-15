@@ -53,15 +53,18 @@
       "phantom_cloak"
     ],
     [
+      "flash_shift",
       "flash_shift_upgrade",
       "energy_tank",
-      "missile_tank",
-      "power_bomb_tank"
+      "missile_tank"
     ],
     [
+      "power_bomb_tank",
       "energy_part",
       "missile_plus_tank",
-      "metroid_dna",
+      "metroid_dna"
+    ],
+    [
       "speed_booster_upgrade"
     ]
   ],
@@ -259,7 +262,14 @@
       "code": "flash_shift_upgrade",
       "name": "Flash Shift Upgrade",
       "id": 84103,
-      "max_count": 7,
+      "max_count": 5,
+      "icon": "icons/flash_shift_upgrade.png"
+    },
+    {
+      "code": "flash_shift",
+      "name": "Flash Shift",
+      "id": 84021,
+      "max_count": 1,
       "icon": "icons/flash_shift_upgrade.png"
     },
     {

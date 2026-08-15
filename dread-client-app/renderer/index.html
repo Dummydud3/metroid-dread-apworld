@@ -46,10 +46,11 @@
               <input id="yaml-name" type="text" autocomplete="off" />
             </label>
             <label>
-              Game goal
-              <select id="yaml-goal">
-                <option value="defeat_raven_beak">Defeat Raven Beak</option>
-                <option value="dna_hunt">DNA Hunt</option>
+              Accessibility
+              <select id="yaml-accessibility" data-yaml="accessibility">
+                <option value="items">Items</option>
+                <option value="full">Full</option>
+                <option value="minimal">Minimal (upgraded to Items)</option>
               </select>
             </label>
           </div>
@@ -57,27 +58,34 @@
           <div class="row2">
             <label>
               Starting location
-              <select id="yaml-start">
+              <select id="yaml-start" data-yaml="starting_location">
                 <option value="default">Default (Artaria Intro)</option>
                 <option value="random_save_station">Random save / map / nav</option>
               </select>
             </label>
             <label class="check inline">
-              <input id="yaml-deathlink" type="checkbox" />
+              <input id="yaml-deathlink" type="checkbox" data-yaml="death_link" />
               <span>Death Link</span>
             </label>
           </div>
 
-          <div class="row2 dna-row" id="yaml-dna-row" hidden>
-            <label>
-              DNA count
-              <input id="yaml-dna-count" type="number" min="4" max="12" />
-            </label>
-            <label>
-              DNA required (%)
-              <input id="yaml-dna-req" type="number" min="50" max="100" />
-            </label>
+          <h3 class="subhead">Goal &amp; DNA</h3>
+          <p class="hint">Defeat Raven Beak, or collect 100% of checks then defeat Raven Beak. Required DNA gates the Itorash artifact door (0 = open).</p>
+          <div class="row2" id="yaml-goal"></div>
+          <div class="row2" id="yaml-dna"></div>
+          <div class="check-grid" id="yaml-dna-flags"></div>
+
+          <h3 class="subhead">Door &amp; transport</h3>
+          <div class="row2" id="yaml-doors"></div>
+          <div id="yaml-door-sets" hidden>
+            <h4 class="subhead">Doors to change</h4>
+            <div class="check-grid" id="yaml-doors-to-change"></div>
+            <h4 class="subhead">Change doors to</h4>
+            <div class="check-grid" id="yaml-change-doors-to"></div>
           </div>
+
+          <h3 class="subhead">Start &amp; locations</h3>
+          <div class="check-grid" id="yaml-start-flags"></div>
 
           <h3 class="subhead">Progressive items</h3>
           <div class="check-grid" id="yaml-progressive"></div>
@@ -85,13 +93,30 @@
           <h3 class="subhead">Item pool</h3>
           <div class="row2" id="yaml-pool"></div>
 
+          <h3 class="subhead">Ammo &amp; energy yields</h3>
+          <div class="row2" id="yaml-ammo"></div>
+
+          <h3 class="subhead">Flash Shift</h3>
+          <div class="check-grid" id="yaml-flash-shift"></div>
+          <div class="row2" id="yaml-flash-shift-nums" style="margin-top: 0.75rem"></div>
+
+          <h3 class="subhead">Cosmetics &amp; combat</h3>
+          <p class="hint">
+            Damage numbers → ODR AIManager flags. Immediate Energy Parts / Constant * DPS →
+            ODR <code>immediate_energy_parts</code> / <code>constant_environment_damage</code>
+            (0 DPS = vanilla scaling).
+          </p>
+          <div class="check-grid" id="yaml-cosmetics"></div>
+          <div class="row2" id="yaml-cosmetics-env" style="margin-top: 0.75rem"></div>
+          <div class="row2" id="yaml-cosmetics-choice" style="margin-top: 0.75rem"></div>
+          <h4 class="subhead">Disabled lights (darker regions)</h4>
+          <div class="check-grid" id="yaml-disabled-lights"></div>
+
           <h3 class="subhead">Logic &amp; tricks</h3>
-          <div class="check-grid">
-            <label class="check">
-              <input id="yaml-early-morph" type="checkbox" />
-              <span>Early Morph Ball</span>
-            </label>
-          </div>
+          <p class="hint">
+            Levels use Randovania names: Disabled, Beginner, Intermediate, Advanced, Expert, Ludicrous.
+            Each trick only lists difficulties that appear in Dread logic.
+          </p>
           <div class="trick-grid" id="yaml-tricks"></div>
 
           <p class="hint" id="yaml-status">Ready.</p>

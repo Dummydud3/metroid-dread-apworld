@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import deque
 from pathlib import Path
-from typing import Dict, FrozenSet, Iterable, Optional, Set, Tuple, TYPE_CHECKING
+from typing import AbstractSet, Dict, FrozenSet, Iterable, Optional, Set, Tuple, TYPE_CHECKING
 
 from BaseClasses import CollectionState
 
@@ -228,10 +228,16 @@ class DreadLogic:
             if int(counts.get(name, 0) or 0) > 0:
                 owned.add(name)
 
-        # Progressive Flash Shift Upgrades: first unlocks logical Flash Shift
-        if int(counts.get("Flash Shift Upgrade", 0) or 0) >= 1 or int(counts.get("Flash Shift", 0) or 0) > 0:
+        # Flash Shift: mode-aware ability + chain count (see flash_shift.py).
+        from .flash_shift import logical_ability_and_chains, plan_from_options
+
+        fs_plan = plan_from_options(self.world.options)
+        has_flash, chains = logical_ability_and_chains(counts, fs_plan)
+        if has_flash:
             owned.add("Flash Shift")
+        if chains > 0 or int(counts.get("Flash Shift Upgrade", 0) or 0) > 0:
             owned.add("Flash Shift Upgrade")
+        owned.add(f"__flash_upgrade_{int(chains)}__")
 
         # Synthetic capacity tokens — base missiles always available in Dread
         owned.add("__missiles__")
@@ -290,19 +296,29 @@ class DreadLogic:
                 counts[name] = state.count(name, player)
         return self.inventory_from_counts(counts)
 
-    def reachable_pickup_names(self, counts: Dict[str, int]) -> list[str]:
+    def reachable_pickup_names(
+        self,
+        counts: Dict[str, int],
+        *,
+        exclude_auto_events: Optional[AbstractSet[str]] = None,
+    ) -> list[str]:
         """Location names currently in-logic for the given inventory counts."""
         inv = self.inventory_from_counts(counts)
-        nodes = self.get_reachable_nodes(inv)
+        nodes = self.get_reachable_nodes(inv, exclude_auto_events=exclude_auto_events)
         return sorted(name for name, node in self.pickup_nodes.items() if node in nodes)
 
-    def reachable_areas(self, counts: Dict[str, int]) -> Set[Tuple[str, str]]:
+    def reachable_areas(
+        self,
+        counts: Dict[str, int],
+        *,
+        exclude_auto_events: Optional[AbstractSet[str]] = None,
+    ) -> Set[Tuple[str, str]]:
         """
         Unique (region, area) pairs reachable with the given inventory.
         Always includes the starting area.
         """
         inv = self.inventory_from_counts(counts)
-        nodes = self.get_reachable_nodes(inv)
+        nodes = self.get_reachable_nodes(inv, exclude_auto_events=exclude_auto_events)
         areas: Set[Tuple[str, str]] = {
             (self.starting_node[0], self.starting_node[1])
         }
@@ -404,6 +420,20 @@ class DreadLogic:
                         except ValueError:
                             pass
                 return best >= amount
+            if ap == "Flash Shift Upgrade":
+                if amount <= 1:
+                    return "Flash Shift Upgrade" in inventory or any(
+                        t.startswith("__flash_upgrade_") and t.endswith("__")
+                        for t in inventory
+                    )
+                best = 0
+                for token in inventory:
+                    if token.startswith("__flash_upgrade_") and token.endswith("__"):
+                        try:
+                            best = max(best, int(token[len("__flash_upgrade_"):-2]))
+                        except ValueError:
+                            pass
+                return best >= amount
             return ap in inventory
 
         if rtype == "events":
@@ -483,10 +513,18 @@ class DreadLogic:
         inventory: FrozenSet[str],
         start: Optional[NodeId] = None,
         collect_events: bool = True,
+        exclude_auto_events: Optional[AbstractSet[str]] = None,
     ) -> Set[NodeId]:
-        """BFS from start, optionally granting event items as their nodes become reachable."""
+        """BFS from start, optionally granting event items as their nodes become reachable.
+
+        ``exclude_auto_events``: event item names that must already be in
+        ``inventory`` to count (Hub tracker uses this so Quiet Robe / X release
+        are not invented from reachability alone). Generation leaves this empty.
+        """
         start = start or self.starting_node
-        cache_ok = collect_events and start == self.starting_node
+        exclude = frozenset(exclude_auto_events or ())
+        # Cache only the default generation path (full auto-collect, no excludes).
+        cache_ok = collect_events and not exclude and start == self.starting_node
         if cache_ok and inventory in self._reachable_cache:
             return self._reachable_cache[inventory]
 
@@ -499,6 +537,8 @@ class DreadLogic:
             reachable = self._bfs_once(frozenset(inv), start)
             gained = False
             for node, event_item in self._event_items.items():
+                if event_item in exclude:
+                    continue
                 if node in reachable and event_item not in inv:
                     inv.add(event_item)
                     gained = True

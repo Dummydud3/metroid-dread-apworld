@@ -1,11 +1,16 @@
 """
-Victory-implies-90% clearance for Metroid Dread.
+Victory-implies-clearance for Metroid Dread.
 
 Clearable checks are pickups reachable from the chosen start with a full
 inventory under the rolled logic (doors / transports / tricks). Raven Beak's
-access rule (see Rules.py) requires at least 90% of those checks to be
-reachable with the current collection state (ceil(0.9 * N)), so the assumed
-fill cannot open victory on a tiny early softball.
+access rule (see Rules.py) requires a fraction of those checks to be
+reachable with the current collection state:
+
+- Defeat Raven Beak goal: ceil(0.9 * N)  (>=90%)
+- 100% goal: all N clearable checks
+- All Bosses goal: >=90% clearance, plus every non-RB boss node in logic
+
+so the assumed fill cannot open victory on a tiny early softball.
 
 post_fill re-checks the same invariant after placement.
 """
@@ -25,20 +30,38 @@ VICTORY_LOCATION = "Raven Beak"
 _GOAL_NODE = ("Itorash", "Raven Beak Arena", "Boss - Raven Beak")
 NodeId = Tuple[str, str, str]
 
-# Fraction of clearable checks that must be in logic when Raven Beak opens.
+# Default fraction of clearable checks that must be in logic when Raven Beak opens.
 CLEARANCE_RATIO = 0.90
+# GameGoal.option_one_hundred_percent / option_all_bosses
+_GOAL_ONE_HUNDRED_PERCENT = 1
+_GOAL_ALL_BOSSES = 2
 
 
-def required_clearance_count(clearable_count: int) -> int:
-    """Minimum clearable checks that must be reachable at victory (ceil 90%)."""
+def clearance_ratio_for_world(world: "MetroidDreadWorld") -> float:
+    """Clearance ratio required when Raven Beak becomes reachable."""
+    try:
+        goal = int(world.options.game_goal.value)
+    except Exception:
+        goal = 0
+    if goal == _GOAL_ONE_HUNDRED_PERCENT:
+        return 1.0
+    # All Bosses keeps the standard 90% pickup clearance; boss-node reachability
+    # is enforced separately in Rules.py via bosses.inventory_reaches_all_boss_nodes.
+    return CLEARANCE_RATIO
+
+
+def required_clearance_count(clearable_count: int, ratio: float = CLEARANCE_RATIO) -> int:
+    """Minimum clearable checks that must be reachable at victory."""
     if clearable_count <= 0:
         return 0
-    return max(1, math.ceil(CLEARANCE_RATIO * clearable_count))
+    if ratio >= 1.0:
+        return clearable_count
+    return max(1, math.ceil(ratio * clearable_count))
 
 
-def allowed_missing_at_victory(clearable_count: int) -> int:
+def allowed_missing_at_victory(clearable_count: int, ratio: float = CLEARANCE_RATIO) -> int:
     """How many clearable checks may still be locked when Raven Beak opens."""
-    return max(0, clearable_count - required_clearance_count(clearable_count))
+    return max(0, clearable_count - required_clearance_count(clearable_count, ratio))
 
 
 def clearable_pickup_names(world: "MetroidDreadWorld") -> List[str]:
@@ -135,28 +158,48 @@ def missing_checks_at_victory(world: "MetroidDreadWorld") -> List[str]:
 
 def assert_victory_implies_full_clearance(world: "MetroidDreadWorld") -> None:
     """
-    Hard generation guarantee: Raven Beak reachability implies >=90% clearable checks.
+    Hard generation guarantee: Raven Beak reachability implies the goal's
+    clearance ratio of clearable checks.
 
     Raises FillError when too many clearable pickups are still locked at the
     first collection state that can reach Raven Beak.
     """
+    ratio = clearance_ratio_for_world(world)
     clearable_n = len(clearable_pickup_names(world))
     missing = missing_checks_at_victory(world)
-    allowed = allowed_missing_at_victory(clearable_n)
-    if len(missing) <= allowed:
-        return
+    allowed = allowed_missing_at_victory(clearable_n, ratio)
+    if len(missing) > allowed:
+        preview = ", ".join(missing[:12])
+        more = f" (+{len(missing) - 12} more)" if len(missing) > 12 else ""
+        player_name = world.multiworld.get_player_name(world.player)
+        required = required_clearance_count(clearable_n, ratio)
+        pct = int(ratio * 100)
+        raise FillError(
+            f"Metroid Dread ({player_name}): Raven Beak is reachable while "
+            f"{len(missing)} clearable check(s) are not "
+            f"(victory must imply >={pct}% clearance: "
+            f"need {required}/{clearable_n}, allow {allowed} missing). "
+            f"Missing e.g.: {preview}{more}"
+        )
 
-    preview = ", ".join(missing[:12])
-    more = f" (+{len(missing) - 12} more)" if len(missing) > 12 else ""
-    player_name = world.multiworld.get_player_name(world.player)
-    required = required_clearance_count(clearable_n)
-    raise FillError(
-        f"Metroid Dread ({player_name}): Raven Beak is reachable while "
-        f"{len(missing)} clearable check(s) are not "
-        f"(victory must imply >={int(CLEARANCE_RATIO * 100)}% clearance: "
-        f"need {required}/{clearable_n}, allow {allowed} missing). "
-        f"Missing e.g.: {preview}{more}"
-    )
+    try:
+        goal = int(world.options.game_goal.value)
+    except Exception:
+        goal = 0
+    if goal == _GOAL_ALL_BOSSES:
+        from . import bosses
+
+        state = collection_state_at_victory(world)
+        locked = bosses.missing_bosses_at_state(world, state)
+        # Raven Beak itself is reachable by definition here; only non-RB matter.
+        locked = [n for n in locked if n != "Raven Beak"]
+        if locked:
+            player_name = world.multiworld.get_player_name(world.player)
+            preview = ", ".join(locked[:12])
+            raise FillError(
+                f"Metroid Dread ({player_name}): All Bosses goal — Raven Beak "
+                f"opens while boss node(s) are still locked: {preview}"
+            )
 
 
 def raven_beak_sphere_index(world: "MetroidDreadWorld") -> int:
@@ -186,7 +229,7 @@ def inventory_reaches_victory_and_clearance(
     state: CollectionState,
     clearable_nodes: Sequence[NodeId] | None = None,
 ) -> bool:
-    """True when Boss Raven Beak is in logic and >=90% of clearable nodes are."""
+    """True when Boss Raven Beak is in logic and clearance ratio is met."""
     logic = world.logic
     if clearable_nodes is None:
         clearable_nodes = clearable_pickup_nodes(world)
@@ -196,7 +239,8 @@ def inventory_reaches_victory_and_clearance(
     if not clearable_nodes:
         return True
     reached = sum(1 for node in clearable_nodes if node in reachable)
-    return reached >= required_clearance_count(len(clearable_nodes))
+    ratio = clearance_ratio_for_world(world)
+    return reached >= required_clearance_count(len(clearable_nodes), ratio)
 
 
 def assert_graph_preflight(world: "MetroidDreadWorld") -> None:

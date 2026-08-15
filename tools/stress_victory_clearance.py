@@ -166,7 +166,7 @@ def extreme_configs(rng_seed: int) -> list[dict]:
             opts["label"] += "_alltricks"
         elif rng.random() < 0.25:
             for key in rng.sample(TRICK_KEYS, k=8):
-                opts[key] = rng.choice(["beginner", "medium", "hard", "expert"])
+                opts[key] = rng.choice(["beginner", "intermediate", "advanced", "expert", "ludicrous"])
         configs.append(opts)
     return configs
 

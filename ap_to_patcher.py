@@ -8,6 +8,7 @@ bypassing Randovania's validation entirely.
 This allows foreign item names (e.g., "Monomon" from Hollow Knight) to appear in-game!
 """
 
+import copy
 import json
 import re
 import sys
@@ -411,6 +412,8 @@ def _pickup_resources_and_caption(
     is_foreign: bool,
     player_name: str = None,
     dna_artifact_index: Optional[int] = None,
+    flash_shift_plan: Optional[dict] = None,
+    yield_plan: Optional[dict] = None,
 ) -> Tuple[list, str, Optional[dict]]:
     """Return (resources, caption, dread_item_data_or_None)."""
     caption = _format_pickup_caption(item_name, player_name)
@@ -426,7 +429,41 @@ def _pickup_resources_and_caption(
 
     item_data = get_dread_item_data(item_name)
     if item_data:
+        try:
+            from dread_item_mapping import apply_yield_overrides
+
+            if yield_plan:
+                item_data = apply_yield_overrides(item_name, item_data, yield_plan)
+        except Exception as exc:
+            print(f"[WARN] yield override failed for {item_name}: {exc}")
+        # Prefer yield-adjusted caption for local tanks / energy when not foreign-named.
+        if item_name in (
+            "Missile Tank",
+            "Missile+ Tank",
+            "Power Bomb Tank",
+            "Energy Tank",
+            "Energy Part",
+        ):
+            caption = item_data.get("caption") or caption
         resources = _sanitize_resources(normalize_resource_progression(item_data["resources"]))
+        if flash_shift_plan and item_name in ("Flash Shift", "Flash Shift Upgrade"):
+            try:
+                from flash_shift import main_resources, upgrade_resources
+
+                if item_name == "Flash Shift":
+                    resources = _sanitize_resources(
+                        normalize_resource_progression(
+                            main_resources(int(flash_shift_plan.get("included_ammo", 2) or 2))
+                        )
+                    )
+                else:
+                    resources = _sanitize_resources(
+                        normalize_resource_progression(
+                            upgrade_resources(int(flash_shift_plan.get("upgrade_amount", 1) or 1))
+                        )
+                    )
+            except Exception as exc:
+                print(f"[WARN] Flash Shift resource adjust failed: {exc}")
         return resources, caption, item_data
 
     print(f"[WARNING] Unknown Dread item: {item_name}, using generic")
@@ -439,6 +476,8 @@ def create_special_pickup_entry(
     is_foreign: bool,
     player_name: str = None,
     dna_artifact_index: Optional[int] = None,
+    flash_shift_plan: Optional[dict] = None,
+    yield_plan: Optional[dict] = None,
 ) -> dict:
     """
     Boss/EMMI death rewards for open-dread-rando.
@@ -447,7 +486,12 @@ def create_special_pickup_entry(
     Vanilla death grants are cleared and replaced by these resources.
     """
     resources, caption, _ = _pickup_resources_and_caption(
-        item_name, is_foreign, player_name, dna_artifact_index=dna_artifact_index
+        item_name,
+        is_foreign,
+        player_name,
+        dna_artifact_index=dna_artifact_index,
+        flash_shift_plan=flash_shift_plan,
+        yield_plan=yield_plan,
     )
     entry = {
         "pickup_type": special["pickup_type"],
@@ -471,13 +515,21 @@ def create_pickup_entry(
     is_foreign: bool,
     player_name: str = None,
     dna_artifact_index: Optional[int] = None,
+    flash_shift_plan: Optional[dict] = None,
+    yield_plan: Optional[dict] = None,
 ) -> dict:
     """Create a pickup entry for patcher.json."""
 
     special = SPECIAL_PICKUPS.get(str(pickup_index))
     if special:
         return create_special_pickup_entry(
-            special, item_name, is_foreign, player_name, dna_artifact_index=dna_artifact_index
+            special,
+            item_name,
+            is_foreign,
+            player_name,
+            dna_artifact_index=dna_artifact_index,
+            flash_shift_plan=flash_shift_plan,
+            yield_plan=yield_plan,
         )
 
     actor_data = PICKUP_ACTORS.get(str(pickup_index))
@@ -502,7 +554,12 @@ def create_pickup_entry(
     }
 
     resources, caption, item_data = _pickup_resources_and_caption(
-        item_name, is_foreign, player_name, dna_artifact_index=dna_artifact_index
+        item_name,
+        is_foreign,
+        player_name,
+        dna_artifact_index=dna_artifact_index,
+        flash_shift_plan=flash_shift_plan,
+        yield_plan=yield_plan,
     )
 
     # Spoiler-hide: unique ItemCustom{n} per location, ? sprite, "Unknown Item".
@@ -581,7 +638,29 @@ COSMETIC_COMBAT_PATHS: dict[str, tuple[str, ...]] = {
     "nerf_power_bombs": ("game_patches", "nerf_power_bombs"),
     "default_x_released": ("game_patches", "default_x_released"),
     "energy_per_tank": ("energy_per_tank",),
+    # Top-level ODR keys (not under cosmetic_patches) — same as RDV Energy tab.
+    "immediate_energy_parts": ("immediate_energy_parts",),
 }
+
+
+def _normalize_constant_environment_damage(raw) -> dict:
+    """ODR expects heat/cold/lava keys; null = vanilla scaling, number = constant DPS."""
+    if not isinstance(raw, dict):
+        raw = {}
+    out = {}
+    for key in ("heat", "cold", "lava"):
+        val = raw.get(key, None)
+        if val is None:
+            out[key] = None
+            continue
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            out[key] = None
+            continue
+        # YAML Range 0 means "off" (vanilla); positive = constant DPS.
+        out[key] = None if num <= 0 else num
+    return out
 
 # Fields older ODR schemas reject via additionalProperties: false.
 # show_dna_in_hud / has_*_upgrades / enable_logging / skip_item_popups: ODR ≥2.19.
@@ -953,8 +1032,21 @@ def parse_dread_patch_extras(spoiler_path: Path, player_name: str) -> dict:
     return {}
 
 
-def _objective_hints_for(required_artifacts: int) -> list:
+def _objective_hints_for(required_artifacts: int, game_goal: int = 0) -> list:
     n = int(required_artifacts)
+    goal = int(game_goal)
+    if goal == 1:
+        if n <= 0:
+            return ["Collect 100% of checks, then defeat Raven Beak."]
+        return [
+            f"Collect 100% of checks and {n} Metroid DNA, then defeat Raven Beak."
+        ]
+    if goal == 2:
+        if n <= 0:
+            return ["Defeat every boss, then defeat Raven Beak."]
+        return [
+            f"Defeat every boss, collect {n} Metroid DNA, then defeat Raven Beak."
+        ]
     if n <= 0:
         return ["Return to your ship and escape ZDR."]
     return [f"Collect {n} Metroid DNA, then defeat Raven Beak."]
@@ -1099,6 +1191,17 @@ def apply_dread_patch_extras(patcher_data: dict, extras: dict, *, our_player: st
             continue
         _set_nested(patcher_data, path, cosmetic[field])
 
+    # Constant environmental damage: top-level ODR object (heat/cold/lava).
+    if "constant_environment_damage" in cosmetic:
+        patcher_data["constant_environment_damage"] = _normalize_constant_environment_damage(
+            cosmetic.get("constant_environment_damage")
+        )
+
+    # RDV: Energy Per Tank only applies with Immediate Energy Parts; otherwise
+    # force 100 so part/tank Lua capacity stays vanilla.
+    if "immediate_energy_parts" in cosmetic and not cosmetic.get("immediate_energy_parts"):
+        patcher_data["energy_per_tank"] = 100.0
+
     # After cosmetic_combat (which may set enable_room_name_display), overlay
     # transporter destination names and optionally force display for elevator rando.
     if elevators:
@@ -1128,7 +1231,14 @@ def apply_dread_patch_extras(patcher_data: dict, extras: dict, *, our_player: st
             obj = {}
             patcher_data["objective"] = obj
         obj["required_artifacts"] = int(required)
-        obj["hints"] = _objective_hints_for(int(required))
+        # Prefer real required_dna for ADAM text (All Bosses may force artifacts≥1
+        # for the Itorash door while DNA is still 0).
+        hint_dna = extras.get("required_dna")
+        if hint_dna is None:
+            hint_dna = required
+        obj["hints"] = _objective_hints_for(
+            int(hint_dna), int(extras.get("game_goal", 0) or 0)
+        )
         # Pre-grant artifacts beyond required so the in-game gate matches N.
         start = patcher_data.setdefault("starting_items", {})
         if not isinstance(start, dict):
@@ -1440,11 +1550,18 @@ def create_patcher_json(
         "hints": [],  # filled from spoiler below
         "text_patches": template_patcher.get("text_patches", {}),
         "spoiler_log": template_patcher.get("spoiler_log", {}),  # Dict, not array
-        "cosmetic_patches": template_patcher.get("cosmetic_patches", {}),
+        # Deep-copy so seed cosmetics cannot mutate the shared template dict.
+        "cosmetic_patches": copy.deepcopy(template_patcher.get("cosmetic_patches", {})),
         "energy_per_tank": template_patcher.get("energy_per_tank", 100),
-        "immediate_energy_parts": template_patcher.get("immediate_energy_parts", False),
+        # Defaults match RDV starter / Options.py (YAML extras override below).
+        "immediate_energy_parts": template_patcher.get("immediate_energy_parts", True),
         "enable_remote_lua": True,  # Required for Archipelago client
-        "constant_environment_damage": template_patcher.get("constant_environment_damage", {}),
+        "constant_environment_damage": _normalize_constant_environment_damage(
+            template_patcher.get(
+                "constant_environment_damage",
+                {"heat": 20, "cold": 20, "lava": 20},
+            )
+        ),
         "game_patches": {
             # Cannot include custom files here due to schema restrictions
             # randomizer_powerup.lua must be manually copied to the mod folder
@@ -1476,6 +1593,20 @@ def create_patcher_json(
     print(f"[OK] Generated {len(patcher_data['hints'])} Adam Nav Station hints")
 
     apply_dread_patch_extras(patcher_data, extras, our_player=our_player_name)
+
+    try:
+        from flash_shift import plan_from_extras
+
+        flash_shift_plan = plan_from_extras(extras)
+    except Exception:
+        flash_shift_plan = None
+
+    try:
+        from dread_item_mapping import yields_from_extras
+
+        yield_plan = yields_from_extras(extras)
+    except Exception:
+        yield_plan = None
 
     # Legacy spoilers without extras: keep vanilla X and no DNA gate.
     if not extras:
@@ -1523,7 +1654,13 @@ def create_patcher_json(
             dna_idx = dna_artifact_next
             dna_artifact_next += 1
         pickup_entry = create_pickup_entry(
-            pickup_index, item, is_foreign, item_player, dna_artifact_index=dna_idx
+            pickup_index,
+            item,
+            is_foreign,
+            item_player,
+            dna_artifact_index=dna_idx,
+            flash_shift_plan=flash_shift_plan,
+            yield_plan=yield_plan,
         )
 
         if pickup_entry:

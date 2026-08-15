@@ -4,7 +4,7 @@
 
   const PROGRESSIVE = [
     ["progressive_beams", "Progressive Beams", true],
-    ["progressive_charge", "Progressive Charge", true],
+    ["progressive_charge", "Progressive Charge Beam", true],
     ["progressive_missiles", "Progressive Missiles", false],
     ["progressive_bombs", "Progressive Bombs", true],
     ["progressive_suit", "Progressive Suit", true],
@@ -17,23 +17,212 @@
     ["missile_tanks", "Missile Tanks", 10, 50, 35],
     ["missile_plus_tanks", "Missile+ Tanks", 0, 15, 10],
     ["power_bomb_tanks", "Power Bomb Tanks", 0, 15, 12],
+    ["speed_booster_upgrade_count", "Speed Booster Upgrade Count", 0, 10, 0],
   ];
 
+  const AMMO = [
+    ["energy_per_tank", "Energy Per Tank", 1, 1000, 100],
+    ["starting_missiles", "Starting Missiles", 0, 255, 15],
+    ["starting_power_bombs", "Starting Power Bombs", 0, 10, 0],
+    ["missile_tank_ammo", "Missile Tank Ammo", 1, 50, 2],
+    ["missile_plus_tank_ammo", "Missile+ Tank Ammo", 1, 100, 10],
+    ["power_bomb_tank_ammo", "Power Bomb Tank Ammo", 1, 10, 1],
+  ];
+
+  const FLASH_SHIFT = {
+    vanillaKey: "vanilla_flash_shift_behaviour",
+    vanillaDefault: true,
+    requireMainKey: "flash_shift_upgrade_requires_main_item",
+    requireMainDefault: true,
+    countKey: "flash_shift_upgrade_count",
+    countMin: 1,
+    countMax: 5,
+    countDefault: 3,
+    amountKey: "flash_shift_upgrade_amount",
+    amountMin: 1,
+    amountMax: 10,
+    amountDefault: 1,
+    includedKey: "flash_shift_included_ammo",
+    includedMin: 0,
+    includedMax: 10,
+    includedDefault: 2,
+  };
+
+  // Defaults match Options.py (DefaultOnToggle vs Toggle).
+  const COSMETICS = [
+    ["show_boss_lifebar", "Show Boss Lifebar", true],
+    ["show_enemy_life", "Show Enemy Life", false],
+    ["show_enemy_damage", "Show Enemy Damage", false],
+    ["show_player_damage", "Show Player Damage", true],
+    ["immediate_energy_parts", "Immediate Energy Parts", true],
+    ["enable_death_counter", "Death Counter", true],
+    ["show_dna_in_hud", "Show DNA In HUD", true],
+    ["nerf_power_bombs", "Nerf Power Bombs", false],
+    ["x_starts_released", "X Starts Released", false],
+  ];
+
+  const COSMETIC_ENV = [
+    ["constant_heat_damage", "Constant Heat DPS", 0, 1000, 20],
+    ["constant_cold_damage", "Constant Cold DPS", 0, 1000, 20],
+    ["constant_lava_damage", "Constant Lava DPS", 0, 1000, 20],
+  ];
+
+  const COSMETIC_CHOICE = [
+    [
+      "room_name_display",
+      "Room Name Display",
+      "never",
+      [
+        ["never", "Never"],
+        ["always", "Always"],
+        ["with_fade", "With Fade"],
+      ],
+    ],
+    [
+      "raven_beak_damage_table",
+      "Raven Beak Damage Table",
+      "consistent_low",
+      [
+        ["unmodified", "Unmodified"],
+        ["consistent_low", "Consistent Low"],
+        ["consistent_high", "Consistent High"],
+      ],
+    ],
+  ];
+
+  const START_FLAGS = [
+    ["early_morph_ball", "Early Morph Ball", false],
+    ["start_with_pulse_radar", "Start With Pulse Radar", true],
+    ["include_boss_pickups", "Include Boss & EMMI Pickups", true],
+  ];
+
+  const DNA_FLAGS = [
+    ["hint_all_dna", "Hint All Metroid DNA", true],
+  ];
+
+  const GAME_GOAL = [
+    ["defeat_raven_beak", "Defeat Raven Beak"],
+    ["one_hundred_percent", "100%"],
+    ["all_bosses", "All Bosses"],
+  ];
+
+  const DNA_PLACEMENT = [
+    ["prefer_emmi", "Prefer EMMI / Central Unit"],
+    ["prefer_bosses", "Prefer Bosses"],
+    ["anywhere", "Anywhere"],
+  ];
+
+  const DOOR_LOCK = [
+    ["vanilla", "Vanilla"],
+    ["individual_doors", "Individual Doors"],
+  ];
+
+  const TRANSPORT = [
+    ["off", "Off"],
+    ["randomized", "Randomized"],
+  ];
+
+  const LIGHT_REGIONS = [
+    "artaria",
+    "burenia",
+    "cataris",
+    "dairon",
+    "elun",
+    "ferenia",
+    "ghavoran",
+    "hanubia",
+    "itorash",
+  ];
+
+  const DOOR_WEAKNESSES = [
+    "Access Open",
+    "Access Permanently Closed",
+    "Bomb Door",
+    "Charge Beam Door",
+    "Cross Bomb Door",
+    "Diffusion Beam Door",
+    "Grapple Beam Door",
+    "Ice Missile Door",
+    "Missile Door",
+    "Phase Shift Door",
+    "Plasma Beam Door",
+    "Power Beam Door",
+    "Power Bomb Door",
+    "Sensor Lock Door",
+    "Storm Missile Door",
+    "Super Missile Door",
+    "Wave Beam Door",
+    "Wide Beam Door",
+  ];
+
+  const DEFAULT_DOORS_TO_CHANGE = new Set([
+    "Access Open",
+    "Charge Beam Door",
+    "Grapple Beam Door",
+    "Missile Door",
+    "Plasma Beam Door",
+    "Power Beam Door",
+    "Sensor Lock Door",
+    "Super Missile Door",
+    "Wave Beam Door",
+    "Wide Beam Door",
+  ]);
+
+  const DEFAULT_CHANGE_DOORS_TO = new Set([
+    "Charge Beam Door",
+    "Grapple Beam Door",
+    "Missile Door",
+    "Plasma Beam Door",
+    "Power Beam Door",
+    "Super Missile Door",
+    "Wave Beam Door",
+    "Wide Beam Door",
+  ]);
+
+  // RDV LayoutTrickLevel names + per-trick used levels from Dread header.json.
+  const TRICK_LEVEL_LABEL = {
+    disabled: "Disabled",
+    beginner: "Beginner",
+    intermediate: "Intermediate",
+    advanced: "Advanced",
+    expert: "Expert",
+    ludicrous: "Ludicrous",
+  };
+
+  const LEGACY_TRICK_LEVEL = {
+    easy: "intermediate",
+    medium: "advanced",
+    hard: "expert",
+  };
+
+  // [key, label, default, allowedLevels]
   const TRICKS = [
-    ["combat_tricks", "Combat Tricks", "beginner"],
-    ["knowledge_tricks", "Knowledge Tricks", "disabled"],
-    ["movement_tricks", "Movement Tricks", "disabled"],
-    ["slide_jump", "Slide Jump", "disabled"],
-    ["wall_jump_tricks", "Wall Jump Tricks", "disabled"],
-    ["infinite_bomb_jump", "Infinite Bomb Jump", "disabled"],
-    ["water_bomb_jump", "Water Bomb Jump", "disabled"],
-    ["water_space_jump", "Water Space Jump", "disabled"],
-    ["single_wall_wall_jump", "Single-Wall Wall Jump", "disabled"],
-    ["heat_cold_runs", "Heat/Cold Runs", "disabled"],
-    ["damage_boost", "Damage Boost", "disabled"],
+    ["combat_tricks", "Combat", "beginner", ["disabled", "beginner", "intermediate", "advanced", "expert", "ludicrous"]],
+    ["knowledge_tricks", "Knowledge", "disabled", ["disabled", "beginner", "intermediate", "advanced"]],
+    ["movement_tricks", "Movement", "disabled", ["disabled", "beginner", "intermediate", "advanced", "ludicrous"]],
+    ["slide_jump", "Slide Jump", "disabled", ["disabled", "beginner", "intermediate", "advanced"]],
+    ["wall_jump_tricks", "Wall Jump", "disabled", ["disabled", "beginner", "intermediate", "advanced"]],
+    ["infinite_bomb_jump", "Infinite Bomb Jump", "disabled", ["disabled", "beginner", "intermediate", "advanced", "expert", "ludicrous"]],
+    ["water_bomb_jump", "Water Bomb Jump", "disabled", ["disabled", "beginner", "intermediate"]],
+    ["water_space_jump", "Water Space Jump", "disabled", ["disabled", "beginner", "intermediate", "advanced"]],
+    ["single_wall_wall_jump", "Single-wall Wall Jump", "disabled", ["disabled", "intermediate", "advanced", "expert"]],
+    ["diagonal_bomb_jump", "Diagonal Bomb Jump", "disabled", ["disabled", "beginner", "intermediate", "advanced", "expert", "ludicrous"]],
+    ["cross_bomb_launch", "Cross Bomb Launch", "disabled", ["disabled", "beginner", "intermediate", "advanced"]],
+    ["grapple_movement", "Grapple Movement", "disabled", ["disabled", "beginner", "intermediate", "advanced"]],
+    ["speedbooster_conservation", "Speed Booster Conservation", "disabled", ["disabled", "beginner", "intermediate", "advanced", "expert"]],
+    ["short_boost", "Short Boost", "disabled", ["disabled", "intermediate", "expert"]],
+    ["flash_shift_skip", "Flash Shift Skip", "disabled", ["disabled", "beginner", "intermediate"]],
+    ["heat_cold_runs", "Heat/Cold Runs", "disabled", ["disabled", "beginner", "intermediate", "advanced"]],
+    ["climb_sloped_tunnels", "Climb Sloped Tunnels", "disabled", ["disabled", "beginner", "intermediate", "advanced", "expert"]],
+    ["climb_sloped_surfaces", "Climb Sloped Surfaces", "disabled", ["disabled", "beginner", "intermediate", "advanced", "expert"]],
+    ["floor_clip", "Floor Clip", "disabled", ["disabled", "intermediate", "advanced", "expert"]],
+    ["damage_boost", "Damage Boost", "disabled", ["disabled", "beginner", "intermediate", "advanced"]],
+    ["pseudo_wave", "Pseudo-Wave Beam", "disabled", ["disabled", "beginner", "intermediate", "advanced"]],
+    ["diffusion_abuse", "Diffusion Abuse", "disabled", ["disabled", "beginner", "intermediate", "advanced", "ludicrous"]],
+    ["stand_on_frozen_enemy", "Stand on Frozen Enemy", "disabled", ["disabled", "beginner", "intermediate", "advanced", "expert"]],
+    ["cross_bomb_skip", "Cross Bomb Skip", "disabled", ["disabled", "intermediate", "advanced", "expert"]],
+    ["ledge_warp", "Ledge Warp", "disabled", ["disabled", "intermediate"]],
   ];
-
-  const TRICK_LEVELS = ["disabled", "beginner", "easy", "medium", "hard", "expert"];
 
   const state = {
     view: "client",
@@ -56,9 +245,76 @@
     unsubStatus: null,
     unsubPatchLog: null,
     unsubPatchProgress: null,
+    // Last loaded / saved Metroid Dread YAML block (preserves unknown keys).
+    yamlLoadedDread: null,
   };
 
   const ANSI_RE = /\u001b\[[0-9;]*m/g;
+
+  function normalizeTrickLevel(raw, allowed, fallback) {
+    let v = String(raw == null ? "" : raw).toLowerCase();
+    if (LEGACY_TRICK_LEVEL[v]) v = LEGACY_TRICK_LEVEL[v];
+    // Old Hub "expert" meant max (5 / Ludicrous) when that option existed as top.
+    if (v === "expert" && allowed && !allowed.includes("expert") && allowed.includes("ludicrous")) {
+      v = "ludicrous";
+    }
+    if (allowed && allowed.includes(v)) return v;
+    return fallback || "disabled";
+  }
+
+  function appendCheck(root, key, label, opts = {}) {
+    const lab = document.createElement("label");
+    lab.className = "check";
+    if (opts.span) lab.style.gridColumn = "1 / -1";
+    lab.innerHTML = `<input type="checkbox" data-yaml="${key}" ${opts.id ? `id="${opts.id}"` : ""} /><span>${label}</span>`;
+    root.appendChild(lab);
+    return lab;
+  }
+
+  function appendNumber(root, key, label, min, max) {
+    const lab = document.createElement("label");
+    lab.innerHTML = `${label}<input type="number" data-yaml="${key}" min="${min}" max="${max}" />`;
+    root.appendChild(lab);
+    return lab;
+  }
+
+  function appendSelect(root, key, label, options, opts = {}) {
+    const lab = document.createElement("label");
+    if (opts.id) lab.id = opts.id;
+    const optsHtml = options
+      .map(([val, text]) => `<option value="${val}">${text}</option>`)
+      .join("");
+    lab.innerHTML = `${label}<select data-yaml="${key}" ${opts.selectId ? `id="${opts.selectId}"` : ""}>${optsHtml}</select>`;
+    root.appendChild(lab);
+    return lab;
+  }
+
+  function appendOptionSet(root, key, values, defaults) {
+    root.innerHTML = "";
+    for (const val of values) {
+      const lab = document.createElement("label");
+      lab.className = "check";
+      const checked = defaults.has(val) ? "checked" : "";
+      lab.innerHTML =
+        `<input type="checkbox" data-yaml-set="${key}" value="${val.replace(/"/g, "&quot;")}" ${checked} />` +
+        `<span>${val}</span>`;
+      root.appendChild(lab);
+    }
+  }
+
+  function readOptionSet(key) {
+    return Array.from(document.querySelectorAll(`[data-yaml-set="${key}"]`))
+      .filter((el) => el.checked)
+      .map((el) => el.value);
+  }
+
+  function writeOptionSet(key, values) {
+    if (values == null) return; // keep form defaults from buildYamlForm
+    const set = new Set(Array.isArray(values) ? values : []);
+    document.querySelectorAll(`[data-yaml-set="${key}"]`).forEach((el) => {
+      el.checked = set.has(el.value);
+    });
+  }
 
   /* ---------- Menu / views ---------- */
 
@@ -308,81 +564,312 @@
 
   /* ---------- YAML editor ---------- */
 
+  async function loadStartingLocationOptions() {
+    const sel = $("yaml-start");
+    if (!sel || sel.dataset.startsLoaded === "1") return;
+    try {
+      const res = await fetch("starting_locations.json");
+      if (!res.ok) return;
+      const starts = await res.json();
+      for (const s of starts) {
+        if (s.default) continue; // covered by "default"
+        const opt = document.createElement("option");
+        opt.value = s.key;
+        opt.textContent = s.label;
+        sel.appendChild(opt);
+      }
+      sel.dataset.startsLoaded = "1";
+    } catch (_) {
+      /* optional catalog */
+    }
+  }
+
   function buildYamlForm() {
+    const goal = $("yaml-goal");
+    if (goal) {
+      goal.innerHTML = "";
+      appendSelect(goal, "game_goal", "Game Goal", GAME_GOAL);
+    }
+    const dna = $("yaml-dna");
+    if (dna) {
+      dna.innerHTML = "";
+      appendNumber(dna, "required_dna", "Required Metroid DNA", 0, 12);
+      appendSelect(dna, "dna_placement", "Metroid DNA Placement", DNA_PLACEMENT);
+    }
+    const dnaFlags = $("yaml-dna-flags");
+    if (dnaFlags) {
+      dnaFlags.innerHTML = "";
+      for (const [key, label] of DNA_FLAGS) appendCheck(dnaFlags, key, label);
+    }
+
+    const doors = $("yaml-doors");
+    if (doors) {
+      doors.innerHTML = "";
+      appendSelect(doors, "door_lock_rando", "Door Lock Randomizer", DOOR_LOCK, {
+        selectId: "yaml-door-lock",
+      });
+      appendSelect(doors, "transport_rando", "Transport Randomizer", TRANSPORT);
+    }
+    appendOptionSet($("yaml-doors-to-change"), "doors_to_change", DOOR_WEAKNESSES, DEFAULT_DOORS_TO_CHANGE);
+    appendOptionSet($("yaml-change-doors-to"), "change_doors_to", DOOR_WEAKNESSES, DEFAULT_CHANGE_DOORS_TO);
+
+    const syncDoorSets = () => {
+      const on = $("yaml-door-lock")?.value === "individual_doors";
+      const wrap = $("yaml-door-sets");
+      if (wrap) wrap.hidden = !on;
+    };
+    $("yaml-door-lock")?.addEventListener("change", syncDoorSets);
+    doors && (doors._syncDoorSets = syncDoorSets);
+
+    const startFlags = $("yaml-start-flags");
+    if (startFlags) {
+      startFlags.innerHTML = "";
+      for (const [key, label] of START_FLAGS) appendCheck(startFlags, key, label);
+    }
+
     const prog = $("yaml-progressive");
     prog.innerHTML = "";
-    for (const [key, label] of PROGRESSIVE) {
-      const lab = document.createElement("label");
-      lab.className = "check";
-      lab.innerHTML = `<input type="checkbox" data-yaml="${key}" /><span>${label}</span>`;
-      prog.appendChild(lab);
-    }
+    for (const [key, label] of PROGRESSIVE) appendCheck(prog, key, label);
 
     const pool = $("yaml-pool");
     pool.innerHTML = "";
-    for (const [key, label, min, max] of POOL) {
-      const lab = document.createElement("label");
-      lab.innerHTML = `${label}<input type="number" data-yaml="${key}" min="${min}" max="${max}" />`;
-      pool.appendChild(lab);
+    for (const [key, label, min, max] of POOL) appendNumber(pool, key, label, min, max);
+
+    const ammo = $("yaml-ammo");
+    if (ammo) {
+      ammo.innerHTML = "";
+      for (const [key, label, min, max] of AMMO) appendNumber(ammo, key, label, min, max);
     }
+
+    const flash = $("yaml-flash-shift");
+    const flashNums = $("yaml-flash-shift-nums");
+    if (flash) {
+      flash.innerHTML = "";
+      appendCheck(flash, FLASH_SHIFT.vanillaKey, "Vanilla Flash Shift Behaviour", {
+        id: "yaml-flash-vanilla",
+        span: true,
+      });
+      appendCheck(flash, FLASH_SHIFT.requireMainKey, "Require Main Item", {
+        id: "yaml-flash-require",
+      });
+    }
+    if (flashNums) {
+      flashNums.innerHTML = "";
+      const count = appendNumber(
+        flashNums,
+        FLASH_SHIFT.countKey,
+        "Flash Shift Upgrade Count",
+        FLASH_SHIFT.countMin,
+        FLASH_SHIFT.countMax
+      );
+      count.id = "yaml-flash-count-wrap";
+      count.querySelector("input").id = "yaml-flash-count";
+      const amount = appendNumber(
+        flashNums,
+        FLASH_SHIFT.amountKey,
+        "Flash Shift Upgrade Amount",
+        FLASH_SHIFT.amountMin,
+        FLASH_SHIFT.amountMax
+      );
+      amount.id = "yaml-flash-amount-wrap";
+      const included = appendNumber(
+        flashNums,
+        FLASH_SHIFT.includedKey,
+        "Flash Shift Included Ammo",
+        FLASH_SHIFT.includedMin,
+        FLASH_SHIFT.includedMax
+      );
+      included.id = "yaml-flash-included-wrap";
+
+      const syncFlashDeps = () => {
+        const vanilla = Boolean($("yaml-flash-vanilla")?.checked);
+        const requireMain = Boolean($("yaml-flash-require")?.checked);
+        const requireEl = $("yaml-flash-require");
+        if (requireEl) requireEl.disabled = vanilla;
+        ["yaml-flash-count", "yaml-flash-amount-wrap", "yaml-flash-count-wrap"].forEach((id) => {
+          const el = $(id);
+          if (!el) return;
+          if (el.tagName === "INPUT") el.disabled = vanilla;
+          else {
+            const inp = el.querySelector("input");
+            if (inp) inp.disabled = vanilla;
+            el.style.opacity = vanilla ? "0.45" : "";
+          }
+        });
+        const reqWrap = requireEl?.closest("label");
+        if (reqWrap) reqWrap.style.opacity = vanilla ? "0.45" : "";
+        // Included ammo used when vanilla OR (non-vanilla + require main).
+        const includedWrap = $("yaml-flash-included-wrap");
+        const includedInp = includedWrap?.querySelector("input");
+        const includedUseful = vanilla || (!vanilla && requireMain);
+        if (includedInp) includedInp.disabled = !includedUseful;
+        if (includedWrap) includedWrap.style.opacity = includedUseful ? "" : "0.45";
+      };
+      $("yaml-flash-vanilla")?.addEventListener("change", syncFlashDeps);
+      $("yaml-flash-require")?.addEventListener("change", syncFlashDeps);
+      flash._syncFlashDeps = syncFlashDeps;
+    }
+
+    const cosmetics = $("yaml-cosmetics");
+    if (cosmetics) {
+      cosmetics.innerHTML = "";
+      for (const [key, label] of COSMETICS) appendCheck(cosmetics, key, label);
+    }
+
+    const envDmg = $("yaml-cosmetics-env");
+    if (envDmg) {
+      envDmg.innerHTML = "";
+      for (const [key, label, min, max] of COSMETIC_ENV) appendNumber(envDmg, key, label, min, max);
+    }
+
+    const cosChoice = $("yaml-cosmetics-choice");
+    if (cosChoice) {
+      cosChoice.innerHTML = "";
+      for (const [key, label, , options] of COSMETIC_CHOICE) {
+        appendSelect(cosChoice, key, label, options);
+      }
+    }
+
+    appendOptionSet($("yaml-disabled-lights"), "disabled_lights", LIGHT_REGIONS, new Set());
 
     const tricks = $("yaml-tricks");
     tricks.innerHTML = "";
-    for (const [key, label] of TRICKS) {
+    for (const [key, label, , levels] of TRICKS) {
       const lab = document.createElement("label");
-      const opts = TRICK_LEVELS.map((v) => `<option value="${v}">${v}</option>`).join("");
+      const opts = levels
+        .map((v) => `<option value="${v}">${TRICK_LEVEL_LABEL[v] || v}</option>`)
+        .join("");
       lab.innerHTML = `${label}<select data-yaml="${key}">${opts}</select>`;
       tricks.appendChild(lab);
     }
 
-    // Reverse grapple toggle
+    // Reverse Grapple: Options.py Toggle (RDV only uses Beginner).
     const rev = document.createElement("label");
     rev.className = "check";
     rev.style.gridColumn = "1 / -1";
-    rev.innerHTML = `<input type="checkbox" data-yaml="reverse_grapple_block" /><span>Reverse Grapple Block</span>`;
+    rev.innerHTML =
+      `<input type="checkbox" data-yaml="reverse_grapple_block" />` +
+      `<span>Reverse Grapple Block</span>`;
     tricks.appendChild(rev);
+
+    const syncDnaDeps = () => {
+      const n = Number(document.querySelector('[data-yaml="required_dna"]')?.value || 0);
+      const on = n > 0;
+      ["hint_all_dna", "show_dna_in_hud"].forEach((key) => {
+        const el = document.querySelector(`[data-yaml="${key}"]`);
+        if (!el) return;
+        el.disabled = !on;
+        const wrap = el.closest("label");
+        if (wrap) wrap.style.opacity = on ? "" : "0.45";
+      });
+      const place = document.querySelector('[data-yaml="dna_placement"]');
+      if (place) {
+        place.disabled = !on;
+        const wrap = place.closest("label");
+        if (wrap) wrap.style.opacity = on ? "" : "0.45";
+      }
+    };
+    document.querySelector('[data-yaml="required_dna"]')?.addEventListener("input", syncDnaDeps);
+    dna && (dna._syncDnaDeps = syncDnaDeps);
+
+    if (doors && doors._syncDoorSets) doors._syncDoorSets();
+  }
+
+  function defaultForKey(key) {
+    const prog = PROGRESSIVE.find((p) => p[0] === key);
+    if (prog) return prog[2];
+    const cos = COSMETICS.find((p) => p[0] === key);
+    if (cos) return cos[2];
+    const start = START_FLAGS.find((p) => p[0] === key);
+    if (start) return start[2];
+    const dna = DNA_FLAGS.find((p) => p[0] === key);
+    if (dna) return dna[2];
+    if (key === FLASH_SHIFT.vanillaKey) return FLASH_SHIFT.vanillaDefault;
+    if (key === FLASH_SHIFT.requireMainKey) return FLASH_SHIFT.requireMainDefault;
+    if (key === "death_link") return false;
+    if (key === "reverse_grapple_block") return false;
+    return null;
   }
 
   function applyYamlToForm(config) {
     const dread = (config && config["Metroid Dread"]) || {};
     $("yaml-name").value = config.name || "DreadPlayer";
-    $("yaml-goal").value = dread.game_goal || "defeat_raven_beak";
-    $("yaml-start").value = dread.starting_location || "default";
-    $("yaml-deathlink").checked = Boolean(dread.death_link);
-    $("yaml-early-morph").checked = Boolean(dread.early_morph_ball);
-    $("yaml-dna-count").value = dread.dna_count ?? 8;
-    $("yaml-dna-req").value = dread.dna_required ?? 80;
-    $("yaml-dna-row").hidden = $("yaml-goal").value !== "dna_hunt";
+
+    // Migrate legacy Hub DNA keys → required_dna.
+    if (dread.required_dna == null && dread.game_goal === "dna_hunt") {
+      const pct = Number(dread.dna_required);
+      const count = Number(dread.dna_count);
+      if (Number.isFinite(count) && count > 0) dread.required_dna = count;
+      else if (Number.isFinite(pct)) dread.required_dna = Math.max(0, Math.round((pct / 100) * 12));
+      else dread.required_dna = 8;
+      dread.game_goal = "defeat_raven_beak";
+    }
+    // Drop retired DNA-hunt goal; keep defeat / 100%.
+    if (dread.game_goal === "dna_hunt") dread.game_goal = "defeat_raven_beak";
 
     document.querySelectorAll("[data-yaml]").forEach((el) => {
       const key = el.dataset.yaml;
-      const val = dread[key];
+      let val = dread[key];
       if (el.type === "checkbox") {
-        const def = PROGRESSIVE.find((p) => p[0] === key);
-        el.checked = val != null ? Boolean(val) : def ? def[2] : false;
+        const def = defaultForKey(key);
+        el.checked = val != null ? Boolean(val) : Boolean(def);
       } else if (el.tagName === "SELECT") {
-        const def = TRICKS.find((t) => t[0] === key);
-        el.value = val != null ? String(val) : def ? def[2] : "disabled";
+        const trick = TRICKS.find((t) => t[0] === key);
+        if (trick) {
+          el.value = normalizeTrickLevel(val, trick[3], trick[2]);
+        } else {
+          const choice = COSMETIC_CHOICE.find((c) => c[0] === key);
+          if (choice) el.value = val != null ? String(val) : choice[2];
+          else if (key === "accessibility") el.value = val != null ? String(val) : "items";
+          else if (key === "starting_location") el.value = val != null ? String(val) : "default";
+          else if (key === "door_lock_rando") el.value = val != null ? String(val) : "vanilla";
+          else if (key === "transport_rando") el.value = val != null ? String(val) : "off";
+          else if (key === "dna_placement") el.value = val != null ? String(val) : "prefer_emmi";
+          else if (key === "game_goal") el.value = val != null ? String(val) : "defeat_raven_beak";
+          else el.value = val != null ? String(val) : el.options[0]?.value;
+        }
+      } else if (el.type === "number") {
+        const defPool = POOL.find((p) => p[0] === key);
+        const defAmmo = AMMO.find((p) => p[0] === key);
+        const defEnv = COSMETIC_ENV.find((p) => p[0] === key);
+        let defVal = null;
+        if (key === FLASH_SHIFT.countKey) defVal = FLASH_SHIFT.countDefault;
+        else if (key === FLASH_SHIFT.amountKey) defVal = FLASH_SHIFT.amountDefault;
+        else if (key === FLASH_SHIFT.includedKey) defVal = FLASH_SHIFT.includedDefault;
+        else if (key === "required_dna") defVal = 0;
+        else if (defPool) defVal = defPool[4];
+        else if (defAmmo) defVal = defAmmo[4];
+        else if (defEnv) defVal = defEnv[4];
+        el.value = val != null ? val : defVal != null ? defVal : "";
       } else {
-        const def = POOL.find((p) => p[0] === key);
-        el.value = val != null ? val : def ? def[4] : "";
+        el.value = val != null ? val : "";
       }
     });
+
+    writeOptionSet("doors_to_change", dread.doors_to_change);
+    writeOptionSet("change_doors_to", dread.change_doors_to);
+    writeOptionSet("disabled_lights", dread.disabled_lights);
+
+    const flashRoot = $("yaml-flash-shift");
+    if (flashRoot && flashRoot._syncFlashDeps) flashRoot._syncFlashDeps();
+    const doorsRoot = $("yaml-doors");
+    if (doorsRoot && doorsRoot._syncDoorSets) doorsRoot._syncDoorSets();
+    const dnaRoot = $("yaml-dna");
+    if (dnaRoot && dnaRoot._syncDnaDeps) dnaRoot._syncDnaDeps();
+
+    state.yamlLoadedDread = { ...dread };
   }
 
   function readYamlFromForm() {
     const dread = {
-      death_link: $("yaml-deathlink").checked,
-      accessibility: "items",
+      ...(state.yamlLoadedDread || {}),
       progression_balancing: 50,
-      game_goal: $("yaml-goal").value,
-      starting_location: $("yaml-start").value,
-      early_morph_ball: $("yaml-early-morph").checked,
     };
-    if (dread.game_goal === "dna_hunt") {
-      dread.dna_count = Number($("yaml-dna-count").value) || 8;
-      dread.dna_required = Number($("yaml-dna-req").value) || 80;
-    }
+    // Drop retired Hub-only DNA-hunt keys; keep game_goal (defeat / 100%).
+    if (dread.game_goal === "dna_hunt") dread.game_goal = "defeat_raven_beak";
+    delete dread.dna_count;
+    delete dread.dna_required;
+
     document.querySelectorAll("[data-yaml]").forEach((el) => {
       const key = el.dataset.yaml;
       if (el.type === "checkbox") dread[key] = el.checked;
@@ -390,6 +877,13 @@
       else if (el.type === "number") dread[key] = Number(el.value);
       else dread[key] = el.value;
     });
+
+    dread.doors_to_change = readOptionSet("doors_to_change");
+    dread.change_doors_to = readOptionSet("change_doors_to");
+    dread.disabled_lights = readOptionSet("disabled_lights");
+
+    // When door rando is off, keep sets for round-trip but generator ignores them.
+    state.yamlLoadedDread = { ...dread };
     return {
       name: $("yaml-name").value.trim() || "DreadPlayer",
       game: "Metroid Dread",
@@ -397,10 +891,6 @@
       "Metroid Dread": dread,
     };
   }
-
-  $("yaml-goal").addEventListener("change", () => {
-    $("yaml-dna-row").hidden = $("yaml-goal").value !== "dna_hunt";
-  });
 
   $("yaml-open").addEventListener("click", async () => {
     const path = await hub.pickYamlOpen();
@@ -1186,6 +1676,7 @@
 
   async function boot() {
     buildYamlForm();
+    await loadStartingLocationOptions();
     const cfg = await hub.getConfig();
     $("server").value = cfg.server || "";
     $("slot").value = cfg.slot || "";

@@ -485,14 +485,23 @@ function RandomizerPowerBomb.OnPickedUp(actor, progression)
     RandomizerPowerup.OnPickedUp(actor, progression)
 end
 
--- Progressive Flash Shift: first ITEM_UPGRADE_FLASH_SHIFT_CHAIN also unlocks Ghost Aura
--- (world pickups use RandomizerPowerup; remote AP uses RandomizerFlashShiftUpgrade).
+-- Flash Shift: Require Main OFF → first chain unlock also grants Ghost Aura.
+-- Require Main ON → upgrades only stack chains (AP_FLASH_SHIFT_REQUIRES_MAIN).
+AP_FLASH_SHIFT_REQUIRES_MAIN = AP_FLASH_SHIFT_REQUIRES_MAIN or false
+
+local function ap_flash_shift_requires_main()
+    if RL and RL.FlashShiftRequiresMain ~= nil then
+        return RL.FlashShiftRequiresMain and true or false
+    end
+    return AP_FLASH_SHIFT_REQUIRES_MAIN and true or false
+end
+
 if not RandomizerPowerup._APFlashUpgradeHooked then
     RandomizerPowerup._APFlashUpgradeHooked = true
     local _APIncreaseItemAmount = RandomizerPowerup.IncreaseItemAmount
     function RandomizerPowerup.IncreaseItemAmount(item_id, quantity, capacity)
         if item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and quantity and quantity > 0 then
-            if not RandomizerPowerup.HasItem("ITEM_GHOST_AURA") then
+            if not RandomizerPowerup.HasItem("ITEM_GHOST_AURA") and not ap_flash_shift_requires_main() then
                 RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
                 Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
                 quantity = 0
@@ -511,7 +520,7 @@ setmetatable(RandomizerFlashShiftUpgrade, {__index = RandomizerPowerup})
 function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
     progression = progression or {{{item_id = "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", quantity = 1}}}
     local first = not RandomizerPowerup.HasItem("ITEM_GHOST_AURA")
-    if first then
+    if first and not ap_flash_shift_requires_main() then
         RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
         Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
         for _, resource_list in ipairs(progression) do

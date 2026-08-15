@@ -56,8 +56,10 @@ ODR_STARTING_ITEMS: Dict[str, Dict[str, int]] = {
     "Gravity Suit": {"ITEM_GRAVITY_SUIT": 1},
     "Spin Boost": {"ITEM_DOUBLE_JUMP": 1},
     "Space Jump": {"ITEM_SPACE_JUMP": 1},
-    # Ghost Aura is normally unlocked by the first upgrade's script hook, which
-    # does not run for pre-granted items, so grant it alongside the chain.
+    # Main Flash Shift (vanilla / require-main). Chain qty adjusted in odr_starting_items.
+    "Flash Shift": {"ITEM_GHOST_AURA": 1, "ITEM_UPGRADE_FLASH_SHIFT_CHAIN": 2},
+    # Progressive / upgrade-only start: Ghost Aura is granted here because the
+    # RandomizerFlashShiftUpgrade hook does not run for pre-granted items.
     "Flash Shift Upgrade": {"ITEM_GHOST_AURA": 1, "ITEM_UPGRADE_FLASH_SHIFT_CHAIN": 1},
 }
 
@@ -70,7 +72,6 @@ _SINGLE_CANDIDATES = (
     "Screw Attack",
     "Power Bomb",
     "Storm Missile",
-    "Flash Shift Upgrade",
 )
 
 # Progressive pool item -> the option that turns the group on.
@@ -90,7 +91,14 @@ def candidate_items(options) -> List[KitItem]:
     Second stages matter: Burenia's south save room is underwater and only
     opens up for Gravity Suit, which is the *second* Progressive Suit.
     """
+    from .flash_shift import plan_from_options
+
     candidates: List[KitItem] = list(_SINGLE_CANDIDATES)
+    fs = plan_from_options(options)
+    if fs["main_count"] > 0:
+        candidates.append("Flash Shift")
+    if fs["upgrade_count"] > 0:
+        candidates.append("Flash Shift Upgrade")
     if not options.start_with_pulse_radar:
         candidates.append("Pulse Radar")
     for pool_item, option_name in _PROGRESSIVE_OPTIONS:
@@ -121,11 +129,55 @@ def logical_names(kit: Iterable[KitItem]) -> List[str]:
     return names
 
 
-def odr_starting_items(kit: Iterable[KitItem]) -> Dict[str, int]:
+def odr_starting_items(
+    kit: Iterable[KitItem],
+    *,
+    options=None,
+) -> Dict[str, int]:
+    """ODR starting_items grants for the start kit (mode-aware Flash Shift)."""
+    from .flash_shift import plan_from_options
+
+    plan = plan_from_options(options) if options is not None else {
+        "vanilla": False,
+        "require_main": False,
+        "included_ammo": 2,
+        "upgrade_amount": 1,
+    }
+    included = int(plan.get("included_ammo", 2) or 2)
+    up_amt = max(1, int(plan.get("upgrade_amount", 1) or 1))
+    require_main = bool(plan.get("require_main"))
+    vanilla = bool(plan.get("vanilla"))
+
     grants: Dict[str, int] = {}
+    upgrade_copies = 0
     for name in logical_names(kit):
+        if name == "Flash Shift":
+            grants["ITEM_GHOST_AURA"] = max(grants.get("ITEM_GHOST_AURA", 0), 1)
+            if included > 0:
+                grants["ITEM_UPGRADE_FLASH_SHIFT_CHAIN"] = max(
+                    grants.get("ITEM_UPGRADE_FLASH_SHIFT_CHAIN", 0), included
+                )
+            continue
+        if name == "Flash Shift Upgrade":
+            upgrade_copies += 1
+            continue
         for item_id, qty in ODR_STARTING_ITEMS.get(name, {}).items():
             grants[item_id] = max(grants.get(item_id, 0), int(qty))
+
+    if upgrade_copies > 0:
+        if vanilla or require_main:
+            # Chains only; ability comes from main Flash Shift if present.
+            grants["ITEM_UPGRADE_FLASH_SHIFT_CHAIN"] = (
+                grants.get("ITEM_UPGRADE_FLASH_SHIFT_CHAIN", 0) + upgrade_copies * up_amt
+            )
+        else:
+            # Progressive: first unlocks Ghost Aura with 0 chains; rest add chains.
+            grants["ITEM_GHOST_AURA"] = max(grants.get("ITEM_GHOST_AURA", 0), 1)
+            extra_chains = max(0, upgrade_copies - 1) * up_amt
+            if extra_chains > 0:
+                grants["ITEM_UPGRADE_FLASH_SHIFT_CHAIN"] = (
+                    grants.get("ITEM_UPGRADE_FLASH_SHIFT_CHAIN", 0) + extra_chains
+                )
     return grants
 
 

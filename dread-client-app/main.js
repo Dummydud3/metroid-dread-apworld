@@ -657,6 +657,7 @@ function trackerPayloadFromStatus(st) {
     in_logic_location_ids: Array.isArray(st.in_logic_location_ids)
       ? st.in_logic_location_ids
       : [],
+    bosses: Array.isArray(st.bosses) ? st.bosses : [],
     in_logic_count: Array.isArray(st.in_logic_location_ids)
       ? st.in_logic_location_ids.length
       : Number(st.in_logic_count) || 0,
@@ -1672,8 +1673,35 @@ function defaultYamlConfig() {
       progression_balancing: 50,
       accessibility: "items",
       game_goal: "defeat_raven_beak",
-      dna_count: 8,
-      dna_required: 80,
+      required_dna: 0,
+      dna_placement: "prefer_emmi",
+      hint_all_dna: true,
+      door_lock_rando: "vanilla",
+      doors_to_change: [
+        "Access Open",
+        "Charge Beam Door",
+        "Grapple Beam Door",
+        "Missile Door",
+        "Plasma Beam Door",
+        "Power Beam Door",
+        "Sensor Lock Door",
+        "Super Missile Door",
+        "Wave Beam Door",
+        "Wide Beam Door",
+      ],
+      change_doors_to: [
+        "Charge Beam Door",
+        "Grapple Beam Door",
+        "Missile Door",
+        "Plasma Beam Door",
+        "Power Beam Door",
+        "Super Missile Door",
+        "Wave Beam Door",
+        "Wide Beam Door",
+      ],
+      transport_rando: "off",
+      include_boss_pickups: true,
+      start_with_pulse_radar: true,
       starting_location: "default",
       early_morph_ball: false,
       progressive_beams: true,
@@ -1687,6 +1715,33 @@ function defaultYamlConfig() {
       missile_tanks: 35,
       missile_plus_tanks: 10,
       power_bomb_tanks: 12,
+      speed_booster_upgrade_count: 0,
+      energy_per_tank: 100,
+      starting_missiles: 15,
+      starting_power_bombs: 0,
+      missile_tank_ammo: 2,
+      missile_plus_tank_ammo: 10,
+      power_bomb_tank_ammo: 1,
+      vanilla_flash_shift_behaviour: true,
+      flash_shift_upgrade_count: 3,
+      flash_shift_upgrade_requires_main_item: true,
+      flash_shift_upgrade_amount: 1,
+      flash_shift_included_ammo: 2,
+      show_boss_lifebar: true,
+      show_enemy_life: false,
+      show_enemy_damage: false,
+      show_player_damage: true,
+      immediate_energy_parts: true,
+      constant_heat_damage: 20,
+      constant_cold_damage: 20,
+      constant_lava_damage: 20,
+      enable_death_counter: true,
+      show_dna_in_hud: true,
+      room_name_display: "never",
+      raven_beak_damage_table: "consistent_low",
+      nerf_power_bombs: false,
+      disabled_lights: [],
+      x_starts_released: false,
       combat_tricks: "beginner",
       knowledge_tricks: "disabled",
       movement_tricks: "disabled",
@@ -1698,6 +1753,20 @@ function defaultYamlConfig() {
       single_wall_wall_jump: "disabled",
       heat_cold_runs: "disabled",
       damage_boost: "disabled",
+      pseudo_wave: "disabled",
+      speedbooster_conservation: "disabled",
+      stand_on_frozen_enemy: "disabled",
+      grapple_movement: "disabled",
+      cross_bomb_skip: "disabled",
+      climb_sloped_tunnels: "disabled",
+      short_boost: "disabled",
+      diffusion_abuse: "disabled",
+      flash_shift_skip: "disabled",
+      diagonal_bomb_jump: "disabled",
+      ledge_warp: "disabled",
+      cross_bomb_launch: "disabled",
+      floor_clip: "disabled",
+      climb_sloped_surfaces: "disabled",
       reverse_grapple_block: false,
     },
   };
@@ -1722,7 +1791,14 @@ function configToYaml(config) {
   for (const [key, value] of Object.entries(dread)) {
     if (value == null) continue;
     if (Array.isArray(value)) {
-      lines.push(`  ${key}: []`);
+      if (value.length === 0) {
+        lines.push(`  ${key}: []`);
+      } else {
+        lines.push(`  ${key}:`);
+        for (const item of value) {
+          lines.push(`    - ${yamlEscape(item)}`);
+        }
+      }
       continue;
     }
     if (typeof value === "object") {
@@ -1735,19 +1811,22 @@ function configToYaml(config) {
 }
 
 function parseSimpleYaml(text) {
-  // Minimal parser for the flat Dread player YAML we write/read.
+  // Minimal parser for the flat Dread player YAML we write/read (incl. option sets).
   const result = defaultYamlConfig();
   const dread = { ...result["Metroid Dread"] };
   let inDread = false;
+  let listKey = null;
   for (const raw of String(text || "").split(/\r?\n/)) {
     const line = raw.replace(/\t/g, "  ");
     if (!line.trim() || line.trim().startsWith("#")) continue;
     if (/^Metroid Dread:\s*$/.test(line.trim()) || /^"Metroid Dread":\s*$/.test(line.trim())) {
       inDread = true;
+      listKey = null;
       continue;
     }
     if (!/^\s/.test(line) && line.includes(":")) {
       inDread = false;
+      listKey = null;
       const idx = line.indexOf(":");
       const key = line.slice(0, idx).trim();
       let val = line.slice(idx + 1).trim();
@@ -1759,20 +1838,53 @@ function parseSimpleYaml(text) {
       }
       continue;
     }
-    if (inDread) {
-      const m = line.match(/^\s+([A-Za-z0-9_]+):\s*(.*)$/);
-      if (!m) continue;
-      const key = m[1];
-      let val = m[2].trim();
-      if (val === "" || val === "[]" || val === "{}") continue;
+    if (!inDread) continue;
+
+    const listItem = line.match(/^\s+-\s+(.*)$/);
+    if (listItem && listKey) {
+      let val = listItem[1].trim();
       if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
         val = val.slice(1, -1);
-      } else if (val === "true") val = true;
-      else if (val === "false") val = false;
-      else if (/^-?\d+$/.test(val)) val = parseInt(val, 10);
-      dread[key] = val;
+      }
+      if (!Array.isArray(dread[listKey])) dread[listKey] = [];
+      dread[listKey].push(val);
+      continue;
     }
+
+    const m = line.match(/^\s+([A-Za-z0-9_]+):\s*(.*)$/);
+    if (!m) continue;
+    const key = m[1];
+    let val = m[2].trim();
+    if (val === "") {
+      listKey = key;
+      dread[key] = [];
+      continue;
+    }
+    listKey = null;
+    if (val === "[]") {
+      dread[key] = [];
+      continue;
+    }
+    if (val === "{}") continue;
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    } else if (val === "true") val = true;
+    else if (val === "false") val = false;
+    else if (/^-?\d+$/.test(val)) val = parseInt(val, 10);
+    dread[key] = val;
   }
+
+  // Legacy Hub DNA → required_dna
+  if (dread.required_dna == null && dread.game_goal === "dna_hunt") {
+    const count = Number(dread.dna_count);
+    if (Number.isFinite(count) && count > 0) dread.required_dna = count;
+    else dread.required_dna = 8;
+    dread.game_goal = "defeat_raven_beak";
+  }
+  if (dread.game_goal === "dna_hunt") dread.game_goal = "defeat_raven_beak";
+  delete dread.dna_count;
+  delete dread.dna_required;
+
   result["Metroid Dread"] = dread;
   return result;
 }

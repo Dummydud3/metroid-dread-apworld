@@ -28,20 +28,22 @@ LOGIC_OPTION_NAMES: tuple[str, ...] = tuple(
     sorted(set(TRICK_TO_OPTION.values()) | set(_EXTRA_LOGIC_OPTIONS))
 )
 
-# Spoiler header labels (Options.display_name) → option field
+# Spoiler header labels (Options.display_name / RDV long_name) → option field.
+# Legacy AP labels kept so older spoilers still parse.
 _SPOILER_LABEL_TO_OPTION: Dict[str, str] = {
-    "Knowledge Tricks": "knowledge_tricks",
-    "Movement Tricks": "movement_tricks",
-    "Combat Tricks": "combat_tricks",
+    # Current RDV long_name / Options.display_name
+    "Knowledge": "knowledge_tricks",
+    "Movement": "movement_tricks",
+    "Combat": "combat_tricks",
     "Pseudo-Wave Beam": "pseudo_wave",
-    "Infinite Bomb Jump (IBJ)": "infinite_bomb_jump",
-    "Water Bomb Jump (WBJ)": "water_bomb_jump",
-    "Water Space Jump (WSJ)": "water_space_jump",
-    "Single-wall Wall Jump (SWJ)": "single_wall_wall_jump",
+    "Infinite Bomb Jump": "infinite_bomb_jump",
+    "Water Bomb Jump": "water_bomb_jump",
+    "Water Space Jump": "water_space_jump",
+    "Single-wall Wall Jump": "single_wall_wall_jump",
     "Slide Jump": "slide_jump",
     "Speed Booster Conservation": "speedbooster_conservation",
-    "Wall Jump Tricks": "wall_jump_tricks",
-    "Heat/Cold Runs (Suitless)": "heat_cold_runs",
+    "Wall Jump": "wall_jump_tricks",
+    "Heat/Cold Runs": "heat_cold_runs",
     "Reverse Grapple Block": "reverse_grapple_block",
     "Damage Boost": "damage_boost",
     "Stand on Frozen Enemy": "stand_on_frozen_enemy",
@@ -51,11 +53,23 @@ _SPOILER_LABEL_TO_OPTION: Dict[str, str] = {
     "Short Boost": "short_boost",
     "Diffusion Abuse": "diffusion_abuse",
     "Flash Shift Skip": "flash_shift_skip",
-    "Diagonal Bomb Jump (DBJ)": "diagonal_bomb_jump",
+    "Diagonal Bomb Jump": "diagonal_bomb_jump",
     "Ledge Warp": "ledge_warp",
-    "Cross Bomb Launch (CBL)": "cross_bomb_launch",
+    "Cross Bomb Launch": "cross_bomb_launch",
     "Floor Clip": "floor_clip",
     "Climb Sloped Surfaces": "climb_sloped_surfaces",
+    # Legacy AP display_name aliases
+    "Knowledge Tricks": "knowledge_tricks",
+    "Movement Tricks": "movement_tricks",
+    "Combat Tricks": "combat_tricks",
+    "Infinite Bomb Jump (IBJ)": "infinite_bomb_jump",
+    "Water Bomb Jump (WBJ)": "water_bomb_jump",
+    "Water Space Jump (WSJ)": "water_space_jump",
+    "Single-wall Wall Jump (SWJ)": "single_wall_wall_jump",
+    "Wall Jump Tricks": "wall_jump_tricks",
+    "Heat/Cold Runs (Suitless)": "heat_cold_runs",
+    "Diagonal Bomb Jump (DBJ)": "diagonal_bomb_jump",
+    "Cross Bomb Launch (CBL)": "cross_bomb_launch",
     "Required Metroid DNA": "required_dna",
     "Energy Per Tank": "energy_per_tank",
     "Starting Power Bombs": "starting_power_bombs",
@@ -65,13 +79,18 @@ _SPOILER_LABEL_TO_OPTION: Dict[str, str] = {
     "Transport Randomizer": "transport_rando",
 }
 
+# RDV LayoutTrickLevel long_name / value strings (+ legacy AP aliases).
 _DIFFICULTY_WORDS: Dict[str, int] = {
     "disabled": 0,
     "beginner": 1,
+    "intermediate": 2,
+    "advanced": 3,
+    "expert": 4,
+    "ludicrous": 5,
+    # Legacy Hub / Seed Manager names (pre-RDV rename)
     "easy": 2,
     "medium": 3,
     "hard": 4,
-    "expert": 5,
     "yes": 1,
     "no": 0,
     "true": 1,
@@ -116,7 +135,7 @@ def parse_logic_options_from_spoiler_text(text: str) -> Dict[str, int]:
     Parse trick / ammo settings from a full Archipelago spoiler header.
 
     Synthetic server spoilers often omit this block; full generate spoilers include
-    lines like ``Knowledge Tricks:                Expert``.
+    lines like ``Knowledge:                Expert``.
     """
     if not text:
         return {}

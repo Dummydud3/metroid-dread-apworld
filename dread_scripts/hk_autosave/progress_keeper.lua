@@ -50,7 +50,7 @@ ProgressKeeper = ProgressKeeper or {
   },
   game_progress_keys = {
     "QUARENTINE_OPENED", "TeleportWorldUnlocked", "RandoTeleportWorldUnlocked",
-    "RandoVisitScenarios", "RandoUnlockTeleportal",
+    "RandoVisitScenarios", "RandoUnlockTeleportal", "X_RELEASE_TRUE",
   },
   game_section_keys = {
     "NumTanksPickedUp", "Completion", "Rando_PlayerDeathCount",

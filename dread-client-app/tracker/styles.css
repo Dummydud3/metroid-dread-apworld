@@ -171,6 +171,62 @@ h2 {
   color: var(--muted);
 }
 
+.bosses-heading {
+  margin-top: 16px;
+}
+
+.bosses-legend {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+}
+
+.boss-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 42vh;
+  padding-right: 4px;
+}
+
+.boss-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  filter: grayscale(1) brightness(0.55);
+  opacity: 0.75;
+}
+
+.boss-list li.in-logic {
+  filter: none;
+  opacity: 1;
+  color: var(--text);
+  background: rgba(62, 207, 191, 0.06);
+  border: 1px solid rgba(62, 207, 191, 0.22);
+}
+
+.boss-list li.beaten {
+  filter: none;
+  opacity: 1;
+  color: var(--ok);
+  background: rgba(93, 202, 138, 0.08);
+  border: 1px solid rgba(93, 202, 138, 0.28);
+}
+
+.boss-list .mark {
+  width: 1rem;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+}
+
 .region-tabs {
   display: flex;
   flex-wrap: wrap;

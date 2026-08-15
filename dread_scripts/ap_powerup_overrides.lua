@@ -1,6 +1,49 @@
 -- Archipelago overrides appended after open-dread-rando's generated randomizer_powerup.
 -- Redefines only what AP needs so progressive/boss pickup classes from ODR remain intact.
 
+-- All Bosses: DNA CheckArtifacts must not unlock Itorash; the AP client grants
+-- ITEM_METROIDNIZATION only when every non-RB boss is beaten (and DNA, if any).
+AP_ALL_BOSSES_GATE = AP_ALL_BOSSES_GATE or false
+
+local function ap_all_bosses_gate()
+    if RL and RL.AllBossesGate ~= nil then
+        return RL.AllBossesGate and true or false
+    end
+    return AP_ALL_BOSSES_GATE and true or false
+end
+
+function RandomizerPowerup.CheckArtifacts(resource)
+    if not resource then return end
+    if not Init or Init.iNumRequiredArtifacts == 0 then return end
+    if RandomizerPowerup.HasItem("ITEM_METROIDNIZATION") then return end
+
+    if resource.item_id:find("ITEM_RANDO_ARTIFACT", 1, true) then
+        if GUI and GUI.AddEmmyMissionLogEntry then
+            GUI.AddEmmyMissionLogEntry("#MLOG_" .. resource.item_id)
+        end
+    end
+
+    if Scenario and Scenario.UpdateHudDnaCount then
+        Scenario.UpdateHudDnaCount()
+    end
+
+    for i = 1, Init.iNumRequiredArtifacts do
+        if RandomizerPowerup.GetItemAmount("ITEM_RANDO_ARTIFACT_" .. i) == 0 then
+            return
+        end
+    end
+
+    if ap_all_bosses_gate() then
+        Game.LogWarn(0, "CheckArtifacts: DNA complete; Metroidnization deferred (All Bosses)")
+        if RL and RL.SendApLog then
+            RL.SendApLog("AP_ALL_BOSSES: DNA complete; waiting for bosses before Metroidnization")
+        end
+        return
+    end
+
+    RandomizerPowerup.SetItemAmount("ITEM_METROIDNIZATION", 1)
+end
+
 function RandomizerPowerup.MarkLocationCollected(locationIdentifier)
     local playerSection = Game.GetPlayerBlackboardSectionName()
     local propName = RandomizerPowerup.PropertyForLocation(locationIdentifier)
@@ -39,14 +82,24 @@ function RandomizerPowerup.MarkLocationCollected(locationIdentifier)
     end
 end
 
--- Progressive Flash Shift Upgrade: unlock Ghost Aura on first pickup (1 flash);
--- each later upgrade adds +1 chain (3rd pickup = vanilla 3, 7th = 7 uses).
+-- Progressive Flash Shift Upgrade: unlock Ghost Aura on first pickup when
+-- Require Main Item is OFF. When Require Main is ON, upgrades only add chains.
+-- AP_FLASH_SHIFT_REQUIRES_MAIN is set by finalize_mod / client from seed options.
+AP_FLASH_SHIFT_REQUIRES_MAIN = AP_FLASH_SHIFT_REQUIRES_MAIN or false
+
+local function ap_flash_shift_requires_main()
+    if RL and RL.FlashShiftRequiresMain ~= nil then
+        return RL.FlashShiftRequiresMain and true or false
+    end
+    return AP_FLASH_SHIFT_REQUIRES_MAIN and true or false
+end
+
 RandomizerFlashShiftUpgrade = {}
 setmetatable(RandomizerFlashShiftUpgrade, {__index = RandomizerPowerup})
 function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
     progression = progression or {{{item_id = "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", quantity = 1}}}
     local first = not RandomizerPowerup.HasItem("ITEM_GHOST_AURA")
-    if first then
+    if first and not ap_flash_shift_requires_main() then
         RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
         Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
         for _, resource_list in ipairs(progression) do
@@ -56,11 +109,13 @@ function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
                 end
             end
         end
+    elseif first and ap_flash_shift_requires_main() then
+        Game.LogWarn(0, "Flash Shift Upgrade stacked (waiting for main Flash Shift)")
     end
     RandomizerPowerup.OnPickedUp(actor, progression)
 end
 
--- Progressive Flash Shift Upgrade: do not strip chains when inventory still has 0
+-- Main Flash Shift: do not strip chains when inventory still has 0
 -- (lets AP catch up after a Ghost-only local grant).
 function RandomizerFlashShift.OnPickedUp(actor, progression)
     progression = progression or {{{item_id = "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", quantity = 0}}}

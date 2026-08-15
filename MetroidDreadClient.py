@@ -1430,6 +1430,9 @@ class MetroidDreadContext(CommonContext):
         # does not re-apply local in-world items before game_reported_locations
         # is populated.
         self._collected_indices_synced = False
+        # True once the game reports Init.bBeatenSinceLastReboot (Raven Beak /
+        # escape). Used with 100% goal so late check clears can still send goal.
+        self._game_beaten_flag: bool = False
 
         self.item_id_to_name: Dict[int, str] = dict(bridge.ap_item_id_to_name())
 
@@ -1461,8 +1464,15 @@ class MetroidDreadContext(CommonContext):
         self._tracker_ui_debounce_s = 0.75
         self._slot_starting_location: Optional[dict] = None
         self._slot_required_dna: int = 0
-        self._slot_game_goal: int = 0  # legacy; unused after required_dna
+        # 0 = defeat_raven_beak, 1 = one_hundred_percent, 2 = all_bosses
+        self._slot_game_goal: int = 0
+        self._all_bosses_gate_task: Optional[asyncio.Task] = None
         self._slot_data: Dict[str, Any] = {}
+        self._visited_scenarios: Set[str] = set()
+        # Boss keys reported beaten by live SPAWNGROUP / GAME_PROGRESS probes.
+        self._game_beaten_boss_keys: Set[str] = set()
+        # Story gate keys (e.g. elun_release_x) from GAME_STATE field 4.
+        self._game_story_keys: Set[str] = set()
         self._patch_extras: Dict[str, Any] = {}
         self._slot_logic_options: Dict[str, int] = {}
         self._logic_options_source: Optional[str] = None
@@ -1942,10 +1952,36 @@ class MetroidDreadContext(CommonContext):
         if not isinstance(starting, dict) or not starting:
             return {}
         try:
-            return bridge.counts_from_starting_items(starting)
+            return bridge.counts_from_starting_items(starting, extras=extras)
         except Exception as exc:
             logger.warning("starting_items→counts failed: %s", exc)
             return {}
+
+    def _tracker_seed_default_x_released(self) -> bool:
+        """True when the seed starts with X already released (patch_extras)."""
+        extras = self._patch_extras if isinstance(self._patch_extras, dict) else {}
+        if not extras:
+            slot = self._slot_data if isinstance(self._slot_data, dict) else {}
+            nested = slot.get("patch_extras")
+            extras = nested if isinstance(nested, dict) else {}
+        if extras.get("default_x_released"):
+            return True
+        patches = extras.get("game_patches") if isinstance(extras, dict) else None
+        if isinstance(patches, dict) and patches.get("default_x_released"):
+            return True
+        return False
+
+    def _tracker_confirmed_event_items(self) -> Set[str]:
+        """Story/boss events confirmed in-game (or seed-default) for tracker inventory."""
+        try:
+            from worlds.metroid_dread.tracker_gate_events import confirmed_event_items
+        except Exception:
+            return set()
+        return confirmed_event_items(
+            beaten_boss_keys=getattr(self, "_game_beaten_boss_keys", set()) or set(),
+            story_keys=getattr(self, "_game_story_keys", set()) or set(),
+            seed_default_x_released=self._tracker_seed_default_x_released(),
+        )
 
     def _tracker_item_counts(self) -> Dict[str, int]:
         """Merge start kit, AP received/precollected items, and live game inventory.
@@ -1959,6 +1995,11 @@ class MetroidDreadContext(CommonContext):
         double-counted once they also appear in items_received.
         """
         counts: Dict[str, int] = {}
+        extras = self._patch_extras if isinstance(self._patch_extras, dict) else {}
+        if not extras:
+            slot = self._slot_data if isinstance(self._slot_data, dict) else {}
+            nested = slot.get("patch_extras")
+            extras = nested if isinstance(nested, dict) else {}
 
         # AP precollected + finds both arrive as items_received.
         for entry in self._tracker_received_items():
@@ -1972,12 +2013,29 @@ class MetroidDreadContext(CommonContext):
 
         if self._game_inventory_amounts:
             try:
-                game_counts = bridge.counts_from_inventory_amounts(self._game_inventory_amounts)
+                game_counts = bridge.counts_from_inventory_amounts(
+                    self._game_inventory_amounts, extras=extras
+                )
             except Exception as exc:
                 logger.warning("Game inventory→counts failed: %s", exc)
                 game_counts = {}
             for name, n in game_counts.items():
                 counts[name] = max(counts.get(name, 0), int(n))
+        try:
+            bridge.apply_flash_shift_logic_counts(counts, extras=extras)
+        except Exception:
+            pass
+        # Quiet Robe / ElunReleaseX: only after live confirmation (or seed default X).
+        try:
+            from worlds.metroid_dread.tracker_gate_events import (
+                apply_confirmed_events_to_counts,
+            )
+
+            counts = apply_confirmed_events_to_counts(
+                counts, self._tracker_confirmed_event_items()
+            )
+        except Exception:
+            pass
         return counts
 
     def _tracker_in_logic_location_ids(self) -> List[int]:
@@ -1993,8 +2051,13 @@ class MetroidDreadContext(CommonContext):
             return self._in_logic_location_ids
         try:
             from worlds.metroid_dread.Locations import location_table
+            from worlds.metroid_dread.tracker_gate_events import (
+                TRACKER_EXCLUDE_AUTO_EVENTS,
+            )
 
-            names = logic.reachable_pickup_names(counts)
+            names = logic.reachable_pickup_names(
+                counts, exclude_auto_events=TRACKER_EXCLUDE_AUTO_EVENTS
+            )
             ids = sorted(
                 int(location_table[name].id)
                 for name in names
@@ -2025,6 +2088,257 @@ class MetroidDreadContext(CommonContext):
             if self.electron_ui:
                 print(f"[tracker-logic] ERROR {exc}", flush=True)
             return list(self._in_logic_location_ids)
+
+    def _boss_check_location_ids(self) -> Dict[str, int]:
+        try:
+            from worlds.metroid_dread import bosses
+
+            return bosses.check_location_ids()
+        except Exception:
+            return {}
+
+    def _tracker_boss_status(self) -> List[dict]:
+        """Hub tracker rows: each boss in-logic (reachable) + beaten (checked)."""
+        try:
+            from worlds.metroid_dread import bosses
+        except Exception:
+            return []
+
+        checked = set(self._tracker_checked_location_ids() or [])
+        checked |= set(getattr(self, "game_reported_locations", set()) or set())
+        loc_ids = self._boss_check_location_ids()
+
+        in_logic: Set[str] = set()
+        beaten: Set[str] = set()
+        logic = self._ensure_tracker_logic()
+        counts = self._tracker_item_counts() if self.electron_ui else {}
+        reachable = set()
+        if logic is not None:
+            try:
+                from worlds.metroid_dread.tracker_gate_events import (
+                    TRACKER_EXCLUDE_AUTO_EVENTS,
+                )
+
+                # collect_events=False so "in logic" means the fight node is
+                # reachable without auto-granting the kill event mid-BFS.
+                inv = logic.inventory_from_counts(counts)
+                reachable = logic.get_reachable_nodes(inv, collect_events=False)
+                # Second pass: auto-collect most events, but withhold Quiet Robe /
+                # ElunReleaseX until confirmed (already in counts when done).
+                reachable |= logic.get_reachable_nodes(
+                    inv,
+                    collect_events=True,
+                    exclude_auto_events=TRACKER_EXCLUDE_AUTO_EVENTS,
+                )
+            except Exception as exc:
+                logger.debug("Boss in-logic compute failed: %s", exc)
+
+        game_bosses = set(getattr(self, "_game_beaten_boss_keys", set()) or set())
+
+        for boss in bosses.ALL_BOSSES:
+            if boss.node in reachable:
+                in_logic.add(boss.key)
+            # Beaten: AP pickup checked, or Raven Beak via game-beaten flag.
+            if boss.key == bosses.RAVEN_BEAK_KEY:
+                if self._game_beaten_flag or self.finished_game:
+                    beaten.add(boss.key)
+                continue
+            # Primary: live spawn-group / GAME_PROGRESS probe (unique per boss).
+            if boss.key in game_bosses:
+                beaten.add(boss.key)
+                continue
+            loc_id = loc_ids.get(boss.key)
+            if loc_id is not None and int(loc_id) in checked:
+                beaten.add(boss.key)
+                continue
+            # Event-only fallback: a *same-region* checked pickup that is only
+            # reachable after this event (never shared-arena / cross-region).
+            if boss.event_item and logic is not None:
+                try:
+                    if self._boss_event_inferred_beaten(logic, counts, boss, checked):
+                        beaten.add(boss.key)
+                except Exception:
+                    pass
+            # At goal-time only: event-only bosses with no pickup / spawn probe
+            # leave no collected index — if the fight is in logic and the player
+            # has been in that region, accept beaten (see _all_bosses_beaten_for_goal).
+            if (
+                boss.key not in beaten
+                and not boss.check_location
+                and not boss.spawn_group
+                and not boss.progress_prop
+                and boss.event_item
+                and boss.key in in_logic
+                and self._game_beaten_flag
+                and self._boss_region_visited(boss.node[0])
+            ):
+                beaten.add(boss.key)
+
+        return bosses.tracker_boss_rows(in_logic_keys=in_logic, beaten_keys=beaten)
+
+    _REGION_TO_SCENARIO = {
+        "Artaria": "s010_cave",
+        "Cataris": "s020_magma",
+        "Dairon": "s030_baselab",
+        "Burenia": "s040_aqua",
+        "Ghavoran": "s050_forest",
+        "Ferenia": "s070_basesanc",
+        "Elun": "s060_quarantine",
+        "Hanubia": "s080_shipyard",
+        "Itorash": "s090_skybase",
+    }
+
+    def _boss_region_visited(self, region: str) -> bool:
+        scenario = self._REGION_TO_SCENARIO.get(region)
+        if not scenario:
+            return False
+        return scenario in (getattr(self, "_visited_scenarios", set()) or set())
+
+    def _boss_event_inferred_beaten(self, logic, counts: Dict[str, int], boss, checked: Set[int]) -> bool:
+        """True when evidence shows this event-only boss was cleared.
+
+        Only counts checked pickups in the **same region** that become reachable
+        solely after adding this boss's event (collect_events=False compare).
+
+        Intentionally does **not** use:
+        - Same-area pickups (Gravity Suit Tower tanks ≠ Twin Robots kill)
+        - Cross-region unlocks (BureniaRobots teleport must not claim Ghavoran kills)
+        """
+        from worlds.metroid_dread.Locations import location_table
+
+        event = boss.event_item
+        if not event:
+            return False
+        region = boss.node[0]
+
+        base_inv = set(logic.inventory_from_counts(counts))
+        base_inv.discard(event)
+        wo = logic.get_reachable_nodes(frozenset(base_inv), collect_events=False)
+        with_inv = set(base_inv)
+        with_inv.add(event)
+        w = logic.get_reachable_nodes(frozenset(with_inv), collect_events=False)
+        unlocked = w - wo
+        for name, node in logic.pickup_nodes.items():
+            if node not in unlocked:
+                continue
+            if node[0] != region:
+                continue
+            data = location_table.get(name)
+            if data is None or data.id is None:
+                continue
+            if int(data.id) in checked:
+                return True
+        return False
+
+    def _all_bosses_beaten_for_goal(self) -> bool:
+        """Client All Bosses win: every non-RB boss beaten; RB via game flag."""
+        rows = self._tracker_boss_status()
+        if not rows:
+            return False
+        for row in rows:
+            if row.get("key") == "raven_beak":
+                continue
+            if not row.get("beaten"):
+                return False
+        return True
+
+    def _dna_collected_count(self) -> int:
+        """How many Metroid DNA items this slot has received from AP."""
+        n = 0
+        for ni in getattr(self, "items_received", []) or []:
+            try:
+                name = self._resolve_item_name(int(ni.item))
+            except Exception:
+                continue
+            if bridge.is_dna_item(name):
+                n += 1
+        return n
+
+    def _dna_satisfied_for_all_bosses_gate(self) -> bool:
+        """True when DNA requirement is met (or unused) for the All Bosses door."""
+        needed = int(getattr(self, "_slot_required_dna", 0) or 0)
+        if needed <= 0:
+            return True
+        return self._dna_collected_count() >= needed
+
+    def _game_has_metroidnization(self) -> bool:
+        """True when live inventory already owns ITEM_METROIDNIZATION."""
+        amounts = getattr(self, "_game_inventory_amounts", None) or []
+        if not amounts:
+            return False
+        try:
+            ids = bridge.inventory_item_ids()
+            idx = ids.index("ITEM_METROIDNIZATION")
+        except Exception:
+            return False
+        if idx >= len(amounts):
+            return False
+        try:
+            return int(amounts[idx] or 0) > 0
+        except Exception:
+            return False
+
+    def _schedule_all_bosses_itorash_gate(self) -> None:
+        """Debounce All Bosses Metroidnization grant (boss/DNA/inventory churn)."""
+        if int(getattr(self, "_slot_game_goal", 0) or 0) != 2:
+            return
+        if not self.game_connected:
+            return
+        prev = getattr(self, "_all_bosses_gate_task", None)
+        if prev is not None and not prev.done():
+            prev.cancel()
+
+        async def _delayed() -> None:
+            try:
+                await asyncio.sleep(0.35)
+                await self._maybe_grant_all_bosses_metroidnization()
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                logger.warning("All Bosses Itorash gate grant failed: %s", exc)
+
+        self._all_bosses_gate_task = asyncio.create_task(
+            _delayed(), name="AllBossesItorashGate"
+        )
+
+    async def _maybe_grant_all_bosses_metroidnization(self) -> None:
+        """Unlock Itorash ADAM door when All Bosses (and DNA, if any) are done.
+
+        Combo rule: Metroidnization only when DNA satisfied AND all non-RB
+        bosses beaten. DNA alone never unlocks (Lua CheckArtifacts deferral).
+        """
+        if int(getattr(self, "_slot_game_goal", 0) or 0) != 2:
+            return
+        if not self.game_connected:
+            return
+        if self._game_mode != "INGAME" or self._in_transition():
+            return
+        if not self._ready_for_item_grants():
+            return
+        if not self._all_bosses_beaten_for_goal():
+            return
+        if not self._dna_satisfied_for_all_bosses_gate():
+            logger.info(
+                "All Bosses: bosses beaten but DNA incomplete "
+                "(%s/%s) — holding Metroidnization",
+                self._dna_collected_count(),
+                int(getattr(self, "_slot_required_dna", 0) or 0),
+            )
+            return
+        if self._game_has_metroidnization():
+            return
+        needed = int(getattr(self, "_slot_required_dna", 0) or 0)
+        reason = (
+            "All Bosses + DNA"
+            if needed > 0
+            else "All Bosses"
+        )
+        lua = bridge.format_metroidnization_grant_lua(reason=reason)
+        logger.info("All Bosses gate: granting ITEM_METROIDNIZATION (%s)", reason)
+        try:
+            await self.run_lua_code(lua, wait_response=False)
+        except Exception as exc:
+            logger.error("Failed to grant Metroidnization for All Bosses: %s", exc)
 
     def _schedule_tracker_ui_refresh(self) -> None:
         """Trailing-debounce UI/logic refresh so inventory spam can't block the loop."""
@@ -2109,8 +2423,14 @@ class MetroidDreadContext(CommonContext):
         if logic is None:
             return
         try:
+            from worlds.metroid_dread.tracker_gate_events import (
+                TRACKER_EXCLUDE_AUTO_EVENTS,
+            )
+
             counts = self._tracker_item_counts()
-            areas = logic.reachable_areas(counts)
+            areas = logic.reachable_areas(
+                counts, exclude_auto_events=TRACKER_EXCLUDE_AUTO_EVENTS
+            )
             sig = reachable_map.areas_signature(areas)
             # Map-icon in-logic labels are keyed on individual pickup nodes, which
             # are finer-grained than (region, area) pairs: an item can unlock a
@@ -2262,10 +2582,11 @@ class MetroidDreadContext(CommonContext):
         revealed = checked ∪ AP-hinted; in_logic from tracker/DreadLogic.
         texts are full display strings for SetLocalized fallback on old subsdk9.
 
-        Also refreshes self._map_icon_sprites (base key → atlas cell) for the
-        revealed subset and self._map_icon_globals (hinted & uncollected →
-        bIsGlobal) for world-map visibility; push_map_icon_labels sends both
-        after the labels.
+        Also refreshes self._map_icon_sprites (base key → atlas cell):
+        revealed → item/AP logo cell; unrevealed → green ? (in logic) or
+        default ? (out of logic). Also refreshes self._map_icon_globals
+        (hinted & uncollected → bIsGlobal) for world-map visibility;
+        push_map_icon_labels sends both after the labels.
         """
         keys = self.ensure_map_icon_keys()
         if not keys:
@@ -2308,6 +2629,11 @@ class MetroidDreadContext(CommonContext):
                 if sprite is None or sprite == map_icon_labels.GENERIC_ITEM_SPRITE:
                     sprite = map_icon_labels.AP_LOGO_SPRITE
                 sprites[base] = sprite
+            else:
+                # Uncollected/unknown: green ? when reachable, default ? otherwise.
+                sprites[base] = map_icon_labels.unknown_sprite_for_logic(
+                    is_in, keys
+                )
             # World-map pulse only while hinted and not yet collected.
             globals_map[base] = bool(loc_id in hinted and loc_id not in checked)
         self._map_icon_labels = variants
@@ -2436,10 +2762,10 @@ class MetroidDreadContext(CommonContext):
 
     async def push_map_icon_sprites(self, force: bool = False) -> None:
         """
-        Swap revealed icons' graphics via RL.ApplyMapIconSprites.
+        Swap map-icon graphics via RL.ApplyMapIconSprites.
 
-        Only revealed locations are sent: everything else is already sitting on
-        the patch-time `unknown` cell, so an unrevealed icon needs no write.
+        Sends every mapped icon: revealed → item/AP logo; unrevealed → green ?
+        when in logic, default ? when out of logic.
         """
         if not self.map_icon_labels_enabled or not self.game_connected:
             return
@@ -2457,7 +2783,7 @@ class MetroidDreadContext(CommonContext):
             sprites, buffer_size=buf
         )
         logger.info(
-            "Map icon sprites: revealing %s icon(s) in %s chunk(s)",
+            "Map icon sprites: updating %s icon(s) in %s chunk(s)",
             len(sprites),
             len(chunks),
         )
@@ -2652,6 +2978,9 @@ class MetroidDreadContext(CommonContext):
             "logic_error": self._tracker_logic_error or "",
             "logic_item_count": len(counts),
             "logic_start": start,
+            "bosses": self._tracker_boss_status() if self.electron_ui else [],
+            "game_goal": int(getattr(self, "_slot_game_goal", 0) or 0),
+            "game_beaten": bool(self._game_beaten_flag or self.finished_game),
         }
 
     def emit_ui_status(self) -> None:
@@ -2743,6 +3072,30 @@ class MetroidDreadContext(CommonContext):
                 self._slot_required_dna = int(slot_data.get("required_dna", 0) or 0)
             except Exception:
                 self._slot_required_dna = 0
+            try:
+                self._slot_game_goal = int(slot_data.get("game_goal", 0) or 0)
+            except Exception:
+                self._slot_game_goal = 0
+            # Push Flash Shift Require-Main + All Bosses gate flags into the game.
+            try:
+                req = bool(self._patch_extras.get("flash_shift_upgrade_requires_main_item"))
+                vanilla = bool(self._patch_extras.get("vanilla_flash_shift_behaviour", True))
+                requires_main = req and not vanilla
+                flag = "true" if requires_main else "false"
+                bosses_flag = "true" if int(self._slot_game_goal or 0) == 2 else "false"
+                asyncio.create_task(
+                    self.run_lua_code(
+                        f"if not RL then RL = {{}} end; "
+                        f"RL.FlashShiftRequiresMain = {flag}; "
+                        f"AP_FLASH_SHIFT_REQUIRES_MAIN = {flag}; "
+                        f"RL.AllBossesGate = {bosses_flag}; "
+                        f"AP_ALL_BOSSES_GATE = {bosses_flag}",
+                        wait_response=False,
+                    ),
+                    name="FlashShiftAllBossesFlags",
+                )
+            except Exception:
+                pass
             # Rebuild logic with seed start / required DNA.
             self._tracker_logic = None
             self._tracker_logic_error = None
@@ -2756,6 +3109,7 @@ class MetroidDreadContext(CommonContext):
             self._server_spoiler_task = asyncio.create_task(self.download_patch_spoiler())
             # Server checked_locations → collected map labels (after keys load / scout).
             self._schedule_map_icon_labels_push(force=True)
+            self._schedule_all_bosses_itorash_gate()
         elif cmd == "ReceivedItems":
             # Game sync is driven by items_received + ReceivedPickups index.
             self.emit_ui_status()
@@ -2765,6 +3119,8 @@ class MetroidDreadContext(CommonContext):
             # wait for the 1s main-loop tick or a later pickup ACK).
             if self.game_connected:
                 asyncio.create_task(self.send_items_to_game(), name="ReceivedItemsGrant")
+            # DNA arrivals can complete the All Bosses + DNA combo gate.
+            self._schedule_all_bosses_itorash_gate()
         elif cmd == "RoomInfo":
             if args.get("seed_name"):
                 self.seed_name = args.get("seed_name")
@@ -2784,6 +3140,8 @@ class MetroidDreadContext(CommonContext):
         elif cmd == "RoomUpdate":
             if args.get("checked_locations") is not None:
                 self._schedule_map_icon_labels_push(force=True)
+                # on_package is sync; schedule goal check like other fire-and-forget work.
+                asyncio.create_task(self._try_send_goal(), name="TrySendGoal")
         elif cmd in ("SetReply", "Retrieved"):
             # AP hints live in stored_data[_read_hints_{team}_{slot}].
             keys = args.get("keys") if cmd == "Retrieved" else None
@@ -3631,6 +3989,26 @@ class MetroidDreadContext(CommonContext):
                     self._map_icon_globals_sig = None
                     self.ensure_map_icon_keys(force=True)
                     asyncio.create_task(self._push_map_after_connect_hold())
+                # Re-push seed flags after bootstrap (Lua globals reset on boot).
+                try:
+                    req = bool(self._patch_extras.get("flash_shift_upgrade_requires_main_item"))
+                    vanilla = bool(self._patch_extras.get("vanilla_flash_shift_behaviour", True))
+                    requires_main = req and not vanilla
+                    flag = "true" if requires_main else "false"
+                    bosses_flag = (
+                        "true" if int(getattr(self, "_slot_game_goal", 0) or 0) == 2 else "false"
+                    )
+                    await self.run_lua_code(
+                        f"if not RL then RL = {{}} end; "
+                        f"RL.FlashShiftRequiresMain = {flag}; "
+                        f"AP_FLASH_SHIFT_REQUIRES_MAIN = {flag}; "
+                        f"RL.AllBossesGate = {bosses_flag}; "
+                        f"AP_ALL_BOSSES_GATE = {bosses_flag}",
+                        wait_response=False,
+                    )
+                except Exception:
+                    pass
+                self._schedule_all_bosses_itorash_gate()
                 self.emit_ui("game_connected", **self.ui_status_payload())
                 self.emit_ui_status()
 
@@ -3720,6 +4098,8 @@ class MetroidDreadContext(CommonContext):
         self.inventory_index = None
         self._collected_indices_synced = False
         self.game_reported_locations.clear()
+        self._game_beaten_boss_keys.clear()
+        self._game_story_keys.clear()
         self._game_mode = "UNKNOWN"
         self._transition_until = 0.0
         self.current_scenario = None
@@ -3774,6 +4154,7 @@ class MetroidDreadContext(CommonContext):
                     # counts. Debounce UI emit so rapid inventory packets cannot
                     # run sync reachability on the asyncio event loop every tick.
                     self._schedule_tracker_ui_refresh()
+                    self._schedule_all_bosses_itorash_gate()
             logger.debug(
                 "Inventory index=%s amounts=%s",
                 self.inventory_index,
@@ -3857,6 +4238,7 @@ class MetroidDreadContext(CommonContext):
             # Still sync collected labels for already-checked bits (reconnect / catch-up).
             # Force: early connect apply often soft-fails before the language bank is ready.
             self._schedule_map_icon_labels_push(force=True)
+            self._schedule_all_bosses_itorash_gate()
             return
 
         to_send = [location_id for _, location_id in pending]
@@ -3892,6 +4274,7 @@ class MetroidDreadContext(CommonContext):
                 len(sent),
                 ", ".join(self._location_display_name(loc_id) for loc_id in sorted(sent)),
             )
+            await self._try_send_goal()
         elif pending:
             logger.warning(
                 "Game reported %d new pickup(s) but none were sent to the AP server "
@@ -3900,6 +4283,7 @@ class MetroidDreadContext(CommonContext):
             )
         # Fire-and-forget labels; never serialize behind item grants.
         self._schedule_map_icon_labels_push(force=True)
+        self._schedule_all_bosses_itorash_gate()
         await self.send_items_to_game()
 
     async def _handle_received_pickups(self, count_str: str):
@@ -3935,11 +4319,34 @@ class MetroidDreadContext(CommonContext):
         parts = state_data.split(";")
         scenario = parts[0]
         has_beaten = len(parts) > 1 and parts[1] == "true"
+        # Optional third field: comma-separated boss keys from SPAWNGROUP /
+        # GAME_PROGRESS probes (see RL.CollectBeatenBossKeys).
+        newly_beaten: Set[str] = set()
+        if len(parts) > 2 and parts[2].strip():
+            reported = {k.strip() for k in parts[2].split(",") if k.strip()}
+            if reported:
+                before = set(getattr(self, "_game_beaten_boss_keys", set()) or set())
+                newly_beaten = reported - before
+                self._game_beaten_boss_keys |= reported
+        # Optional fourth field: story gate keys (Elun X release, …).
+        newly_story: Set[str] = set()
+        if len(parts) > 3 and parts[3].strip():
+            reported_story = {k.strip() for k in parts[3].split(",") if k.strip()}
+            if reported_story:
+                before_s = set(getattr(self, "_game_story_keys", set()) or set())
+                newly_story = reported_story - before_s
+                self._game_story_keys |= reported_story
         prev_scenario = self.current_scenario
         prev_mode = self._game_mode
         classified = self._classify_game_state_token(scenario)
         self._game_mode = classified
         self.current_scenario = scenario
+        if classified == "INGAME" and scenario and scenario not in (
+            "MAINMENU",
+            "TRANSITION",
+            "",
+        ):
+            self._visited_scenarios.add(scenario)
 
         if classified == "MAINMENU":
             self.in_cooldown = True
@@ -3947,6 +4354,8 @@ class MetroidDreadContext(CommonContext):
             self.inventory_index = None
             self._collected_indices_synced = False
             self.game_reported_locations.clear()
+            self._game_beaten_boss_keys.clear()
+            self._game_story_keys.clear()
             logger.debug("Returned to main menu; reset sync state")
         elif classified == "TRANSITION":
             # Between title and in-game (or other non-world modes).
@@ -3957,6 +4366,17 @@ class MetroidDreadContext(CommonContext):
         else:
             # INGAME (scenario id like s010_cave)
             logger.debug("Game state: %s", state_data)
+            if newly_beaten:
+                logger.info("Boss spawn/progress marked beaten: %s", sorted(newly_beaten))
+                self._in_logic_cache_key = None
+                self._schedule_tracker_ui_refresh()
+                self._schedule_all_bosses_itorash_gate()
+                self._schedule_reachable_map_push(force=True)
+            if newly_story:
+                logger.info("Story gate confirmed: %s", sorted(newly_story))
+                self._in_logic_cache_key = None
+                self._schedule_tracker_ui_refresh()
+                self._schedule_reachable_map_push(force=True)
             left_menu = prev_mode == "MAINMENU" or prev_scenario == "MAINMENU"
             scenario_changed = bool(prev_scenario) and prev_scenario != scenario
             if left_menu or scenario_changed or prev_mode == "TRANSITION":
@@ -3978,11 +4398,42 @@ class MetroidDreadContext(CommonContext):
             # Mirror reachable reapply for collected map-icon labels.
             if scenario != prev_scenario and self.map_icon_labels_enabled:
                 self._schedule_map_icon_labels_push(force=True)
+            # Re-apply Metroidnization on boot/reconnect if bosses already done.
+            if left_menu or scenario_changed or prev_mode == "TRANSITION":
+                self._schedule_all_bosses_itorash_gate()
 
         if has_beaten and not self.finished_game:
-            await self.send_msgs([{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}])
-            self.finished_game = True
-            logger.info("Victory detected (game beaten)")
+            self._game_beaten_flag = True
+            await self._try_send_goal()
+
+    async def _try_send_goal(self) -> None:
+        """Send CLIENT_GOAL when the slot's win condition is satisfied."""
+        if self.finished_game:
+            return
+        if not self._game_beaten_flag:
+            return
+        goal = int(getattr(self, "_slot_game_goal", 0) or 0)
+        # 100% goal: Raven Beak alone is not enough — every AP check must be done.
+        if goal == 1:
+            missing = set(getattr(self, "missing_locations", set()) or set())
+            if missing:
+                logger.info(
+                    "Game beaten but 100%% goal incomplete "
+                    "(%d checks still missing)",
+                    len(missing),
+                )
+                return
+        # All Bosses: every required boss beaten, then Raven Beak (game beaten).
+        elif goal == 2:
+            if not self._all_bosses_beaten_for_goal():
+                logger.info(
+                    "Game beaten but All Bosses goal incomplete "
+                    "(one or more bosses still unmarked)"
+                )
+                return
+        await self.send_msgs([{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}])
+        self.finished_game = True
+        logger.info("Victory detected (game beaten)")
 
     # ----- AP → game item delivery (RL.ReceivePickup) -----
 
@@ -4119,7 +4570,9 @@ class MetroidDreadContext(CommonContext):
                 self.in_cooldown = False
             return
 
-        resources = bridge.get_item_resources(item_name, item_id=item.item)
+        resources = bridge.get_item_resources(
+            item_name, item_id=item.item, extras=self._patch_extras
+        )
         if not resources:
             logger.warning("No Dread mapping for AP item %s (%s); skipping grant", item.item, item_name)
             # Still advance game counter with ITEM_NONE so sync does not stall
@@ -4195,7 +4648,9 @@ class MetroidDreadContext(CommonContext):
                 logger.warning("/give: no item matches '%s'", requested_name)
             return
 
-        resources = bridge.get_item_resources(resolved_name)
+        resources = bridge.get_item_resources(
+            resolved_name, extras=getattr(self, "_patch_extras", None)
+        )
         has_real_resource = bridge.is_dna_item(resolved_name) or any(
             res.get("item_id") not in (None, "ITEM_NONE", bridge.DNA_DYNAMIC_ITEM_ID)
             and int(res.get("quantity") or 0) > 0

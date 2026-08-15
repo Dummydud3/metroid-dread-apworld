@@ -136,19 +136,28 @@ class MetroidDreadWorld(World):
         self.forced_boss_locations = set()
 
         # Raven Beak's access rule already requires >=90% of clearable checks
-        # (see Rules.py / victory_clearance). Do NOT force accessibility:full —
-        # several pickup/event nodes are trick-gated (Speedbooster Conservation,
+        # (100% when game_goal is one_hundred_percent; see Rules.py /
+        # victory_clearance). Do NOT force accessibility:full — several
+        # pickup/event nodes are trick-gated (Speedbooster Conservation,
         # Knowledge, etc.) and stay unreachable with default tricks disabled.
         # Full would make fulfills_accessibility demand those nodes and fail
         # every seed. Coerce Minimal→Items so progression cannot hide behind
         # unreachable checks, while filler/trick-only locations may remain out
         # of logic (ItemsAccessibility). Full is re-checked after the graph is
         # final (tricks + start + door/transport) and downgraded if needed.
+        # For 100% goal, non-clearable checks are dropped from the pool instead.
         if self.options.accessibility == "minimal":
             self.options.accessibility.value = self.options.accessibility.option_items
+            goal_val = int(self.options.game_goal.value)
+            if goal_val == 1:
+                goal_note = "100% clearance"
+            elif goal_val == 2:
+                goal_note = "90% clearance + all bosses"
+            else:
+                goal_note = "90% clearance"
             print(
                 f"[Metroid Dread Player {self.player}] accessibility "
-                f"'minimal' upgraded to 'items' (victory implies 90% clearance)"
+                f"'minimal' upgraded to 'items' (victory implies {goal_note})"
             )
 
         self._resolve_starting_location()
@@ -196,16 +205,42 @@ class MetroidDreadWorld(World):
             int(self.options.raven_beak_damage_table.value)
         ]
         required = int(self.options.required_dna.value)
+        goal = int(self.options.game_goal.value)
+        # ODR installs the Itorash ADAM door only when required_artifacts > 0.
+        # All Bosses reuses that door even with DNA=0 (client grants Metroidnization).
+        patch_artifacts = max(required, 1) if goal == 2 else required
         self.patch_extras = {
             "door_patches": self.door_patches,
             "elevators": self.elevator_patches,
-            "required_artifacts": required,
+            "game_goal": goal,
+            # Patch/ODR gate count (may be forced ≥1 for All Bosses).
+            "required_artifacts": patch_artifacts,
+            # Real YAML DNA count for ADAM hints / client combo gate.
+            "required_dna": required,
             "hint_all_dna": bool(self.options.hint_all_dna.value) and required > 0,
             "cosmetic_combat": {
                 "bShowBossLifebar": bool(self.options.show_boss_lifebar.value),
                 "bShowEnemyLife": bool(self.options.show_enemy_life.value),
                 "bShowEnemyDamage": bool(self.options.show_enemy_damage.value),
                 "bShowPlayerDamage": bool(self.options.show_player_damage.value),
+                "immediate_energy_parts": bool(self.options.immediate_energy_parts.value),
+                "constant_environment_damage": {
+                    "heat": (
+                        int(self.options.constant_heat_damage.value)
+                        if int(self.options.constant_heat_damage.value) > 0
+                        else None
+                    ),
+                    "cold": (
+                        int(self.options.constant_cold_damage.value)
+                        if int(self.options.constant_cold_damage.value) > 0
+                        else None
+                    ),
+                    "lava": (
+                        int(self.options.constant_lava_damage.value)
+                        if int(self.options.constant_lava_damage.value) > 0
+                        else None
+                    ),
+                },
                 "enable_death_counter": bool(self.options.enable_death_counter.value),
                 "show_dna_in_hud": bool(self.options.show_dna_in_hud.value) and required > 0,
                 "enable_room_name_display": room_name,
@@ -220,10 +255,15 @@ class MetroidDreadWorld(World):
             "missile_tank_ammo": int(self.options.missile_tank_ammo.value),
             "missile_plus_tank_ammo": int(self.options.missile_plus_tank_ammo.value),
             "power_bomb_tank_ammo": int(self.options.power_bomb_tank_ammo.value),
+            "vanilla_flash_shift_behaviour": bool(self.options.vanilla_flash_shift_behaviour.value),
             "flash_shift_upgrade_amount": int(self.options.flash_shift_upgrade_amount.value),
+            "flash_shift_upgrade_count": int(self.options.flash_shift_upgrade_count.value),
             "flash_shift_included_ammo": int(self.options.flash_shift_included_ammo.value),
+            "flash_shift_upgrade_requires_main_item": bool(
+                self.options.flash_shift_upgrade_requires_main_item.value
+            ),
             "start_with_pulse_radar": bool(self.options.start_with_pulse_radar.value),
-            "starting_items": StartKit.odr_starting_items(self.start_kit),
+            "starting_items": StartKit.odr_starting_items(self.start_kit, options=self.options),
             # Logic-graph form for the client tracker (elevators alone use arrival
             # spawn actors, which are awkward to map back to dock nodes).
             "transport_matching": dict(self.transport_matching or {}),
@@ -714,7 +754,15 @@ class MetroidDreadWorld(World):
             if item_name not in items_to_create:
                 items_to_create[item_name] = 1
 
-        items_to_create["Flash Shift Upgrade"] = int(self.options.flash_shift_upgrade_count.value)
+        from .flash_shift import plan_from_options
+
+        fs_plan = plan_from_options(self.options)
+        if fs_plan["main_count"] > 0:
+            items_to_create["Flash Shift"] = int(fs_plan["main_count"])
+        # Vanilla OFF: always schedule all N upgrades (guaranteed pool members).
+        fs_upgrade_planned = int(fs_plan["upgrade_count"] or 0)
+        if fs_upgrade_planned > 0:
+            items_to_create["Flash Shift Upgrade"] = fs_upgrade_planned
         sb_up = int(self.options.speed_booster_upgrade_count.value)
         if sb_up > 0:
             items_to_create["Speed Booster Upgrade"] = sb_up
@@ -739,16 +787,40 @@ class MetroidDreadWorld(World):
             self.multiworld.push_precollected(self.create_item(pool_item))
             granted.append(pool_item)
         self.start_kit = granted
-        self.patch_extras["starting_items"] = StartKit.odr_starting_items(granted)
+        self.patch_extras["starting_items"] = StartKit.odr_starting_items(
+            granted, options=self.options
+        )
+
+        # Guarantee Flash Shift Upgrade placement: displace Missile Tank filler 1:1
+        # for every upgrade still going into the shuffled pool (not start-kit).
+        # Upgrades are never optional leftovers that padding/trim can drop.
+        fs_upgrades_in_pool = int(items_to_create.get("Flash Shift Upgrade", 0) or 0)
+        if fs_upgrades_in_pool > 0:
+            mt = int(items_to_create.get("Missile Tank", 0) or 0)
+            items_to_create["Missile Tank"] = max(0, mt - fs_upgrades_in_pool)
 
         for item_name, count in items_to_create.items():
             for _ in range(count):
                 itempool.append(self.create_item(item_name))
 
+        # Progressive Flash Shift (no main): first upgrade unlocks the ability, so it
+        # must be advancement. Later upgrades stay filler chain-ammo like missiles.
+        if (
+            not fs_plan["vanilla"]
+            and not fs_plan["require_main"]
+            and fs_upgrades_in_pool > 0
+        ):
+            for item in itempool:
+                if item.name == "Flash Shift Upgrade":
+                    item.classification = ItemClassification.progression
+                    break
+
         if self.options.early_morph_ball and items_to_create.get("Morph Ball", 0) > 0:
             self.multiworld.local_early_items[self.player]["Morph Ball"] = 1
 
-        # Exclude boss/EMMI checks → fewer locations, trim filler accordingly.
+        # Exclude boss/EMMI checks → fewer locations, trim/pad filler accordingly.
+        # Never trim Flash Shift Upgrade — only Missile Tank (padding bucket), then
+        # Power Bomb Tank as a last resort.
         active_locations = self.active_location_names()
         total_locations = len(active_locations)
         items_created = len(itempool)
@@ -757,12 +829,17 @@ class MetroidDreadWorld(World):
             for _ in range(total_locations - items_created):
                 itempool.append(self.create_item("Missile Tank"))
         elif items_created > total_locations:
-            # Prefer trimming filler Missile Tanks first.
             extras = items_created - total_locations
+            trim_order = ("Missile Tank", "Power Bomb Tank")
             kept = []
             trimmed = 0
             for item in reversed(itempool):
-                if trimmed < extras and item.name == "Missile Tank":
+                if (
+                    trimmed < extras
+                    and item.name in trim_order
+                    and item.name != "Flash Shift Upgrade"
+                    and not item.advancement
+                ):
                     trimmed += 1
                     continue
                 kept.append(item)
@@ -772,17 +849,35 @@ class MetroidDreadWorld(World):
                     f"Too many items created: {len(itempool)} items for {total_locations} locations"
                 )
 
+        # Sanity: every non-start-kit upgrade must still be in the pool.
+        upgrades_kept = sum(1 for i in itempool if i.name == "Flash Shift Upgrade")
+        if upgrades_kept != fs_upgrades_in_pool:
+            raise Exception(
+                f"Flash Shift Upgrade pool guarantee failed: expected "
+                f"{fs_upgrades_in_pool}, kept {upgrades_kept}"
+            )
+
         self.multiworld.itempool += itempool
 
     def active_location_names(self) -> List[str]:
         names = list(location_table.keys())
-        if self.options.include_boss_pickups:
-            return names
-        forced = getattr(self, "forced_boss_locations", set()) or set()
-        return [
-            n for n in names
-            if n in forced or not any(s in n for s in _BOSS_EMMI_LOCATION_SUBSTR)
-        ]
+        if not self.options.include_boss_pickups:
+            forced = getattr(self, "forced_boss_locations", set()) or set()
+            names = [
+                n for n in names
+                if n in forced or not any(s in n for s in _BOSS_EMMI_LOCATION_SUBSTR)
+            ]
+        # 100% goal: only ship checks reachable with a full inventory under the
+        # rolled logic so the client can require every slot check without softlock.
+        if int(self.options.game_goal.value) == 1 and getattr(self, "logic", None):
+            reachable = self.logic.get_reachable_nodes(
+                self.logic.inventory_from_counts(self._full_inventory_counts())
+            )
+            names = [
+                n for n in names
+                if self.logic.pickup_nodes.get(n) in reachable
+            ]
+        return names
 
     def create_item(self, name: str) -> MetroidDreadItem:
         item_data = item_table[name]
@@ -792,26 +887,24 @@ class MetroidDreadWorld(World):
 
     def set_rules(self):
         set_rules(self.multiworld, self.player, self.options)
-        # Remove excluded boss/EMMI locations from the multiworld (keep forced sinks).
-        if not self.options.include_boss_pickups:
-            forced = getattr(self, "forced_boss_locations", set()) or set()
-            for name in list(location_table.keys()):
-                if name in forced:
-                    continue
-                if any(s in name for s in _BOSS_EMMI_LOCATION_SUBSTR):
-                    try:
-                        loc = self.multiworld.get_location(name, self.player)
-                    except KeyError:
-                        continue
-                    if loc.parent_region:
-                        loc.parent_region.locations.remove(loc)
+        # Remove inactive pickup locations (boss/EMMI off, or non-clearable under 100%).
+        active = set(self.active_location_names())
+        for name in list(location_table.keys()):
+            if name in active:
+                continue
+            try:
+                loc = self.multiworld.get_location(name, self.player)
+            except KeyError:
+                continue
+            if loc.parent_region:
+                loc.parent_region.locations.remove(loc)
 
     def pre_fill(self) -> None:
         self._pre_place_dna()
         victory_clearance.assert_location_capacity(self)
 
     def post_fill(self) -> None:
-        """Reject fills where Raven Beak opens before 90% of checks are in logic."""
+        """Reject fills where Raven Beak opens before the goal's clearance ratio."""
         victory_clearance.assert_victory_implies_full_clearance(self)
 
     def _dna_candidate_locations(self) -> List[str]:
@@ -898,6 +991,7 @@ class MetroidDreadWorld(World):
         extras["logic_options"] = dict(logic_options)
         slot_data = {
             "death_link": self.options.death_link.value,
+            "game_goal": int(self.options.game_goal.value),
             "required_dna": int(self.options.required_dna.value),
             "starting_location": {
                 "region": region,

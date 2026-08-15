@@ -4,6 +4,89 @@ Dread Item Mappings for Archipelago
 Maps Archipelago item names to Dread resources, models, and icons.
 """
 
+from __future__ import annotations
+
+from copy import deepcopy
+from typing import Any, Dict, Mapping, MutableMapping, Optional
+
+# Default tank yields (match Options.py / RDV starter).
+DEFAULT_MISSILE_TANK_AMMO = 2
+DEFAULT_MISSILE_PLUS_TANK_AMMO = 10
+DEFAULT_POWER_BOMB_TANK_AMMO = 1
+DEFAULT_ENERGY_PER_TANK = 100
+
+
+def yields_from_extras(extras: Optional[Mapping[str, Any]]) -> Dict[str, int]:
+    """Resolve ammo / energy yields from patch_extras (or empty → defaults)."""
+    extras = extras or {}
+    combat = extras.get("cosmetic_combat") if isinstance(extras.get("cosmetic_combat"), Mapping) else {}
+    ept = combat.get("energy_per_tank", extras.get("energy_per_tank", DEFAULT_ENERGY_PER_TANK))
+    return {
+        "missile_tank_ammo": max(1, int(extras.get("missile_tank_ammo", DEFAULT_MISSILE_TANK_AMMO) or DEFAULT_MISSILE_TANK_AMMO)),
+        "missile_plus_tank_ammo": max(
+            1, int(extras.get("missile_plus_tank_ammo", DEFAULT_MISSILE_PLUS_TANK_AMMO) or DEFAULT_MISSILE_PLUS_TANK_AMMO)
+        ),
+        "power_bomb_tank_ammo": max(
+            1, int(extras.get("power_bomb_tank_ammo", DEFAULT_POWER_BOMB_TANK_AMMO) or DEFAULT_POWER_BOMB_TANK_AMMO)
+        ),
+        "energy_per_tank": max(1, int(ept or DEFAULT_ENERGY_PER_TANK)),
+    }
+
+
+def _set_resource_qty(resources: Any, item_id: str, qty: int) -> Any:
+    """Rewrite quantity for item_id in a flat or staged resources list (in place)."""
+
+    def _walk(stage: Any) -> None:
+        if isinstance(stage, list):
+            if stage and isinstance(stage[0], dict):
+                for entry in stage:
+                    if isinstance(entry, dict) and entry.get("item_id") == item_id:
+                        entry["quantity"] = int(qty)
+            else:
+                for nested in stage:
+                    _walk(nested)
+
+    _walk(resources)
+    return resources
+
+
+def apply_yield_overrides(
+    item_name: str,
+    item_data: MutableMapping[str, Any],
+    yields: Optional[Mapping[str, int]] = None,
+) -> MutableMapping[str, Any]:
+    """
+    Copy *item_data* and apply YAML ammo / energy-per-tank yields.
+
+    Used by the patcher (world pickups) and the client bridge (remote grants)
+    so ROM pickups and AP receives stay in sync with Options.py.
+    """
+    out = deepcopy(dict(item_data))
+    y = dict(yields or {})
+    missile = int(y.get("missile_tank_ammo", DEFAULT_MISSILE_TANK_AMMO))
+    missile_plus = int(y.get("missile_plus_tank_ammo", DEFAULT_MISSILE_PLUS_TANK_AMMO))
+    pb = int(y.get("power_bomb_tank_ammo", DEFAULT_POWER_BOMB_TANK_AMMO))
+    ept = int(y.get("energy_per_tank", DEFAULT_ENERGY_PER_TANK))
+    part = max(1, ept // 4)
+
+    if item_name == "Missile Tank":
+        _set_resource_qty(out["resources"], "ITEM_WEAPON_MISSILE_MAX", missile)
+        out["caption"] = f"Missile Tank acquired.\nMissile capacity increased by {missile}."
+    elif item_name == "Missile+ Tank":
+        _set_resource_qty(out["resources"], "ITEM_WEAPON_MISSILE_MAX", missile_plus)
+        out["caption"] = f"Missile+ Tank acquired.\nMissile capacity increased by {missile_plus}."
+    elif item_name == "Power Bomb Tank":
+        _set_resource_qty(out["resources"], "ITEM_WEAPON_POWER_BOMB_MAX", pb)
+        out["caption"] = f"Power Bomb Tank acquired.\nPower Bomb capacity increased by {pb}."
+    elif item_name == "Energy Tank":
+        _set_resource_qty(out["resources"], "ITEM_MAX_LIFE", ept)
+        out["caption"] = f"Energy Tank acquired.\nEnergy capacity increased by {ept}."
+    elif item_name == "Energy Part":
+        # ODR still grants ITEM_LIFE_SHARDS qty 1; caption reflects ept/4 when immediate.
+        out["caption"] = f"Energy Part acquired.\nEnergy capacity increased by {part}."
+    return out
+
+
 # Map AP item names → Dread item IDs and models
 DREAD_ITEM_MAPPING = {
     # Energy
@@ -188,21 +271,23 @@ DREAD_ITEM_MAPPING = {
         "caption": "Phantom Cloak acquired."
     },
     "Flash Shift": {
-        # Deprecated alias (not pooled). Treat as one Flash Shift Upgrade.
+        # Vanilla / main item: Ghost Aura + included_ammo chains (default 2 = RDV/ODR).
+        # Patcher may rewrite chain quantity from flash_shift_included_ammo.
         "resources": [
             {"item_id": "ITEM_GHOST_AURA", "quantity": 1},
-            {"item_id": "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", "quantity": 1},
+            {"item_id": "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", "quantity": 2},
         ],
-        "model": "powerup_flashshift",
-        "icon": "powerup_flashshift",
+        "model": "powerup_ghostaura",
+        "icon": "powerup_ghostaura",
         "caption": "Flash Shift acquired."
     },
     "Flash Shift Upgrade": {
-        # First unlocks Ghost Aura (via RandomizerFlashShiftUpgrade); each adds +1 chain.
-        # Flash uses = 1 + chain_count (1st=1 use, 3rd=vanilla 3, 7th=7 uses).
+        # Chains only. Progressive unlock of Ghost Aura (when Require Main is off)
+        # is handled by RandomizerFlashShiftUpgrade / AP IncreaseItemAmount hook.
+        # Flash uses = 1 + chain_count once the ability is owned.
         "resources": [{"item_id": "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", "quantity": 1}],
-        "model": "powerup_flashshift",
-        "icon": "powerup_flashshift",
+        "model": "item_flashshiftupgrade",
+        "icon": "item_flashshiftupgrade",
         "caption": "Flash Shift Upgrade acquired."
     },
     "Slide": {
