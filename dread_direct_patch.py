@@ -349,19 +349,22 @@ def build_patcher_json(
     )
 
 
-def ensure_remote_lua(patcher_data: dict) -> None:
+def ensure_remote_lua(
+    patcher_data: dict,
+    *,
+    seed_id: Optional[str] = None,
+    spoiler_path: Optional[Path] = None,
+) -> None:
+    """Enable remote Lua and set the Metroid Bread AP title screen string."""
     patcher_data["enable_remote_lua"] = True
     patcher_data["mod_compatibility"] = patcher_data.get("mod_compatibility") or "ryujinx"
     patcher_data["mod_category"] = patcher_data.get("mod_category") or "romfs"
-    text = patcher_data.setdefault("text_patches", {})
-    if isinstance(text, dict):
-        company = text.get("GUI_COMPANY_TITLE_SCREEN", "Archipelago <versions>")
-        if "<versions>" in company:
-            text["GUI_COMPANY_TITLE_SCREEN"] = company.replace(
-                "<versions>", "Archipelago Direct Patch - open-dread-rando"
-            )
-        elif "Archipelago" not in str(company):
-            text["GUI_COMPANY_TITLE_SCREEN"] = f"Archipelago Direct Patch\n{company}"
+    from ap_to_patcher import apply_company_title_screen
+
+    title = apply_company_title_screen(
+        patcher_data, seed_id=seed_id, spoiler_path=spoiler_path
+    )
+    log(f"[OK] Title screen: {title.replace(chr(10), ' / ')}")
 
 
 def apply_freesink(patcher_data: dict, enabled: bool) -> None:
@@ -1169,7 +1172,8 @@ def patch_from_spoiler(
         )
     except ValueError as e:
         raise PatchError(str(e)) from e
-    ensure_remote_lua(patcher_data)
+    # Re-apply with the spoiler path so seed id is never the RDV template leftover.
+    ensure_remote_lua(patcher_data, spoiler_path=spoiler)
     apply_freesink(patcher_data, freesink)
 
     py = find_python_with_odr()

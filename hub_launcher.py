@@ -903,12 +903,14 @@ def start_hub_process(
 
 def ensure_system_client_python_deps(world_dir: Optional[Path] = None) -> str:
     """
-    Install Hub client packages (websockets, etc.) for the Hub-spawned Python.
+    Install Hub client packages (websockets, open-dread-rando, etc.) for the
+    Hub-spawned Python.
 
     Archipelago Launcher / Text Client use a bundled interpreter that already
     has deps; Hub spawns host Python with SKIP_REQUIREMENTS_UPDATE=1, so those
     packages must be installed separately. On Linux, ensure_client_deps uses a
-    local ``_metroid_dread_venv`` (never systemwide / ``pip install --user``).
+    local ``_metroid_dread_venv`` (never systemwide / ``pip install --user``);
+    ODR may land in the venv or remain visible via ``--system-site-packages``.
     Raises RuntimeError with a clear user-facing message on failure.
     """
     world = Path(world_dir) if world_dir else world_package_dir()

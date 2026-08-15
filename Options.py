@@ -379,6 +379,10 @@ class RavenBeakDamageTable(Choice):
 
 
 class NerfPowerBombs(Toggle):
+    """
+    Power Bomb Limitations (RDV / ODR): Power Bombs no longer open Charge Beam
+    doors or destroy Enkys. Generator logic follows the same restriction.
+    """
     display_name = "Nerf Power Bombs"
 
 

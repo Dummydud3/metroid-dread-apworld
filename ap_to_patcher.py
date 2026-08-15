@@ -1205,6 +1205,135 @@ def spoiler_seed_key(spoiler_path: Path) -> str:
     return spoiler_path.resolve().as_posix()
 
 
+# Title-screen branding (BTXT GUI_COMPANY_TITLE_SCREEN). ODR uses `|` inside the
+# second line for its own separator; we use `\n` between the two visual lines.
+DEFAULT_ODR_VERSION = "2.18.0"
+_STALE_RDV_SEED_MARKERS = ("Slaaga Spittail Robe", "57GXBFRH")
+_DIFSELECTOR_LABEL_KEYS = (
+    "GUI_DIFSELECTOR_LABEL_DESCRIPTOR_EASY",
+    "GUI_DIFSELECTOR_LABEL_DESCRIPTOR_NORMAL",
+    "GUI_DIFSELECTOR_LABEL_DESCRIPTOR_HARD_UNLOCKED",
+    "GUI_DIFSELECTOR_LABEL_DESCRIPTOR_EXPERT",
+)
+
+
+def ap_world_version() -> str:
+    """AP world / apworld build version from archipelago.json."""
+    path = _ROOT / "archipelago.json"
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        version = data.get("world_version") if isinstance(data, dict) else None
+        if isinstance(version, str) and version.strip():
+            return version.strip()
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    return "0.0.0"
+
+
+def open_dread_rando_version() -> str:
+    """Installed ODR version when importable; else the pinned fallback."""
+    try:
+        from open_dread_rando.version import version as odr_version
+
+        text = str(odr_version).strip()
+        if text:
+            return text
+    except Exception:
+        pass
+    return DEFAULT_ODR_VERSION
+
+
+def format_display_seed_id(seed_key: str) -> str:
+    """Turn spoiler_seed_key / raw seed into a short title-screen id."""
+    key = (seed_key or "").strip()
+    if not key or any(m in key for m in _STALE_RDV_SEED_MARKERS):
+        return ""
+    match = re.fullmatch(r"(?:SEED_|AP_)?(\d{10,})", key)
+    if match:
+        return match.group(1)
+    if key.startswith("SEED_"):
+        return key[5:]
+    if key.startswith("AP_"):
+        return key
+    # Path fallbacks are not useful on the title screen.
+    if "/" in key or "\\" in key or len(key) > 48:
+        return ""
+    return key
+
+
+def layout_uuid_short(layout_uuid: Optional[str]) -> str:
+    if not isinstance(layout_uuid, str):
+        return ""
+    value = layout_uuid.strip()
+    if not value or value in _PLACEHOLDER_LAYOUT_UUIDS:
+        return ""
+    compact = value.replace("-", "")
+    return compact[:8].upper() if len(compact) >= 8 else compact.upper()
+
+
+def resolve_title_seed_id(
+    *,
+    spoiler_path: Optional[Path] = None,
+    seed_id: Optional[str] = None,
+    patcher_data: Optional[dict] = None,
+) -> str:
+    """Prefer the real AP seed; fall back to a short layout UUID."""
+    direct = format_display_seed_id(seed_id or "")
+    if direct:
+        return direct
+    if spoiler_path is not None:
+        from_spoiler = format_display_seed_id(spoiler_seed_key(spoiler_path))
+        if from_spoiler:
+            return from_spoiler
+    if isinstance(patcher_data, dict):
+        short = layout_uuid_short(patcher_data.get("layout_uuid"))
+        if short:
+            return short
+    return "unknown"
+
+
+def build_company_title_screen(
+    *,
+    version: Optional[str] = None,
+    odr_version: Optional[str] = None,
+    seed_id: str,
+) -> str:
+    ver = (version or ap_world_version()).strip()
+    odr = (odr_version or open_dread_rando_version()).strip()
+    sid = (seed_id or "unknown").strip() or "unknown"
+    return (
+        f"Metroid Bread AP\n"
+        f"AP World v{ver} - open-dread-rando {odr}|{sid}"
+    )
+
+
+def apply_company_title_screen(
+    patcher_data: dict,
+    *,
+    seed_id: Optional[str] = None,
+    spoiler_path: Optional[Path] = None,
+) -> str:
+    """
+    Replace GUI_COMPANY_TITLE_SCREEN entirely (no RDV leftover prepend).
+
+    Also refreshes difficulty-selector descriptors when present so they do not
+    keep the stale sample-seed word hash.
+    """
+    sid = resolve_title_seed_id(
+        spoiler_path=spoiler_path,
+        seed_id=seed_id,
+        patcher_data=patcher_data,
+    )
+    title = build_company_title_screen(seed_id=sid)
+    text = patcher_data.setdefault("text_patches", {})
+    if isinstance(text, dict):
+        text["GUI_COMPANY_TITLE_SCREEN"] = title
+        for key in _DIFSELECTOR_LABEL_KEYS:
+            text[key] = sid
+    return title
+
+
 def _read_layout_uuid(path: Path) -> Optional[str]:
     if not path.is_file():
         return None
@@ -1465,6 +1594,10 @@ def create_patcher_json(
     no_icon = len(keys_preview.get("skipped") or [])
     if no_icon:
         print(f"     - {no_icon} pickups keep their vanilla map icon (no ItemCustom slot)")
+
+    # Title screen: replace RDV sample leftovers with AP branding + real seed id.
+    title = apply_company_title_screen(patcher_data, spoiler_path=spoiler_path)
+    print(f"[OK] Title screen: {title.replace(chr(10), ' / ')}")
 
     # Samus-menu upgrade rows (ODR ≥2.19). Safe no-op / strip on ≤2.18.
     apply_upgrade_menu_flags(patcher_data)

@@ -21,6 +21,17 @@ if TYPE_CHECKING:
 
 NodeId = Tuple[str, str, str]  # region, area, node
 
+# RDV misc resources that are always enabled (matches dread bootstrap defaults).
+MISC_ALWAYS_ON: FrozenSet[str] = frozenset({"SeparateBeams", "SeparateMissiles"})
+
+# RDV misc short name -> MetroidDreadOptions field (truthy value enables the resource).
+# Matches randovania dread generator bootstrap logical_patches / dock / teleporter flags.
+MISC_TO_OPTION: Dict[str, str] = {
+    "NerfPowerBombs": "nerf_power_bombs",
+    "DoorLocks": "door_lock_rando",
+    "Teleporters": "transport_rando",
+}
+
 # RDV trick short name -> MetroidDreadOptions field
 TRICK_TO_OPTION: Dict[str, str] = {
     "Knowledge": "knowledge_tricks",
@@ -408,10 +419,30 @@ class DreadLogic:
             return self._damage_ok(rname, amount, inventory)
 
         if rtype == "misc":
-            # Flags like NerfPowerBombs are off by default
-            return False
+            return self._misc_ok(rname)
 
         return False
+
+    def _misc_ok(self, rname: str) -> bool:
+        """
+        RDV misc resources gate optional patches (e.g. NerfPowerBombs).
+
+        Open Charge Door / Destroy Enky require ``NOT NerfPowerBombs`` for the
+        Power Bomb alternate; when the option is on, that branch must fail so
+        generator logic matches ODR's ``_remove_pb_weaknesses`` patch.
+        """
+        if rname in MISC_ALWAYS_ON:
+            return True
+        opt_name = MISC_TO_OPTION.get(rname)
+        if not opt_name:
+            return False
+        opt = getattr(self.world.options, opt_name, None)
+        if opt is None:
+            return False
+        try:
+            return int(opt.value) > 0
+        except Exception:
+            return bool(opt.value)
 
     def _damage_ok(self, name: str, amount: int, inventory: FrozenSet[str]) -> bool:
         suitless = self.trick_level("Suitless")

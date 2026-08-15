@@ -97,6 +97,13 @@ class EnsureLogicTests(unittest.TestCase):
         self.assertIn("websockets", text)
         self.assertIn("colorama", text)
         self.assertIn("PyYAML", text)
+        self.assertIn("open-dread-rando", text)
+
+    def test_client_imports_includes_odr(self):
+        names = [name for name, _ in ecd.CLIENT_IMPORTS]
+        self.assertIn("open_dread_rando", names)
+        reqs = dict(ecd.CLIENT_IMPORTS)
+        self.assertTrue(reqs["open_dread_rando"].startswith("open-dread-rando"))
 
     def test_linux_resolve_uses_venv_not_system_pip(self):
         logs: list[str] = []

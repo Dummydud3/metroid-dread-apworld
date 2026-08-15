@@ -21,10 +21,9 @@ from .dread_logic import PROGRESSIVE_EXPAND
 
 # Sphere-0 pickups to aim for. This is a floor that makes the fill work, not a
 # difficulty knob, and every point costs the player a major item out of the
-# pool — but two is measurably too tight. The fill still dead-ends placing the
-# last progression item maybe one seed in twenty when the start has only two
-# checks, so three it is.
-MIN_START_LOCATIONS = 3
+# pool. Two keeps Artaria Intro / Start Room empty (it already has exactly two
+# in-logic checks); three forced Phantom Cloak (etc.) into the start kit there.
+MIN_START_LOCATIONS = 2
 
 # Never hand out more than this, even if the start stays cramped.
 MAX_START_KIT = 5

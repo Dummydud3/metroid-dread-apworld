@@ -13,12 +13,15 @@ from typing import Any, Dict, Mapping, Optional
 
 from .dread_logic import TRICK_TO_OPTION
 
-# Ammo / DNA settings DreadLogic reads via world.options.<name>.value
+# Ammo / DNA / misc-patch settings DreadLogic reads via world.options.<name>.value
 _EXTRA_LOGIC_OPTIONS = (
     "required_dna",
     "energy_per_tank",
     "starting_power_bombs",
     "power_bomb_tank_ammo",
+    "nerf_power_bombs",
+    "door_lock_rando",
+    "transport_rando",
 )
 
 LOGIC_OPTION_NAMES: tuple[str, ...] = tuple(
@@ -57,6 +60,9 @@ _SPOILER_LABEL_TO_OPTION: Dict[str, str] = {
     "Energy Per Tank": "energy_per_tank",
     "Starting Power Bombs": "starting_power_bombs",
     "Power Bomb Tank Ammo": "power_bomb_tank_ammo",
+    "Nerf Power Bombs": "nerf_power_bombs",
+    "Door Lock Randomizer": "door_lock_rando",
+    "Transport Randomizer": "transport_rando",
 }
 
 _DIFFICULTY_WORDS: Dict[str, int] = {

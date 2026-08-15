@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 # Import name → pip requirement (used when requirements-client.txt is missing).
+# open_dread_rando: patcher engine (Connect/ensure so Patch finds it on Hub's interpreter).
+# Prefer >=2.19 (DNA HUD / upgrade-row schema); portable dist may ship unpinned.
 CLIENT_IMPORTS: Tuple[Tuple[str, str], ...] = (
     ("websockets", "websockets>=13.0.1,<14"),
     ("colorama", "colorama>=0.4.6"),
@@ -27,6 +29,7 @@ CLIENT_IMPORTS: Tuple[Tuple[str, str], ...] = (
     ("jellyfish", "jellyfish>=1.2.1"),
     ("typing_extensions", "typing_extensions>=4.15.0"),
     ("schema", "schema>=0.7.8"),
+    ("open_dread_rando", "open-dread-rando>=2.19"),
 )
 
 EXIT_OK = 0

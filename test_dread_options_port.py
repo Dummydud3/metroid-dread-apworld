@@ -451,49 +451,55 @@ class TestTransportRandoSpawn(unittest.TestCase):
         self.assertEqual(artaria["source_camera"], "collision_camera_077")
 
 
+def _fake_start_kit_world(start_node_id, trick_value=5, trick_key="expert"):
+    """Minimal world stub for StartKit.build_start_kit unit tests."""
+    import random
+
+    from worlds.metroid_dread.dread_logic import DreadLogic
+
+    class _O:
+        def __init__(self, v=0, key="disabled"):
+            self.value = v
+            self.current_key = key
+
+        def __bool__(self):
+            return bool(self.value)
+
+    class FakeOpt:
+        required_dna = _O(0)
+        progressive_beams = _O(0)
+        progressive_charge = _O(1)
+        progressive_missiles = _O(0)
+        progressive_bombs = _O(0)
+        progressive_suit = _O(1)
+        progressive_spin = _O(1)
+        start_with_pulse_radar = _O(0)
+        reverse_grapple_block = _O(1)
+
+        def __getattr__(self, _name):
+            return _O(trick_value, trick_key)
+
+    class FakeWorld:
+        player = 1
+        options = FakeOpt()
+
+        def active_location_names(self):
+            return set(self.logic.pickup_nodes)
+
+    world = FakeWorld()
+    world.random = random.Random(0)
+    world.logic = DreadLogic(world)
+    world.logic.set_starting_node(start_node_id)
+    return world
+
+
 class TestStartKitTightFit(unittest.TestCase):
     def test_hanubia_prefers_bomb_over_power_bomb(self):
         """Hanubia must not be handed Power Bomb just to open sphere 0."""
-        import random
-
         from worlds.metroid_dread import StartKit
-        from worlds.metroid_dread.dread_logic import DreadLogic
         from worlds.metroid_dread.starting_locations import get_by_option_key
 
-        class _O:
-            def __init__(self, v=0, key="disabled"):
-                self.value = v
-                self.current_key = key
-
-            def __bool__(self):
-                return bool(self.value)
-
-        class FakeOpt:
-            required_dna = _O(0)
-            progressive_beams = _O(0)
-            progressive_charge = _O(1)
-            progressive_missiles = _O(0)
-            progressive_bombs = _O(0)
-            progressive_suit = _O(1)
-            progressive_spin = _O(1)
-            start_with_pulse_radar = _O(0)
-            reverse_grapple_block = _O(1)
-
-            def __getattr__(self, _name):
-                # Expert tricks: Morph+Bomb opens 4 checks; Morph+PB opens 26.
-                return _O(5, "expert")
-
-        class FakeWorld:
-            player = 1
-            options = FakeOpt()
-
-            def active_location_names(self):
-                return set(self.logic.pickup_nodes)
-
-        world = FakeWorld()
-        world.random = random.Random(0)
-        world.logic = DreadLogic(world)
-        world.logic.set_starting_node(
+        world = _fake_start_kit_world(
             get_by_option_key("hanubia_navigation_station_save_station").node_id
         )
         kit = StartKit.build_start_kit(world)
@@ -504,6 +510,19 @@ class TestStartKitTightFit(unittest.TestCase):
             StartKit.start_checks(world, StartKit.kit_counts(kit)),
             StartKit.MIN_START_LOCATIONS,
         )
+
+    def test_artaria_intro_empty_kit_at_min_two(self):
+        """Intro already has two in-logic checks; min=2 must not grant Cloak etc."""
+        from worlds.metroid_dread import StartKit
+        from worlds.metroid_dread.starting_locations import DEFAULT_START
+
+        self.assertEqual(StartKit.MIN_START_LOCATIONS, 2)
+        world = _fake_start_kit_world(DEFAULT_START)
+        empty_checks = StartKit.start_checks(world, {})
+        self.assertGreaterEqual(empty_checks, StartKit.MIN_START_LOCATIONS)
+        kit = StartKit.build_start_kit(world)
+        self.assertEqual(kit, [])
+        self.assertNotIn("Phantom Cloak", kit)
 
 
 if __name__ == "__main__":

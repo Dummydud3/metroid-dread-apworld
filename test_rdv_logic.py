@@ -140,6 +140,43 @@ class TestRdvLogic(unittest.TestCase):
         }
         self.assertTrue(self.logic.evaluate_requirement(req, frozenset(self._base_inv())))
 
+    def test_nerf_power_bombs_blocks_open_charge_door_pb_path(self):
+        """With Knowledge + PB, charge doors open via PB only when nerf is off."""
+        from worlds.metroid_dread.dread_logic import DreadLogic
+
+        tmpl = self.logic.parser.templates["Open Charge Door"]["requirement"]
+        # Lay Power Bomb needs Morph + MainPB + PB ammo.
+        inv = frozenset(self._base_inv("Morph Ball", "Power Bomb", "__pb_ammo__"))
+
+        class _OptsOff:
+            def __getattr__(self, name):
+                if name == "knowledge_tricks":
+                    return type("o", (), {"value": 1})()
+                return type("o", (), {"value": 0})()
+
+        class _WorldOff:
+            player = 1
+            options = _OptsOff()
+
+        logic_off = DreadLogic(_WorldOff())
+        self.assertTrue(logic_off.evaluate_requirement(tmpl, inv))
+
+        class _OptsOn:
+            def __getattr__(self, name):
+                if name in ("knowledge_tricks", "nerf_power_bombs"):
+                    return type("o", (), {"value": 1})()
+                return type("o", (), {"value": 0})()
+
+        class _WorldOn:
+            player = 1
+            options = _OptsOn()
+
+        logic_on = DreadLogic(_WorldOn())
+        self.assertFalse(logic_on.evaluate_requirement(tmpl, inv))
+        # Charge Beam still opens the door when nerfed.
+        with_charge = frozenset(self._base_inv("Charge Beam"))
+        self.assertTrue(logic_on.evaluate_requirement(tmpl, with_charge))
+
 
 class TestGenerationSmoke(unittest.TestCase):
     """Optional full generation — skipped if AP world import fails."""
