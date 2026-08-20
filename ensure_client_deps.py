@@ -16,6 +16,11 @@ import sys
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
+try:
+    from win_subprocess import run_hidden
+except ImportError:
+    from worlds.metroid_bread.win_subprocess import run_hidden
+
 # Import name → pip requirement (used when requirements-client.txt is missing).
 # open_dread_rando: patcher engine (Connect/ensure so Patch finds it on Hub's interpreter).
 # Prefer >=2.19 (DNA HUD / upgrade-row schema); portable dist may ship unpinned.
@@ -42,6 +47,11 @@ VERSION_OK_CODE = (
     "import sys; raise SystemExit("
     "0 if (3, 11, 9) <= sys.version_info < (3, 14) else 1)"
 )
+VERSION_PRINT_CODE = "import sys; print('%d.%d.%d' % sys.version_info[:3])"
+
+# Inclusive lower / exclusive upper bounds for Hub client CPython.
+CLIENT_PYTHON_MIN = (3, 11, 9)
+CLIENT_PYTHON_MAX_EXCLUSIVE = (3, 14)
 
 PYTHON_MISSING_MESSAGE = (
     "No usable Python 3.11–3.13 found for the Hub client.\n"
@@ -85,9 +95,21 @@ def format_cmd(cmd: Sequence[str]) -> str:
     return " ".join(str(c) for c in cmd if c)
 
 
+def is_supported_client_python_version(
+    version_info: Optional[Tuple[int, ...]] = None,
+) -> bool:
+    """True when version is Hub-compatible CPython 3.11.9–3.13.x."""
+    info = version_info if version_info is not None else sys.version_info
+    major = int(info[0])
+    minor = int(info[1])
+    micro = int(info[2]) if len(info) > 2 else 0
+    tup = (major, minor, micro)
+    return CLIENT_PYTHON_MIN <= tup < CLIENT_PYTHON_MAX_EXCLUSIVE
+
+
 def _probe(cmd: Sequence[str], code: str, *, timeout: float = 30.0) -> bool:
     try:
-        proc = subprocess.run(
+        proc = run_hidden(
             list(cmd) + ["-c", code],
             capture_output=True,
             text=True,
@@ -97,6 +119,46 @@ def _probe(cmd: Sequence[str], code: str, *, timeout: float = 30.0) -> bool:
         return proc.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+def _probe_version_string(cmd: Sequence[str], *, timeout: float = 30.0) -> Optional[str]:
+    try:
+        proc = run_hidden(
+            list(cmd) + ["-c", VERSION_PRINT_CODE],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    line = (proc.stdout or "").strip().splitlines()
+    return line[-1].strip() if line else None
+
+
+def describe_missing_client_python() -> str:
+    """
+    Short checklist / wizard detail when no usable 3.11–3.13 interpreter exists.
+
+    Mentions a present-but-unsupported Python (e.g. 3.14) when found.
+    """
+    for candidate in _base_python_candidates():
+        ver = _probe_version_string(candidate)
+        if not ver:
+            continue
+        parts = ver.split(".")
+        try:
+            tup = tuple(int(p) for p in parts[:3])
+        except ValueError:
+            continue
+        if not is_supported_client_python_version(tup):
+            return (
+                f"{format_cmd(candidate)} is Python {ver} "
+                "(need 3.11–3.13) — Install Python 3.12"
+            )
+    return "no usable 3.11–3.13 — Install Python 3.12"
 
 
 def _is_venv_python_cmd(python_cmd: Sequence[str], world: Optional[Path] = None) -> bool:
@@ -210,7 +272,7 @@ def ensure_linux_venv(
         f"(from {format_cmd(base_cmd)}; deps will not be installed systemwide)..."
     )
     try:
-        proc = subprocess.run(
+        proc = run_hidden(
             list(base_cmd)
             + ["-m", "venv", "--system-site-packages", str(vdir)],
             capture_output=True,
@@ -290,7 +352,7 @@ def missing_imports(python_cmd: Sequence[str]) -> List[str]:
         "print(','.join(miss))\n"
     )
     try:
-        proc = subprocess.run(
+        proc = run_hidden(
             list(python_cmd) + ["-c", code],
             capture_output=True,
             text=True,
@@ -449,7 +511,7 @@ def ensure_pip(
 
     _log(f"pip missing for {format_cmd(python_cmd)}; trying ensurepip...")
     try:
-        proc = subprocess.run(
+        proc = run_hidden(
             list(python_cmd) + ["-m", "ensurepip", "--upgrade"],
             capture_output=True,
             text=True,
@@ -490,7 +552,7 @@ def _install_packages(
     else:
         cmd = list(python_cmd) + ["-m", "pip", "install", *[r for _, r in CLIENT_IMPORTS]]
     try:
-        proc = subprocess.run(
+        proc = run_hidden(
             cmd,
             capture_output=True,
             text=True,
@@ -507,7 +569,7 @@ def _install_packages(
             ok_pip, _ = ensure_pip(python_cmd, log=log)
             if ok_pip:
                 try:
-                    proc = subprocess.run(
+                    proc = run_hidden(
                         cmd,
                         capture_output=True,
                         text=True,

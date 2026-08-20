@@ -21,6 +21,11 @@ import zipfile
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
+try:
+    from win_subprocess import run_hidden
+except ImportError:
+    from worlds.metroid_bread.win_subprocess import run_hidden
+
 NODE_DIST_LATEST_V24 = "https://nodejs.org/dist/latest-v24.x/"
 NODE_BROWSER_FALLBACK = NODE_DIST_LATEST_V24
 WINGET_NODE_IDS = ("OpenJS.NodeJS.24", "OpenJS.NodeJS")
@@ -193,7 +198,7 @@ def try_winget_install_node(*, log: Optional[LogFn] = None) -> bool:
     for pkg_id in WINGET_NODE_IDS:
         _log(log, f"Trying winget install -e --id {pkg_id} ...")
         try:
-            proc = subprocess.run(
+            proc = run_hidden(
                 [
                     winget,
                     "install",

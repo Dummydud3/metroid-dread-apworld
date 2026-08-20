@@ -7,8 +7,9 @@ Official Archipelago Windows installs under `C:\ProgramData\Archipelago` are
 
 This folder is a minimal loose-`.py` import surface (CommonClient, Utils,
 NetUtils, Options, …) plus a stub `worlds/` package that exposes the Metroid
-Dread datapackage. Path resolution prefers a real Archipelago source/portable
-tree when present; otherwise it uses this `ap_core`.
+Bread datapackage (`worlds/metroid_bread_datapackage.json`). Path resolution
+prefers a real Archipelago source/portable tree when present; otherwise it uses
+this `ap_core`.
 
 Refresh from a matching Archipelago checkout:
 

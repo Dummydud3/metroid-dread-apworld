@@ -18,11 +18,28 @@ def run_hub_or_client(*args):
     """
     Entry point for multiprocessing spawn — must stay at module level (picklable).
     Starts our Hub with package install/repair, or the Python client fallback.
-    """
-    from .hub_launcher import launch_hub_or_fallback
 
-    # Block this worker process until Hub/client exits so the launcher can track it.
-    launch_hub_or_fallback(args, wait=True)
+    Any failure must show a MessageBox / wizard — never a silent no-op.
+    """
+    try:
+        from .hub_launcher import launch_hub_or_fallback
+
+        launch_hub_or_fallback(args, wait=True)
+    except Exception as exc:
+        # launch_hub_or_fallback already MessageBoxes most paths; this catches
+        # import failures or anything that escaped without UI.
+        try:
+            from .hub_launcher import LAUNCH_NEED_DEPS_HINT, show_user_error
+
+            show_user_error(
+                "Metroid Bread Client",
+                f"Could not start Metroid Bread Client:\n\n{exc}\n\n"
+                f"{LAUNCH_NEED_DEPS_HINT}",
+            )
+        except Exception:
+            import sys
+
+            print(f"Metroid Bread Client failed: {exc}", file=sys.stderr, flush=True)
 
 
 def launch_metroid_bread_client(*args):

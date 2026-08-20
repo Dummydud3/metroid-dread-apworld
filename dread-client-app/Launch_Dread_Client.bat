@@ -25,15 +25,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM Electron 33 install.js uses extract-zip, which silently fails on Node 26.x
-REM (path.txt / electron.exe never appear; npm start then throws the reinstall Error).
-REM Majors ^>=25 are refused; managed Node 24 from the Hub Setup Wizard is preferred.
+REM Electron 33 historically failed to install its binary on Node 24.16+ / 26.x
+REM (extract-zip / yauzl hang — electron/electron#51619). package.json now
+REM overrides yauzl to ^3.3.1 so Node 26 works. Only refuse Node below 18.
 for /f "usebackq delims=" %%A in (`node -p "process.versions.node.split('.')[0]" 2^>nul`) do set "NODE_MAJOR=%%A"
 if not defined NODE_MAJOR set "NODE_MAJOR=0"
-if %NODE_MAJOR% GEQ 25 (
+if %NODE_MAJOR% LSS 18 (
   echo.
-  echo Node.js %NODE_MAJOR% is not supported for the Metroid Bread Client Hub.
-  echo Electron cannot download its binary on Node 26.x ^(extract-zip bug^).
+  echo Node.js %NODE_MAJOR% is too old for the Metroid Bread Client Hub ^(need ≥18^).
   echo.
   echo Fix: install Node.js 24 from https://nodejs.org/dist/latest-v24.x/
   echo   ^(or use Archipelago Launcher → Hub Setup Wizard → Install Node 24^)

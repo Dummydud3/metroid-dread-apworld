@@ -56,3 +56,4 @@ Thumbs.db
 
 # Large binary artifacts that are rebuilt locally (keep intentional assets tracked)
 # icons.bctex / PNGs under assets/ ARE tracked on purpose.
+/docs

@@ -37,6 +37,10 @@ DREAD_PATCH_EXTRAS_MARKER = "DREAD_PATCH_EXTRAS_JSON:"
 
 _GOAL_NODE = ("Itorash", "Raven Beak Arena", "Boss - Raven Beak")
 
+# With combat_tricks disabled, RDV fight templates fall back to raw Damage/energy
+# gates. Gold Chozo-X and Raven Beak both require 799 energy on the no-Combat path.
+_COMBAT_OFF_MIN_ENERGY = 799
+
 # Share of the world a start has to reach with a full inventory to be usable.
 _MIN_START_COVERAGE = 0.8
 
@@ -50,6 +54,22 @@ _MIN_START_CHECKS = StartKit.MIN_START_LOCATIONS
 _GRAPH_REROLL_ATTEMPTS = 2
 _DOOR_SOFTEN_PASSES = 3
 _DOOR_SOFTEN_TOP_K = 6
+
+# Openers tried when testing whether sphere-0 can grow under assumed fill.
+_SPHERE_OPENERS = (
+    "Morph Ball",
+    "Bomb",
+    "Charge Beam",
+    "Spider Magnet",
+    "Grapple Beam",
+    "Speed Booster",
+    "Phantom Cloak",
+    "Wide Beam",
+    "Power Bomb",
+    "Varia Suit",
+    "Flash Shift",
+    "Screw Attack",
+)
 
 # Boss / EMMI defeat-style pickups (for DNA placement + include_boss_pickups).
 _BOSS_EMMI_LOCATION_SUBSTR = (
@@ -82,6 +102,29 @@ _BOSS_DNA_SUBSTR = (
     "Central Unit Access",
     "Purple EMMI Arena",
     "Orange EMMI Introduction",
+)
+
+# Arena / EMMI-defeat sinks (true DNA homes). Central Unit Access is preferred
+# for DNA theming but also holds Morph / Speed / Magnet — use it after arenas.
+_ARENA_DNA_SUBSTR = (
+    "Corpius Arena",
+    "Kraid Arena",
+    "Drogyga Arena",
+    "Escue Arena",
+    "Golzuna Arena",
+    "Above Z-57 Fight - Pickup (Z-57)",
+    "Purple EMMI Arena",
+    "Orange EMMI Introduction",
+)
+
+# Vanilla intro checks that look "late" vs a non-Artaria start kit sphere but
+# are terrible locked-DNA sinks (Ferenia start + Artaria tutorials, etc.).
+_STALE_INTRO_DNA_SUBSTR = (
+    "Charge Tutorial",
+    "Melee Tutorial Room",
+    "EMMI Zone First Entrance",
+    "Proto EMMI Introduction",
+    "First Tutorial",
 )
 
 
@@ -139,6 +182,7 @@ class MetroidBreadWorld(World):
         self.patch_extras = {}
         self.start_kit = []
         self.forced_boss_locations = set()
+        self.early_expand_pins: List[str] = []
 
         # Raven Beak's access rule already requires >=90% of clearable checks
         # (100% when game_goal is one_hundred_percent; see Rules.py /
@@ -164,6 +208,10 @@ class MetroidBreadWorld(World):
                 f"[Metroid Bread Player {self.player}] accessibility "
                 f"'minimal' upgraded to 'items' (victory implies {goal_note})"
             )
+
+        # Combat-off + tiny energy_per_tank leaves Gold Chozo / Raven Beak
+        # logically impossible even with every tank collected.
+        self._ensure_combat_energy_viable()
 
         self._resolve_starting_location()
 
@@ -195,9 +243,15 @@ class MetroidBreadWorld(World):
                         f"({last_preflight}); reverted to vanilla graph"
                     )
 
-        # Final guard: never ship a kit that can already touch Raven Beak.
-        if self._start_kit_reaches_goal():
+        # Final guard: never ship a kit that can already touch Raven Beak,
+        # or a start whose sphere 0 cannot expand under the settled graph.
+        if self._start_kit_reaches_goal() or not self._kit_is_ok():
             self._roll_start_kit()
+
+        # Cramped sphere-0 (exactly MIN checks): fill can park non-opening
+        # progression in every early slot and softlock. Pin the openers that
+        # actually expand the start into local_early_items (see create_items).
+        self._compute_early_expand_pins()
 
         self._compute_forced_boss_locations()
         victory_clearance.assert_graph_preflight(self)
@@ -283,6 +337,82 @@ class MetroidBreadWorld(World):
     def _start_checks(self) -> int:
         return StartKit.start_checks(self, StartKit.kit_counts(self.start_kit))
 
+    def _opener_pool_name(self, name: str) -> str:
+        """Map a logic opener to the shuffled pool name under progressive options."""
+        if name in ("Wide Beam", "Plasma Beam", "Wave Beam") and self.options.progressive_beams:
+            return "Progressive Beam"
+        if name in ("Charge Beam", "Diffusion Beam") and self.options.progressive_charge:
+            return "Progressive Charge Beam"
+        if name in ("Bomb", "Cross Bomb") and self.options.progressive_bombs:
+            return "Progressive Bombs"
+        if name in ("Varia Suit", "Gravity Suit") and self.options.progressive_suit:
+            return "Progressive Suit"
+        if name in ("Spin Boost", "Space Jump") and self.options.progressive_spin:
+            return "Progressive Spin"
+        return name
+
+    def _start_sphere_expands(self) -> bool:
+        """
+        True when assumed fill can grow past sphere 0.
+
+        Some save rooms only expose two local checks; placing Morph (etc.) there
+        still leaves the player trapped (one-ways, door locks, transport cuts).
+        Artaria Intro expands; Artaria Save East / Burenia South often do not.
+        """
+        counts = StartKit.kit_counts(self.start_kit)
+        early = self.logic.reachable_pickup_names(counts)
+        if len(early) < _MIN_START_CHECKS:
+            return False
+        sim = dict(counts)
+        added = 0
+        for name in _SPHERE_OPENERS:
+            grant = self._opener_pool_name(name)
+            if sim.get(grant, 0) > 0:
+                continue
+            sim[grant] = sim.get(grant, 0) + 1
+            added += 1
+            if added >= len(early):
+                break
+        expanded = self.logic.reachable_pickup_names(sim)
+        return len(expanded) >= len(early) + _MIN_START_CHECKS
+
+    def _compute_early_expand_pins(self) -> None:
+        """
+        When sphere-0 has only ``_MIN_START_CHECKS`` slots, pin the openers that
+        expand it into ``local_early_items``.
+
+        Assumed fill may otherwise place Progressive Beam / DNA-adjacent junk in
+        every early check (fuzz 434 Artaria Save East + Morph; fuzz 53 Burenia
+        South + Screw Attack), leaving Morph/Bomb/Charge nowhere to go.
+        Spacious starts (> MIN early checks) leave fill enough room to stumble.
+        """
+        self.early_expand_pins = []
+        counts = StartKit.kit_counts(self.start_kit)
+        early = self.logic.reachable_pickup_names(counts)
+        if len(early) != _MIN_START_CHECKS:
+            return
+        if not self._start_sphere_expands():
+            return
+
+        sim = dict(counts)
+        pins: List[str] = []
+        for name in _SPHERE_OPENERS:
+            grant = self._opener_pool_name(name)
+            if sim.get(grant, 0) > 0:
+                continue
+            sim[grant] = sim.get(grant, 0) + 1
+            pins.append(grant)
+            if len(self.logic.reachable_pickup_names(sim)) >= len(early) + _MIN_START_CHECKS:
+                break
+            if len(pins) >= len(early):
+                break
+        self.early_expand_pins = pins
+        if pins:
+            print(
+                f"[Metroid Bread Player {self.player}] sphere-0 has only "
+                f"{len(early)} check(s); pinning early opener(s): {', '.join(pins)}"
+            )
+
     def _start_kit_reaches_goal(self) -> bool:
         """True when the starting kit alone can already reach Raven Beak."""
         counts = StartKit.kit_counts(self.start_kit)
@@ -290,6 +420,13 @@ class MetroidBreadWorld(World):
             self.logic.inventory_from_counts(counts)
         )
         return _GOAL_NODE in nodes
+
+    def _kit_is_ok(self) -> bool:
+        return (
+            self._start_checks() >= _MIN_START_CHECKS
+            and self._start_sphere_expands()
+            and not self._start_kit_reaches_goal()
+        )
 
     def _has_uncleared_logic_locations(self) -> bool:
         """True if any AP pickup/event node stays out of logic with full inventory."""
@@ -326,12 +463,6 @@ class MetroidBreadWorld(World):
             f"are disabled)"
         )
 
-    def _kit_is_ok(self) -> bool:
-        return (
-            self._start_checks() >= _MIN_START_CHECKS
-            and not self._start_kit_reaches_goal()
-        )
-
     def _roll_start_kit(self) -> None:
         """Pick the starting kit, relocating if this start cannot be opened.
 
@@ -358,6 +489,19 @@ class MetroidBreadWorld(World):
                     f"[Metroid Bread Player {self.player}] starting location "
                     f"{'/'.join(original)} has too little in logic to fill from; "
                     f"moved to {info.path}"
+                )
+                return
+
+        # Last resort: default Artaria Intro usually expands from an empty kit.
+        fallback = get_default()
+        if fallback.node_id != original and self._start_is_viable(fallback.node_id):
+            self.logic.set_starting_node(fallback.node_id)
+            self.start_kit = StartKit.build_start_kit(self)
+            if self._kit_is_ok():
+                print(
+                    f"[Metroid Bread Player {self.player}] starting location "
+                    f"{'/'.join(original)} cannot expand sphere 0; "
+                    f"fell back to {fallback.path}"
                 )
                 return
 
@@ -444,6 +588,11 @@ class MetroidBreadWorld(World):
         if self._start_checks() < _MIN_START_CHECKS or self._start_kit_reaches_goal():
             return FillError(
                 "start kit too weak or already reaches Raven Beak "
+                "under rolled doors/transports"
+            )
+        if not self._start_sphere_expands():
+            return FillError(
+                "start sphere 0 does not expand after placing early progression "
                 "under rolled doors/transports"
             )
         try:
@@ -609,8 +758,8 @@ class MetroidBreadWorld(World):
 
     def _compute_forced_boss_locations(self) -> None:
         """
-        When boss/EMMI pickups are excluded, still keep enough DNA sinks under
-        high DNA / transport / door pressure so prefer_emmi/bosses can place.
+        When boss/EMMI pickups are excluded, still keep enough preferred DNA
+        sinks active so prefer_emmi / prefer_bosses can place (any DNA count).
         """
         self.forced_boss_locations = set()
         if self.options.include_boss_pickups:
@@ -618,13 +767,6 @@ class MetroidBreadWorld(World):
         needed = int(self.options.required_dna.value)
         mode = int(self.options.dna_placement.value)
         if needed <= 0 or mode == 2:
-            return
-        pressured = (
-            self.options.transport_rando.value == 1
-            or self.options.door_lock_rando.value == 1
-            or needed >= 6
-        )
-        if not pressured:
             return
         substrs = _EMMI_DNA_SUBSTR if mode == 0 else _BOSS_DNA_SUBSTR
         sinks = [n for n in location_table if any(s in n for s in substrs)]
@@ -639,9 +781,59 @@ class MetroidBreadWorld(World):
                 f"sinks (include_boss_pickups is off)"
             )
 
+    def _max_obtainable_energy(self) -> int:
+        """Peak HP from energy_per_tank × tanks/parts in the YAML pool."""
+        ept = max(1, int(self.options.energy_per_tank.value))
+        tanks = int(self.options.energy_tanks.value)
+        parts = int(self.options.energy_parts.value)
+        return int((ept - 1) + tanks * ept + parts * (ept / 4.0))
+
+    def _ensure_combat_energy_viable(self) -> None:
+        """
+        Combat tricks disabled → fights use raw Damage/energy gates.
+
+        Gold Chozo-X and Raven Beak need 799 energy on that path. Raise
+        energy_per_tank so *base* HP (no tanks collected) clears the gate —
+        otherwise assumed fill can bury every Energy Tank behind those fights
+        and softlock. If the option cap still cannot reach the threshold, fall
+        back to combat beginner.
+        """
+        if int(self.options.combat_tricks.value) > 0:
+            return
+        need = _COMBAT_OFF_MIN_ENERGY
+        ept = max(1, int(self.options.energy_per_tank.value))
+        if ept - 1 >= need:
+            return
+        new_ept = min(1000, need + 1)
+        if new_ept > ept:
+            self.options.energy_per_tank.value = new_ept
+            print(
+                f"[Metroid Bread Player {self.player}] combat tricks disabled: "
+                f"raised energy_per_tank {ept} -> {new_ept} so base HP can clear "
+                f"Gold Chozo / Raven Beak (need >={need})"
+            )
+        if int(self.options.energy_per_tank.value) - 1 < need:
+            self.options.combat_tricks.value = 1
+            print(
+                f"[Metroid Bread Player {self.player}] combat tricks set to "
+                f"beginner - energy_per_tank cannot provide >={need} base HP"
+            )
+
     def _full_inventory_counts(self) -> dict:
-        """Every real item, in quantities past any progressive / DNA threshold."""
-        return {name: 12 for name, data in item_table.items() if data.id is not None}
+        """Every real item at quantities past progressive / DNA thresholds.
+
+        Energy tanks/parts use the YAML pool sizes so preflight matches the
+        energy the seed can actually obtain (important when combat is off).
+        """
+        counts = {
+            name: 12 for name, data in item_table.items() if data.id is not None
+        }
+        counts["Energy Tank"] = int(self.options.energy_tanks.value)
+        counts["Energy Part"] = int(self.options.energy_parts.value)
+        dna = int(self.options.required_dna.value)
+        if dna > 0:
+            counts["Metroid DNA"] = max(dna, counts.get("Metroid DNA", 0))
+        return counts
 
     def start_coverage(self, node) -> float:
         """Fraction of active checks in logic from `node` with everything collected.
@@ -817,6 +1009,14 @@ class MetroidBreadWorld(World):
             for _ in range(count):
                 itempool.append(self.create_item(item_name))
 
+        # Combat-off: Energy Tanks/Parts gate Gold Chozo / Raven Beak (Damage
+        # requirements). Treat them as progression so assumed fill cannot bury
+        # them behind those fights.
+        if int(self.options.combat_tricks.value) == 0:
+            for item in itempool:
+                if item.name in ("Energy Tank", "Energy Part"):
+                    item.classification = ItemClassification.progression
+
         # Progressive Flash Shift (no main): first upgrade unlocks the ability, so it
         # must be advancement. Later upgrades stay filler chain-ammo like missiles.
         if (
@@ -831,6 +1031,15 @@ class MetroidBreadWorld(World):
 
         if self.options.early_morph_ball and items_to_create.get("Morph Ball", 0) > 0:
             self.multiworld.local_early_items[self.player]["Morph Ball"] = 1
+
+        # Cramped sphere-0: force the openers that expand the start into early
+        # spheres so fill cannot fill both early slots with Progressive Beam etc.
+        for name in getattr(self, "early_expand_pins", []) or []:
+            if items_to_create.get(name, 0) > 0:
+                self.multiworld.local_early_items[self.player][name] = max(
+                    self.multiworld.local_early_items[self.player].get(name, 0),
+                    1,
+                )
 
         # Exclude boss/EMMI checks → fewer locations, trim/pad filler accordingly.
         # Never trim Flash Shift Upgrade — only Missile Tank (padding bucket), then
@@ -944,49 +1153,139 @@ class MetroidBreadWorld(World):
                 ]
         victory_clearance.assert_victory_implies_full_clearance(self)
 
+    def _dna_placement_substrs(self) -> tuple:
+        mode = int(self.options.dna_placement.value)
+        if mode == 0:
+            return _EMMI_DNA_SUBSTR
+        if mode == 1:
+            return _BOSS_DNA_SUBSTR
+        return ()
+
+    def _dna_frontier_names(self) -> set:
+        """
+        Start-kit sphere plus a one-step opener expansion.
+
+        DNA must not consume these when alternatives exist: they are the fill
+        frontier for Morph / early progression. Sphere-0 alone is not enough —
+        Artaria tutorials are outside a Ferenia start sphere yet still starve fill.
+        """
+        counts = StartKit.kit_counts(self.start_kit)
+        frontier = set(self.logic.reachable_pickup_names(counts))
+        sim = dict(counts)
+        openers = (
+            "Morph Ball",
+            "Bomb",
+            "Charge Beam",
+            "Spider Magnet",
+            "Grapple Beam",
+            "Speed Booster",
+            "Phantom Cloak",
+            "Wide Beam",
+            "Power Bomb",
+            "Varia Suit",
+            "Flash Shift",
+            "Screw Attack",
+            "Space Jump",
+            "Spin Boost",
+            "Wave Beam",
+            "Plasma Beam",
+            "Ice Missile",
+            "Storm Missile",
+        )
+        for name in openers:
+            grant = name
+            if name in ("Wide Beam", "Plasma Beam", "Wave Beam") and self.options.progressive_beams:
+                grant = "Progressive Beam"
+            elif name in ("Charge Beam", "Diffusion Beam") and self.options.progressive_charge:
+                grant = "Progressive Charge Beam"
+            elif name in ("Bomb", "Cross Bomb") and self.options.progressive_bombs:
+                grant = "Progressive Bombs"
+            elif name in ("Varia Suit", "Gravity Suit") and self.options.progressive_suit:
+                grant = "Progressive Suit"
+            elif name in ("Spin Boost", "Space Jump") and self.options.progressive_spin:
+                grant = "Progressive Spin"
+            if sim.get(grant, 0) > 0:
+                continue
+            sim[grant] = sim.get(grant, 0) + 1
+        frontier.update(self.logic.reachable_pickup_names(sim))
+        return frontier
+
+    def _dna_stale_intro_names(self, names: set) -> set:
+        """Wrong-region vanilla intros: late vs start kit, but awful DNA sinks."""
+        start_region = self.logic.starting_node[0]
+        stale = set()
+        for name in names:
+            if start_region != "Artaria" and any(s in name for s in _STALE_INTRO_DNA_SUBSTR):
+                stale.add(name)
+                continue
+            # Any region's named tutorial pickup when that is not the start region.
+            if "Tutorial" in name and not name.startswith(f"{start_region} -"):
+                stale.add(name)
+        return stale
+
     def _dna_candidate_locations(self) -> List[str]:
+        """
+        Ordered DNA targets: eventually-reachable preferred sinks first, then
+        other eventually-reachable actives. Unreachable / inactive checks omitted.
+        """
         mode = int(self.options.dna_placement.value)
         active = set(self.active_location_names())
-        anywhere = [n for n in location_table if n in active]
+        full = set(self.logic.reachable_pickup_names(self._full_inventory_counts()))
+        usable = [n for n in location_table if n in active and n in full]
         if mode == 2:
-            return anywhere
+            return usable
 
-        if mode == 0:  # prefer_emmi
-            substrs = _EMMI_DNA_SUBSTR
-        else:  # prefer_bosses
-            substrs = _BOSS_DNA_SUBSTR
-
-        preferred = [
-            n for n in location_table
-            if n in active and any(s in n for s in substrs)
-        ]
-        needed = int(self.options.required_dna.value)
-        # High DNA + transport/doors: preferred first, then anywhere (softening).
-        pressured = (
-            needed >= 6
-            or self.options.transport_rando.value == 1
-            or self.options.door_lock_rando.value == 1
-        )
-        if len(preferred) >= needed and not pressured:
-            return preferred
-        # Preferred first, then remaining actives — never starve DNA placement.
+        substrs = self._dna_placement_substrs()
+        preferred = [n for n in usable if any(s in n for s in substrs)]
+        # Prefer true arena/EMMI-defeat sinks before Central Unit Access (Morph etc.).
+        arenas = [n for n in preferred if any(s in n for s in _ARENA_DNA_SUBSTR)]
+        cu_access = [n for n in preferred if n not in arenas]
+        preferred = arenas + cu_access
         seen = set(preferred)
-        return preferred + [n for n in anywhere if n not in seen]
+        # Preferred first, then other eventually-reachable actives (softening).
+        return preferred + [n for n in usable if n not in seen]
 
     def _pre_place_dna(self) -> None:
         n = int(self.options.required_dna.value)
         if n <= 0 or int(self.options.dna_placement.value) == 2:
             return
         candidates = self._dna_candidate_locations()
-        # Keep preferred-first order but shuffle within tiers loosely.
-        if candidates:
-            head = candidates[:n]
-            self.random.shuffle(head)
-            rest = candidates[n:]
-            self.random.shuffle(rest)
-            candidates = head + rest
         if len(candidates) < n:
             return
+
+        substrs = self._dna_placement_substrs()
+        preferred = {name for name in candidates if any(s in name for s in substrs)}
+        frontier = self._dna_frontier_names()
+        stale = self._dna_stale_intro_names(set(candidates))
+
+        def _tier(name: str) -> int:
+            # Lower = better DNA sink for fill health.
+            is_pref = name in preferred
+            is_arena = any(s in name for s in _ARENA_DNA_SUBSTR)
+            in_frontier = name in frontier
+            is_stale = name in stale
+            if is_stale and not is_pref:
+                return 5
+            if in_frontier and not is_pref:
+                return 4
+            if in_frontier and is_pref:
+                return 3
+            if is_pref and is_arena:
+                return 0
+            if is_pref:
+                return 1
+            return 2
+
+        buckets: dict[int, list] = {i: [] for i in range(6)}
+        for name in candidates:
+            buckets[_tier(name)].append(name)
+        ordered: List[str] = []
+        for i in range(6):
+            bucket = buckets[i]
+            self.random.shuffle(bucket)
+            ordered.extend(bucket)
+        candidates = ordered
+
         dna_items = [
             item for item in self.multiworld.itempool
             if item.player == self.player and item.name == "Metroid DNA"

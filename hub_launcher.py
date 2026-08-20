@@ -7,12 +7,21 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import urllib.parse
 import zipfile
 from pathlib import Path
-from typing import Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple
+from typing import Dict, Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple
+
+try:
+    from win_subprocess import popen_hidden, run_hidden
+except ImportError:
+    from worlds.metroid_bread.win_subprocess import popen_hidden, run_hidden
 
 logger = logging.getLogger("MetroidBread.HubLauncher")
+
+_NODE_MAJOR_CACHE: Dict[str, Tuple[float, Optional[int]]] = {}
+_NODE_MAJOR_CACHE_TTL_S = 30.0
 
 ELECTRON_REINSTALL_MARKERS = (
     "Electron failed to install correctly",
@@ -29,10 +38,10 @@ CLIENT_SCRIPT_NAME = "MetroidBreadClient.py"
 RUNTIME_WORLD_DIRNAME = "_metroid_bread_runtime"
 APWORLD_STAMP_NAME = ".apworld_hub_source"
 # Bump when extract layout changes so stale runtime trees are refreshed.
-APWORLD_EXTRACT_LAYOUT = "world-pkg-v14"
-# Electron 33 install.js → extract-zip stalls / silently incomplete on Node 26.x
-# (and historically some 24.16+ builds). Refuse majors ≥25; recommend managed Node 24.
-ELECTRON_UNSUPPORTED_NODE_MAJOR = 25
+APWORLD_EXTRACT_LAYOUT = "world-pkg-v16"
+# Electron 33's install.js used extract-zip → yauzl@2, which hung / incomplete-extracted
+# on Node 24.16+ / 26.x (electron/electron#51619). Hub package.json overrides yauzl to
+# ^3.3.1 so system Node 26 works; managed Node 24 remains the recommended fallback.
 NODE_MIN_MAJOR = 18
 NODE_LTS_RECOMMENDED = "24"
 MANAGED_NODE_DIRNAME = "node-v24"
@@ -47,6 +56,120 @@ _EXTRACT_SKIP_PREFIXES = (
     "metroid_bread/dread-client-app/.git/",
 )
 _EXTRACT_SKIP_PARTS = ("/__pycache__/", "/.pytest_cache/", "/.mypy_cache/")
+
+LAUNCH_NEED_DEPS_HINT = (
+    "Need Node.js ≥18 (Install Node 24 if missing) and Python 3.11–3.13 "
+    "(Install Python 3.12), then try Open again."
+)
+
+
+# Win32 MessageBox icons (MB_ICONERROR / MB_ICONINFORMATION).
+_MB_ICONERROR = 0x10
+_MB_ICONINFORMATION = 0x40
+# Optional override for runtime extract dir (tests / external tools).
+RUNTIME_WORLD_DIR_ENV = "METROID_BREAD_RUNTIME_WORLD_DIR"
+
+
+def _show_user_dialog(title: str, text: str, *, error: bool) -> None:
+    """stderr + MessageBox / tkinter (never logging alone)."""
+    msg = (text or "").strip() or "Unknown error"
+    heading = (title or "Metroid Bread Client").strip()
+    stream_fn = logger.error if error else logger.info
+    print(f"{heading}: {msg}", file=sys.stderr, flush=True)
+    stream_fn("%s\n%s", heading, msg)
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            icon = _MB_ICONERROR if error else _MB_ICONINFORMATION
+            ctypes.windll.user32.MessageBoxW(0, msg[:2048], heading[:120], icon)
+            return
+        except Exception:
+            pass
+
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            if error:
+                messagebox.showerror(heading, msg)
+            else:
+                messagebox.showinfo(heading, msg)
+        finally:
+            root.destroy()
+    except Exception:
+        pass
+
+
+def show_user_error(title: str, text: str) -> None:
+    """
+    Always surface a visible failure (stderr + MessageBox / tkinter).
+
+    Never rely on logging alone — Archipelago Launcher workers die silently
+    when exceptions are uncaught and no UI is shown.
+    """
+    _show_user_dialog(title, text, error=True)
+
+
+def show_user_notice(title: str, text: str) -> None:
+    """Informational MessageBox / stderr (used during wizard Python bootstrap)."""
+    _show_user_dialog(title, text, error=False)
+
+
+def client_python_gap_hint() -> str:
+    """Extra wizard reason text when no usable Hub client Python is found."""
+    try:
+        try:
+            from ensure_client_deps import (
+                describe_missing_client_python,
+                find_client_python,
+            )
+        except ImportError:
+            from worlds.metroid_bread.ensure_client_deps import (
+                describe_missing_client_python,
+                find_client_python,
+            )
+        if find_client_python():
+            return ""
+        detail = describe_missing_client_python()
+        return f"\n\nClient Python: {detail}"
+    except Exception as exc:
+        return f"\n\nClient Python check failed: {exc}"
+
+
+def launcher_python_unsupported_message() -> Optional[str]:
+    """
+    If *this* process Python is outside 3.11–3.13, return a user message.
+
+    Frozen Archipelago Launcher usually uses a bundled supported interpreter;
+    source / wrong-system Python hits this path.
+    """
+    try:
+        try:
+            from ensure_client_deps import is_supported_client_python_version
+        except ImportError:
+            from worlds.metroid_bread.ensure_client_deps import (
+                is_supported_client_python_version,
+            )
+    except ImportError:
+        info = sys.version_info
+        ok = (3, 11) <= (info.major, info.minor) < (3, 14)
+        if ok:
+            return None
+    else:
+        if is_supported_client_python_version(sys.version_info):
+            return None
+
+    ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    return (
+        f"This launcher worker is running Python {ver}, which is outside the "
+        "supported 3.11–3.13 range for Metroid Bread.\n\n"
+        f"{LAUNCH_NEED_DEPS_HINT}"
+    )
 
 
 def electron_relative_binary(platform: Optional[str] = None) -> str:
@@ -158,10 +281,10 @@ def managed_python_cmd() -> Optional[list]:
 
 
 def node_major_usable(major: Optional[int]) -> bool:
-    """True when major is Hub-compatible (18–24 inclusive)."""
+    """True when major is Hub-compatible (Node.js ≥18)."""
     if major is None:
         return False
-    return NODE_MIN_MAJOR <= major < ELECTRON_UNSUPPORTED_NODE_MAJOR
+    return major >= NODE_MIN_MAJOR
 
 
 def prepend_managed_node_path(env: Optional[MutableMapping[str, str]] = None) -> dict:
@@ -217,15 +340,9 @@ def find_node() -> Optional[str]:
 
     if system:
         sys_major = node_major_version(system)
-        # System Node ≥25 cannot drive Electron install; prefer managed even if
-        # its version probe failed, so the wizard/repair can still use it.
-        if (
-            sys_major is not None
-            and sys_major >= ELECTRON_UNSUPPORTED_NODE_MAJOR
-            and managed is not None
-        ):
-            return str(managed)
-        return system
+        if node_major_usable(sys_major) or sys_major is None:
+            return system
+        # System Node too old (<18); fall through to managed if present.
 
     if managed is not None:
         return str(managed)
@@ -248,8 +365,13 @@ def node_major_version(node: Optional[str] = None) -> Optional[int]:
                     break
     if not exe:
         return None
+    # Short cache: wizard status polls otherwise re-spawn node.exe constantly.
+    now = time.monotonic()
+    cached = _NODE_MAJOR_CACHE.get(exe)
+    if cached is not None and (now - cached[0]) < _NODE_MAJOR_CACHE_TTL_S:
+        return cached[1]
     try:
-        proc = subprocess.run(
+        proc = run_hidden(
             [exe, "-p", "process.versions.node.split('.')[0]"],
             capture_output=True,
             text=True,
@@ -257,37 +379,39 @@ def node_major_version(node: Optional[str] = None) -> Optional[int]:
             timeout=15,
         )
     except (OSError, subprocess.TimeoutExpired):
+        _NODE_MAJOR_CACHE[exe] = (now, None)
         return None
     if proc.returncode != 0:
+        _NODE_MAJOR_CACHE[exe] = (now, None)
         return None
     raw = (proc.stdout or "").strip()
     try:
-        return int(raw)
+        major = int(raw)
     except ValueError:
-        return None
+        major = None
+    _NODE_MAJOR_CACHE[exe] = (now, major)
+    return major
 
 
 def node_electron_compat_message(major: Optional[int]) -> Optional[str]:
     """
-    User-facing message when Node is too new for Electron 33's install.js.
+    User-facing message when Node is too old for the Hub.
 
-    Returns None when the version is acceptable or unknown.
+    Node 24.16+ / 26.x Electron install hangs were fixed via package.json
+    ``overrides.yauzl`` (electron/electron#51619). No upper-bound refuse.
     """
-    if major is None or major < ELECTRON_UNSUPPORTED_NODE_MAJOR:
+    if major is None or major >= NODE_MIN_MAJOR:
         return None
     return (
-        f"Node.js {major} is not supported for the Metroid Bread Client Hub.\n"
-        "Electron binary download fails on Node 26.x "
-        "(extract-zip silently leaves path.txt missing).\n"
+        f"Node.js {major} is too old for the Metroid Bread Client Hub "
+        f"(need ≥{NODE_MIN_MAJOR}).\n"
         f"Use the Hub Setup Wizard to install managed Node.js {NODE_LTS_RECOMMENDED}, "
-        f"or install Node.js {NODE_LTS_RECOMMENDED} from https://nodejs.org/dist/latest-v24.x/, "
-        "delete node_modules (or at least node_modules/electron), then "
-        "run: npm install --no-ignore-scripts"
+        f"or install Node.js {NODE_LTS_RECOMMENDED}+ from https://nodejs.org/."
     )
 
 
 def ensure_node_supports_electron() -> None:
-    """Raise RuntimeError when Node major is known-broken for Electron install."""
+    """Raise RuntimeError when Node major is known-too-old for the Hub."""
     major = node_major_version()
     msg = node_electron_compat_message(major)
     if msg:
@@ -316,6 +440,9 @@ def find_containing_apworld(start: Optional[Path] = None) -> Optional[Path]:
 
 def runtime_world_dir() -> Path:
     """Writable folder for Hub extracted from a .apworld."""
+    override = (os.environ.get(RUNTIME_WORLD_DIR_ENV) or "").strip()
+    if override:
+        return Path(override)
     try:
         from Utils import user_path
 
@@ -1045,7 +1172,7 @@ def run_npm(hub_dir: Path, npm_args: Sequence[str], *, env: Optional[Mapping[str
         )
     merged = npm_install_env(env)
     logger.info("Running: %s %s (cwd=%s)", npm, " ".join(npm_args), hub_dir)
-    return subprocess.run(
+    return run_hidden(
         [npm, *npm_args],
         cwd=str(hub_dir),
         env=merged,
@@ -1075,7 +1202,7 @@ def run_electron_install_js(hub_dir: Path, *, env: Optional[Mapping[str, str]] =
         return False, "node not found"
     merged = npm_install_env(env)
     logger.info("Running Electron install.js to fetch platform binary...")
-    proc = subprocess.run(
+    proc = run_hidden(
         [node, str(install_js)],
         cwd=str(electron_package_dir(hub)),
         env=merged,
@@ -1181,7 +1308,7 @@ def probe_electron_load(hub_dir: Path, *, env: Optional[Mapping[str, str]] = Non
         "  process.exit(1);"
         "}"
     )
-    proc = subprocess.run(
+    proc = run_hidden(
         [node, "-e", script],
         cwd=str(hub_dir),
         env=merged,
@@ -1215,7 +1342,7 @@ def start_hub_process(
         merged.setdefault("DREAD_HUB_PYTHON", managed_py[0])
 
     if not wait:
-        subprocess.Popen(
+        popen_hidden(
             [npm, "start"],
             cwd=str(hub_dir),
             env=merged,
@@ -1225,7 +1352,7 @@ def start_hub_process(
         )
         return 0
 
-    proc = subprocess.run(
+    proc = run_hidden(
         [npm, "start"],
         cwd=str(hub_dir),
         env=merged,
@@ -1283,7 +1410,7 @@ def launch_hub_with_repair(
     """
     Ensure packages, probe Electron, auto-repair once if needed, then start Hub.
     """
-    # Fail fast on Node 26+ before npm start can throw the cryptic reinstall Error.
+    # Fail fast if Node is too old (<18) before a doomed Electron install.
     if not electron_is_healthy(hub_dir):
         ensure_node_supports_electron()
 
@@ -1291,7 +1418,7 @@ def launch_hub_with_repair(
 
     ok, probe_out = probe_electron_load(hub_dir, env=env)
     if not ok or not electron_is_healthy(hub_dir):
-        # Re-check Node before a doomed reinstall loop on 26.x.
+        # Re-check Node before a doomed reinstall loop.
         ensure_node_supports_electron()
         logger.warning(
             "Electron install looks broken (%s); deleting node_modules/electron and reinstalling...",
@@ -1514,13 +1641,16 @@ def ensure_portable_node24(log=None) -> Tuple[bool, str]:
     return install_portable_node24(managed_node_dir(), log=log)
 
 
-def ensure_portable_python312(log=None) -> Tuple[bool, str]:
-    """Download managed CPython 3.12 into runtime tools/python-3.12."""
+def ensure_portable_python312(log=None, *, require_tkinter: bool = False) -> Tuple[bool, str]:
+    """Download managed CPython 3.12 into runtime tools/python-3.12 (Hub client)."""
     try:
         from ensure_portable_python import install_portable_python312
     except ImportError:
         from worlds.metroid_bread.ensure_portable_python import install_portable_python312
-    return install_portable_python312(managed_python_dir(), log=log)
+    # Wizard UI no longer needs Tcl/Tk; require_tkinter kept for rare callers.
+    return install_portable_python312(
+        managed_python_dir(), log=log, require_tkinter=require_tkinter
+    )
 
 
 def _run_setup_wizard_or_python(
@@ -1530,37 +1660,46 @@ def _run_setup_wizard_or_python(
     wait: bool = True,
 ) -> str:
     """
-    Show the Hub Setup Wizard; fall back to Kivy if tkinter is unavailable.
+    Show the Hub Setup Wizard (local HTML page in the default browser).
 
     Returns ``\"hub\"`` or ``\"python\"``.
+    Kivy is launched **only** when the wizard returns an explicit python/kivy
+    choice — never as a silent default when the wizard should have run.
     """
     try:
         try:
             from hub_setup_wizard import run_setup_wizard
         except ImportError:
             from worlds.metroid_bread.hub_setup_wizard import run_setup_wizard
-    except ImportError as exc:
-        logger.warning(
-            "Hub Setup Wizard unavailable (%s); falling back to Python client",
-            exc,
+    except Exception as exc:
+        show_user_error(
+            "Metroid Bread Client",
+            f"Could not open the Hub Setup Wizard:\n\n{exc}\n\n"
+            f"{LAUNCH_NEED_DEPS_HINT}",
         )
-        launch_python_client(args)
         return "python"
 
     try:
         choice = run_setup_wizard(reason=reason, args=args, wait=wait)
     except Exception as exc:
-        # Includes tkinter ImportError raised inside the wizard module.
-        logger.warning(
-            "Hub Setup Wizard failed (%s); falling back to Python client",
-            exc,
+        show_user_error(
+            "Metroid Bread Client",
+            f"Hub Setup Wizard failed:\n\n{exc}\n\n{LAUNCH_NEED_DEPS_HINT}",
         )
-        launch_python_client(args)
         return "python"
 
     if choice == "hub":
         return "hub"
-    launch_python_client(args)
+
+    # Explicit user choice (Kivy button).
+    try:
+        launch_python_client(args)
+    except Exception as kivy_exc:
+        show_user_error(
+            "Metroid Bread Client",
+            f"Could not start the Python client (Kivy) fallback:\n\n"
+            f"{kivy_exc}\n\n{LAUNCH_NEED_DEPS_HINT}",
+        )
     return "python"
 
 
@@ -1569,11 +1708,14 @@ def launch_hub_or_fallback(args: Sequence[str] = (), *, wait: bool = True) -> st
     Preferred entry: Hub when possible, else Setup Wizard, else Python client.
 
     Returns which path was used: "hub" or "python".
+    Failures that cannot open UI raise after ``show_user_error`` (MessageBox).
     """
     connect = parse_launcher_connect_args(args)
     hub = find_hub_dir()
     npm = find_npm()
     node = find_node()
+    py_hint = client_python_gap_hint()
+    launcher_py_msg = launcher_python_unsupported_message()
 
     if hub and npm and node:
         world_dir = find_world_dir_for_hub(hub)
@@ -1607,11 +1749,8 @@ def launch_hub_or_fallback(args: Sequence[str] = (), *, wait: bool = True) -> st
             return "hub"
         except Exception as exc:
             logger.warning("Hub launch failed (%s); opening Setup Wizard", exc)
-            return _run_setup_wizard_or_python(
-                args,
-                reason=f"Hub launch failed:\n{exc}",
-                wait=wait,
-            )
+            reason = f"Hub launch failed:\n{exc}{py_hint}"
+            return _run_setup_wizard_or_python(args, reason=reason, wait=wait)
 
     reasons = []
     if not hub:
@@ -1621,5 +1760,8 @@ def launch_hub_or_fallback(args: Sequence[str] = (), *, wait: bool = True) -> st
     if not npm:
         reasons.append("npm not found")
     reason = ", ".join(reasons) or "Hub prerequisites missing"
-    logger.info("Opening Hub Setup Wizard (%s)", reason)
+    if launcher_py_msg:
+        reason = f"{reason}\n\n{launcher_py_msg}"
+    reason = f"{reason}{py_hint}"
+    logger.info("Opening Hub Setup Wizard (%s)", reason.split("\n", 1)[0])
     return _run_setup_wizard_or_python(args, reason=reason, wait=wait)

@@ -426,8 +426,13 @@ class CommonContext:
 
         self.jsontotextparser = JSONtoTextParser(self)
         self.rawjsontotextparser = RawJSONtoTextParser(self)
+        # Local datapackage may omit this game (stub worlds/, offline Hub, rename lag).
+        # Checksum is filled later from RoomInfo / GetDataPackage when connecting.
         if self.game:
-            self.checksums[self.game] = network_data_package["games"][self.game]["checksum"]
+            local_game = network_data_package.get("games", {}).get(self.game) or {}
+            local_checksum = local_game.get("checksum")
+            if local_checksum:
+                self.checksums[self.game] = local_checksum
         self.update_data_package(network_data_package)
 
         # execution

@@ -1,6 +1,6 @@
 {
   "name": "dread-client",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Metroid Bread Client Hub — YAML editor, patcher, and Archipelago client",
   "main": "main.js",
   "scripts": {
@@ -19,6 +19,9 @@
     "electron": true
   },
   "engines": {
-    "node": ">=18 <25"
+    "node": ">=18"
+  },
+  "overrides": {
+    "yauzl": "^3.3.1"
   }
 }

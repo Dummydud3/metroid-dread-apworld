@@ -12,6 +12,7 @@ import argparse
 import json
 import logging
 import shutil
+import ssl
 import sys
 import tempfile
 import urllib.error
@@ -33,6 +34,9 @@ ASSET_CANDIDATES = (ASSET_NAME, LEGACY_ASSET_NAME)
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases"
 API_LATEST_URL = (
     f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+)
+API_RELEASES_LIST_URL = (
+    f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases?per_page=15"
 )
 USER_AGENT = "MetroidBread-ApworldUpdater/1.0"
 HTTP_TIMEOUT_SEC = 15
@@ -198,38 +202,116 @@ def read_local_world_version(
     return "0.0.0"
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """
+    Build an SSL context that works under Archipelago / portable Pythons.
+
+    Frozen or embeddable interpreters often lack system CA bundles; prefer
+    ``certifi`` when importable.
+    """
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        pass
+    return ssl.create_default_context()
+
+
 def _http_get_json(url: str, *, timeout: float = HTTP_TIMEOUT_SEC) -> Any:
     req = urllib.request.Request(
         url,
         headers={
             "User-Agent": USER_AGENT,
             "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
         },
         method="GET",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
         body = resp.read()
     return json.loads(body.decode("utf-8"))
 
 
-def fetch_latest_release() -> Optional[Dict[str, Any]]:
+def _http_error_detail(exc: BaseException) -> str:
+    if isinstance(exc, urllib.error.HTTPError):
+        body = ""
+        try:
+            body = (exc.read() or b"")[:200].decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        extra = f" — {body.strip()}" if body.strip() else ""
+        return f"HTTP {exc.code} {exc.reason}{extra}"
+    if isinstance(exc, urllib.error.URLError):
+        reason = getattr(exc, "reason", exc)
+        return f"URL error: {reason}"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _pick_stable_release(data: Any) -> Optional[Dict[str, Any]]:
+    """From a release object or list, return the newest non-draft non-prerelease."""
+    if isinstance(data, dict):
+        if data.get("prerelease") is True or data.get("draft") is True:
+            return None
+        return data
+    if not isinstance(data, list):
+        return None
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        if item.get("prerelease") is True or item.get("draft") is True:
+            continue
+        return item
+    return None
+
+
+def fetch_latest_release() -> Tuple[Optional[Dict[str, Any]], str]:
     """
-    Return parsed GitHub releases/latest JSON, or None on soft failure / prerelease.
+    Return ``(release_json, error_detail)``.
+
+    ``error_detail`` is empty on success. Soft-fails on network / empty stable.
+    Tries ``/releases/latest``, then falls back to listing releases.
     """
+    last_err = ""
     try:
         data = _http_get_json(API_LATEST_URL)
+        picked = _pick_stable_release(data)
+        if picked is not None:
+            return picked, ""
+        last_err = "latest release is draft/prerelease"
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
-        logger.info("GitHub release check failed (soft): %s", exc)
-        return None
+        last_err = _http_error_detail(exc)
+        logger.info("GitHub /releases/latest failed (soft): %s", last_err)
+        # 404: repo has no "latest" stable — try the list endpoint.
+        if not (
+            isinstance(exc, urllib.error.HTTPError) and exc.code in (404, 403)
+        ) and not isinstance(exc, (urllib.error.URLError, TimeoutError, OSError)):
+            pass
     except (json.JSONDecodeError, UnicodeError, TypeError, ValueError) as exc:
+        last_err = f"invalid JSON: {exc}"
         logger.info("GitHub release JSON invalid (soft): %s", exc)
-        return None
-    if not isinstance(data, dict):
-        return None
-    if data.get("prerelease") is True or data.get("draft") is True:
-        logger.info("Ignoring prerelease/draft latest release")
-        return None
-    return data
+        return None, last_err
+
+    try:
+        data = _http_get_json(API_RELEASES_LIST_URL)
+        picked = _pick_stable_release(data)
+        if picked is not None:
+            return picked, ""
+        if last_err:
+            return None, (
+                f"{last_err}; release list has no non-prerelease builds. "
+                f"See {RELEASES_PAGE_URL}"
+            )
+        return None, f"no stable (non-prerelease) releases at {RELEASES_PAGE_URL}"
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
+        detail = _http_error_detail(exc)
+        logger.info("GitHub /releases list failed (soft): %s", detail)
+        combined = f"{last_err}; list fallback: {detail}" if last_err else detail
+        return None, combined
+    except (json.JSONDecodeError, UnicodeError, TypeError, ValueError) as exc:
+        detail = f"invalid JSON: {exc}"
+        combined = f"{last_err}; list fallback: {detail}" if last_err else detail
+        return None, combined
 
 
 def _asset_download_url(release: Dict[str, Any]) -> Optional[str]:
@@ -260,8 +342,30 @@ def check_for_update(
     """Compare local world_version to GitHub latest tag_name."""
     local = normalize_version(local_version or read_local_world_version(world_dir))
     releases_url = RELEASES_PAGE_URL
-    release = fetch_latest_release()
+    release, fetch_err = fetch_latest_release()
     if release is None:
+        detail = (fetch_err or "unknown error").strip()
+        # Keep message short for dialogs; put full detail in error.
+        if "CERTIFICATE" in detail.upper() or "SSL" in detail.upper():
+            hint = (
+                "SSL/certificate error talking to api.github.com. "
+                "Install/update certifi for this Python, or open Releases in a browser."
+            )
+        elif "403" in detail or "rate limit" in detail.lower():
+            hint = (
+                "GitHub API rate-limited or blocked this request. "
+                "Try again later, or open Releases in a browser."
+            )
+        elif "no stable" in detail.lower() or "prerelease" in detail.lower():
+            hint = (
+                "No stable (non-prerelease) GitHub Release found. "
+                f"See {RELEASES_PAGE_URL}"
+            )
+        else:
+            hint = (
+                "Could not reach GitHub Releases. "
+                f"Detail: {detail[:240]}"
+            )
         return UpdateCheckResult(
             ok=False,
             update_available=False,
@@ -269,8 +373,8 @@ def check_for_update(
             remote_version="",
             download_url="",
             releases_url=releases_url,
-            message="Could not reach GitHub Releases (network or no stable latest).",
-            error="network_or_prerelease",
+            message=hint,
+            error=detail or "network_or_prerelease",
         )
 
     remote = normalize_version(str(release.get("tag_name") or ""))
@@ -421,7 +525,9 @@ def download_and_install(
         method="GET",
     )
     try:
-        with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT_SEC) as resp:
+        with urllib.request.urlopen(
+            req, timeout=DOWNLOAD_TIMEOUT_SEC, context=_ssl_context()
+        ) as resp:
             total_hdr = resp.headers.get("Content-Length")
             total = int(total_hdr) if total_hdr and total_hdr.isdigit() else None
             written = 0

@@ -30,6 +30,28 @@ class MessageTests(unittest.TestCase):
         self.assertIn("py install 3.12", msg)
         self.assertIn("local venv", msg)
 
+    def test_is_supported_client_python_version_bounds(self):
+        self.assertFalse(ecd.is_supported_client_python_version((3, 10, 99)))
+        self.assertFalse(ecd.is_supported_client_python_version((3, 11, 8)))
+        self.assertTrue(ecd.is_supported_client_python_version((3, 11, 9)))
+        self.assertTrue(ecd.is_supported_client_python_version((3, 12, 0)))
+        self.assertTrue(ecd.is_supported_client_python_version((3, 13, 5)))
+        self.assertFalse(ecd.is_supported_client_python_version((3, 14, 0)))
+        self.assertFalse(ecd.is_supported_client_python_version((3, 14, 1)))
+
+    def test_describe_missing_mentions_unsupported_version(self):
+        with mock.patch.object(
+            ecd,
+            "_base_python_candidates",
+            return_value=[["python"]],
+        ):
+            with mock.patch.object(
+                ecd, "_probe_version_string", return_value="3.14.0"
+            ):
+                detail = ecd.describe_missing_client_python()
+        self.assertIn("3.14.0", detail)
+        self.assertIn("Install Python 3.12", detail)
+
     def test_pip_failure_includes_manual_command(self):
         with tempfile.TemporaryDirectory() as tmp:
             world = Path(tmp)

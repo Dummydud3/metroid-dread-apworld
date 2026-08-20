@@ -133,10 +133,9 @@ function Install-NpmDeps {
     } catch {
       $nodeMajor = 0
     }
-    if ($nodeMajor -ge 25) {
+    if ($nodeMajor -lt 18) {
       throw (
-        "Node.js $nodeMajor is not supported for the Metroid Bread Client Hub.`n" +
-        "Electron binary download fails on Node 26.x (extract-zip leaves path.txt missing).`n" +
+        "Node.js $nodeMajor is too old for the Metroid Bread Client Hub (need ≥18).`n" +
         "Install Node.js 24 from https://nodejs.org/dist/latest-v24.x/, then re-run this installer."
       )
     }

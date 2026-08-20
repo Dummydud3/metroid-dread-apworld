@@ -8,9 +8,12 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.request
 from pathlib import Path
 from unittest import mock
 
@@ -66,29 +69,47 @@ class ElectronErrorDetectionTests(unittest.TestCase):
 
 
 class NodeElectronCompatTests(unittest.TestCase):
-    def test_accepts_lts_majors(self):
+    def test_accepts_current_majors(self):
         self.assertIsNone(hl.node_electron_compat_message(None))
         self.assertIsNone(hl.node_electron_compat_message(18))
         self.assertIsNone(hl.node_electron_compat_message(20))
         self.assertIsNone(hl.node_electron_compat_message(22))
         self.assertIsNone(hl.node_electron_compat_message(24))
+        self.assertIsNone(hl.node_electron_compat_message(25))
+        self.assertIsNone(hl.node_electron_compat_message(26))
 
-    def test_rejects_node_25_plus(self):
-        msg = hl.node_electron_compat_message(26)
+    def test_rejects_node_below_18(self):
+        msg = hl.node_electron_compat_message(16)
         self.assertIsNotNone(msg)
-        self.assertIn("Node.js 26", msg)
-        self.assertIn("Node.js 24", msg)
-        self.assertIsNotNone(hl.node_electron_compat_message(25))
+        self.assertIn("16", msg)
+        self.assertIn("18", msg)
 
-    def test_ensure_raises_on_unsupported(self):
-        with mock.patch.object(hl, "node_major_version", return_value=26):
+    def test_ensure_raises_on_too_old(self):
+        with mock.patch.object(hl, "node_major_version", return_value=16):
             with self.assertRaises(RuntimeError) as ctx:
                 hl.ensure_node_supports_electron()
-            self.assertIn("26", str(ctx.exception))
+            self.assertIn("16", str(ctx.exception))
+
+    def test_ensure_ok_on_node_26(self):
+        with mock.patch.object(hl, "node_major_version", return_value=26):
+            hl.ensure_node_supports_electron()
 
     def test_ensure_ok_on_supported(self):
         with mock.patch.object(hl, "node_major_version", return_value=20):
             hl.ensure_node_supports_electron()
+
+    def test_node_major_usable_allows_26(self):
+        self.assertTrue(hl.node_major_usable(26))
+        self.assertTrue(hl.node_major_usable(24))
+        self.assertFalse(hl.node_major_usable(16))
+        self.assertFalse(hl.node_major_usable(None))
+
+    def test_package_json_overrides_yauzl(self):
+        pkg = Path(__file__).resolve().parent / "dread-client-app" / "package.json"
+        data = json.loads(pkg.read_text(encoding="utf-8"))
+        self.assertIn("overrides", data)
+        self.assertIn("yauzl", data["overrides"])
+        self.assertEqual(data["engines"].get("node"), ">=18")
 
 
 class ParseArgsTests(unittest.TestCase):
@@ -588,22 +609,25 @@ class LaunchFallbackWizardTests(unittest.TestCase):
         wiz.assert_called_once()
         self.assertIn("boom", wiz.call_args.kwargs["reason"])
 
-    def test_wizard_missing_falls_back_to_python(self):
-        with mock.patch.object(hl, "launch_python_client") as kivy:
-            # Force ImportError for wizard module path used by helper.
-            import builtins
+    def test_wizard_missing_shows_error_without_auto_kivy(self):
+        """Wizard import failure must MessageBox — never silently open Kivy."""
+        import builtins
 
-            real_import = builtins.__import__
+        real_import = builtins.__import__
 
-            def fake_import(name, *args, **kwargs):
-                if name in ("hub_setup_wizard", "worlds.metroid_bread.hub_setup_wizard"):
-                    raise ImportError("no wizard")
-                return real_import(name, *args, **kwargs)
+        def fake_import(name, *args, **kwargs):
+            if name in ("hub_setup_wizard", "worlds.metroid_bread.hub_setup_wizard"):
+                raise ImportError("no wizard")
+            return real_import(name, *args, **kwargs)
 
-            with mock.patch.object(builtins, "__import__", side_effect=fake_import):
-                out = hl._run_setup_wizard_or_python((), reason="test")
+        with mock.patch.object(builtins, "__import__", side_effect=fake_import):
+            with mock.patch.object(hl, "launch_python_client") as kivy:
+                with mock.patch.object(hl, "show_user_error") as shown:
+                    out = hl._run_setup_wizard_or_python((), reason="test")
         self.assertEqual(out, "python")
-        kivy.assert_called_once()
+        kivy.assert_not_called()
+        shown.assert_called_once()
+        self.assertIn("Wizard", shown.call_args[0][1])
 
     def test_wizard_python_choice_launches_kivy(self):
         fake_wizard = mock.Mock(return_value="python")
@@ -629,6 +653,298 @@ class LaunchFallbackWizardTests(unittest.TestCase):
                 out = hl._run_setup_wizard_or_python((), reason="ok")
         self.assertEqual(out, "hub")
         kivy.assert_not_called()
+
+    def test_wizard_import_failure_shows_error_without_auto_kivy(self):
+        """Indentation/SyntaxError on wizard must MessageBox, not silent Kivy."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name in ("hub_setup_wizard", "worlds.metroid_bread.hub_setup_wizard"):
+                raise IndentationError("unexpected indent")
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch.object(builtins, "__import__", side_effect=fake_import):
+            with mock.patch.object(hl, "launch_python_client") as kivy:
+                with mock.patch.object(hl, "show_user_error") as shown:
+                    out = hl._run_setup_wizard_or_python(
+                        (), reason="node not found"
+                    )
+        self.assertEqual(out, "python")
+        kivy.assert_not_called()
+        shown.assert_called_once()
+        msg = shown.call_args[0][1]
+        self.assertIn("indent", msg.lower())
+
+    def test_wizard_runtime_failure_shows_error_without_auto_kivy(self):
+        fake_wizard = mock.Mock(side_effect=RuntimeError("server bind failed"))
+        import types
+
+        mod = types.ModuleType("hub_setup_wizard")
+        mod.run_setup_wizard = fake_wizard
+        with mock.patch.dict(sys.modules, {"hub_setup_wizard": mod}):
+            with mock.patch.object(hl, "launch_python_client") as kivy:
+                with mock.patch.object(hl, "show_user_error") as shown:
+                    out = hl._run_setup_wizard_or_python((), reason="no node")
+        self.assertEqual(out, "python")
+        kivy.assert_not_called()
+        shown.assert_called_once()
+        self.assertIn("server bind failed", shown.call_args[0][1])
+
+    def test_missing_prereqs_reason_includes_python_gap(self):
+        with mock.patch.object(hl, "parse_launcher_connect_args", return_value={}):
+            with mock.patch.object(hl, "find_hub_dir", return_value=None):
+                with mock.patch.object(hl, "find_node", return_value=None):
+                    with mock.patch.object(hl, "find_npm", return_value=None):
+                        with mock.patch.object(
+                            hl,
+                            "client_python_gap_hint",
+                            return_value="\n\nClient Python: python is Python 3.14.0 "
+                            "(need 3.11–3.13) — Install Python 3.12",
+                        ):
+                            with mock.patch.object(
+                                hl, "launcher_python_unsupported_message", return_value=None
+                            ):
+                                with mock.patch.object(
+                                    hl, "_run_setup_wizard_or_python", return_value="python"
+                                ) as wiz:
+                                    hl.launch_hub_or_fallback(())
+        reason = wiz.call_args.kwargs["reason"]
+        self.assertIn("node not found", reason)
+        self.assertIn("3.14", reason)
+        self.assertIn("Install Python 3.12", reason)
+
+    def test_show_user_error_prints_stderr(self):
+        with mock.patch.object(hl.sys, "platform", "linux"):
+            with mock.patch("builtins.print") as printed:
+                # Avoid real dialogs in CI
+                with mock.patch.dict(sys.modules, {"tkinter": None}):
+                    hl.show_user_error("Title", "Body text")
+        printed.assert_called()
+        args = printed.call_args[0]
+        self.assertIn("Title", args[0])
+        self.assertIn("Body text", args[0])
+
+    def test_wizard_source_has_no_tkinter_ui(self):
+        from worlds.metroid_bread import hub_setup_wizard as wiz
+
+        src = Path(wiz.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("tkinter is required", src.lower())
+        self.assertNotIn("import tkinter", src)
+        self.assertIn("ThreadingHTTPServer", src)
+        self.assertIn("webbrowser", src)
+
+
+class HtmlWizardServerTests(unittest.TestCase):
+    def test_status_and_kivy_action(self):
+        from worlds.metroid_bread import hub_setup_wizard as wiz
+
+        state = wiz._WizardState(reason="test reason", args=())
+        state.append_log("hello")
+        helpers = {
+            "show_user_notice": mock.Mock(),
+            "show_user_error": mock.Mock(),
+            "ensure_portable_node24": mock.Mock(return_value=(True, "ok")),
+            "ensure_portable_python312": mock.Mock(return_value=(True, "ok")),
+            "ensure_hub_packages": mock.Mock(),
+            "ensure_system_client_python_deps": mock.Mock(),
+            "find_hub_dir": mock.Mock(return_value=None),
+            "find_world_dir_for_hub": mock.Mock(return_value=None),
+            "hub_env_from_connect": mock.Mock(return_value={}),
+            "launch_hub_with_repair": mock.Mock(),
+            "parse_launcher_connect_args": mock.Mock(return_value={}),
+        }
+        handler = wiz._make_handler(state, helpers)
+        server = wiz.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        host, port = server.server_address[:2]
+        self.assertEqual(host, "127.0.0.1")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with mock.patch.object(
+                wiz,
+                "collect_checklist",
+                return_value=[("Node.js", False, "not found")],
+            ):
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status") as resp:
+                    status = json.loads(resp.read().decode())
+            self.assertEqual(status["reason"], "test reason")
+            self.assertIn("hello", status["log_tail"])
+            self.assertFalse(status["can_launch"])
+            self.assertEqual(status["rows"][0]["name"], "Node.js")
+
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/") as resp:
+                html = resp.read().decode()
+            self.assertIn("Hub Setup", html)
+            self.assertIn("/api/status", html)
+
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/action",
+                data=json.dumps({"action": "kivy"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as resp:
+                body = json.loads(resp.read().decode())
+            self.assertTrue(body["ok"])
+            self.assertTrue(state.done_event.wait(timeout=2))
+            self.assertEqual(state.choice, "python")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_binds_localhost_only(self):
+        from worlds.metroid_bread import hub_setup_wizard as wiz
+
+        state = wiz._WizardState(reason="", args=())
+        handler = wiz._make_handler(state, {})
+        server = wiz.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        try:
+            self.assertEqual(server.server_address[0], "127.0.0.1")
+        finally:
+            server.server_close()
+
+    def test_checklist_cache_avoids_repeat_work(self):
+        from worlds.metroid_bread import hub_setup_wizard as wiz
+
+        wiz.invalidate_checklist_cache()
+        calls = {"n": 0}
+
+        def fake_uncached():
+            calls["n"] += 1
+            return [("Node.js", False, "x")]
+
+        with mock.patch.object(wiz, "_collect_checklist_uncached", side_effect=fake_uncached):
+            a = wiz.collect_checklist()
+            b = wiz.collect_checklist()
+            self.assertEqual(a, b)
+            self.assertEqual(calls["n"], 1)
+            wiz.invalidate_checklist_cache()
+            wiz.collect_checklist(force=True)
+            self.assertEqual(calls["n"], 2)
+
+
+class WinSubprocessTests(unittest.TestCase):
+    def test_hidden_kwargs_on_windows(self):
+        from worlds.metroid_bread import win_subprocess as ws
+
+        kwargs = ws.hidden_subprocess_kwargs()
+        if os.name == "nt":
+            self.assertIn("creationflags", kwargs)
+            self.assertIn("startupinfo", kwargs)
+        else:
+            self.assertEqual(kwargs, {})
+
+
+class PortablePythonHelperTests(unittest.TestCase):
+    def test_python_cmd_has_tkinter_false_on_bad_cmd(self):
+        from worlds.metroid_bread import ensure_portable_python as epp
+
+        self.assertFalse(epp.python_cmd_has_tkinter([]))
+        self.assertFalse(epp.python_cmd_has_tkinter(["__no_such_python__"]))
+
+    def test_find_tcl_tk_library_dirs_windows_layout(self):
+        from worlds.metroid_bread import ensure_portable_python as epp
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            py = root / "python.exe"
+            py.write_bytes(b"")
+            tcl = root / "tcl" / "tcl8.6"
+            tk = root / "tcl" / "tk8.6"
+            tcl.mkdir(parents=True)
+            tk.mkdir(parents=True)
+            (tcl / "init.tcl").write_text("#", encoding="utf-8")
+            (tk / "tk.tcl").write_text("#", encoding="utf-8")
+            got_tcl, got_tk = epp.find_tcl_tk_library_dirs(py)
+            self.assertEqual(got_tcl, tcl)
+            self.assertEqual(got_tk, tk)
+            env = epp.tcl_tk_environ_for_python(py, {})
+            self.assertEqual(env["TCL_LIBRARY"], str(tcl))
+            self.assertEqual(env["TK_LIBRARY"], str(tk))
+
+    def test_require_tkinter_reinstalls_when_probe_fails(self):
+        from worlds.metroid_bread import ensure_portable_python as epp
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "python-3.12"
+            dest.mkdir()
+            fake_py = dest / ("python.exe" if os.name == "nt" else "python")
+            if os.name != "nt":
+                (dest / "bin").mkdir(parents=True, exist_ok=True)
+                fake_py = dest / "bin" / "python3.12"
+            fake_py.write_bytes(b"")
+            if os.name != "nt":
+                fake_py.chmod(0o755)
+
+            with mock.patch.object(
+                epp, "python_cmd_tkinter_probe", return_value=(False, "no tk")
+            ):
+                with mock.patch.object(
+                    epp, "_install_pbs_into", side_effect=OSError("net")
+                ):
+                    with mock.patch.object(
+                        epp, "try_windows_official_silent_install", return_value=False
+                    ):
+                        with mock.patch.object(
+                            epp, "try_winget_install_python", return_value=False
+                        ):
+                            with mock.patch.object(epp, "open_python_download_page"):
+                                ok, msg = epp.install_portable_python312(
+                                    dest,
+                                    require_tkinter=True,
+                                    allow_browser_fallback=True,
+                                )
+            self.assertFalse(ok)
+            self.assertIn("Auto-install", msg)
+            self.assertNotIn("tkinter is required", msg.lower())
+
+    def test_pbs_probe_fail_tries_official_with_tcltk(self):
+        from worlds.metroid_bread import ensure_portable_python as epp
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "python-3.12"
+
+            def fake_pbs(d, log=None):
+                d.mkdir(parents=True, exist_ok=True)
+                exe = d / ("python.exe" if os.name == "nt" else "bin/python3.12")
+                if os.name != "nt":
+                    exe.parent.mkdir(parents=True, exist_ok=True)
+                exe.write_bytes(b"")
+                if os.name != "nt":
+                    exe.chmod(0o755)
+
+            calls = {"official": 0}
+
+            def fake_official(d, log=None, include_tcltk=False):
+                calls["official"] += 1
+                self.assertTrue(include_tcltk)
+                return False
+
+            with mock.patch.object(epp, "_install_pbs_into", side_effect=fake_pbs):
+                with mock.patch.object(
+                    epp,
+                    "python_cmd_tkinter_probe",
+                    return_value=(False, "Can't find init.tcl"),
+                ):
+                    with mock.patch.object(
+                        epp,
+                        "try_windows_official_silent_install",
+                        side_effect=fake_official,
+                    ):
+                        with mock.patch.object(
+                            epp, "try_winget_install_python", return_value=False
+                        ):
+                            with mock.patch.object(epp, "open_python_download_page"):
+                                ok, msg = epp.install_portable_python312(
+                                    dest, require_tkinter=True
+                                )
+            self.assertFalse(ok)
+            if os.name == "nt":
+                self.assertEqual(calls["official"], 1)
+            self.assertIn("init.tcl", msg)
 
 
 class PortableNodeHelperTests(unittest.TestCase):

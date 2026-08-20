@@ -12,6 +12,7 @@ import json
 import sys
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -61,7 +62,7 @@ class CheckForUpdateTests(unittest.TestCase):
                 }
             ],
         }
-        with mock.patch.object(au, "fetch_latest_release", return_value=release):
+        with mock.patch.object(au, "fetch_latest_release", return_value=(release, "")):
             result = au.check_for_update(local_version="1.7.0")
         self.assertTrue(result.ok)
         self.assertFalse(result.update_available)
@@ -80,7 +81,7 @@ class CheckForUpdateTests(unittest.TestCase):
                 }
             ],
         }
-        with mock.patch.object(au, "fetch_latest_release", return_value=release):
+        with mock.patch.object(au, "fetch_latest_release", return_value=(release, "")):
             result = au.check_for_update(local_version="1.7.0")
         self.assertTrue(result.ok)
         self.assertTrue(result.update_available)
@@ -88,17 +89,61 @@ class CheckForUpdateTests(unittest.TestCase):
         self.assertTrue(result.download_url.endswith("a.apworld"))
 
     def test_soft_fail_network(self):
-        with mock.patch.object(au, "fetch_latest_release", return_value=None):
+        with mock.patch.object(au, "fetch_latest_release", return_value=(None, "URL error: timed out")):
             result = au.check_for_update(local_version="1.0.0")
         self.assertFalse(result.ok)
         self.assertFalse(result.update_available)
-        self.assertEqual(result.error, "network_or_prerelease")
+        self.assertIn("timed out", result.error)
+        self.assertIn("Could not reach", result.message)
+
+    def test_soft_fail_ssl_message(self):
+        with mock.patch.object(
+            au,
+            "fetch_latest_release",
+            return_value=(None, "URL error: [SSL: CERTIFICATE_VERIFY_FAILED]"),
+        ):
+            result = au.check_for_update(local_version="1.0.0")
+        self.assertFalse(result.ok)
+        self.assertIn("SSL", result.message.upper())
 
     def test_ignores_prerelease_via_fetch(self):
-        # fetch_latest_release itself returns None for prerelease
-        with mock.patch.object(au, "fetch_latest_release", return_value=None):
+        with mock.patch.object(
+            au,
+            "fetch_latest_release",
+            return_value=(None, "no stable (non-prerelease) releases"),
+        ):
             result = au.check_for_update(local_version="0.0.1")
         self.assertFalse(result.update_available)
+        self.assertIn("stable", result.message.lower())
+
+    def test_fetch_falls_back_to_release_list(self):
+        def fake_get(url, *, timeout=15.0):
+            if "latest" in url:
+                raise urllib.error.HTTPError(
+                    url, 404, "Not Found", hdrs={}, fp=None  # type: ignore[arg-type]
+                )
+            return [
+                {"tag_name": "1.0.0-beta", "prerelease": True, "draft": False, "assets": []},
+                {
+                    "tag_name": "1.5.0",
+                    "prerelease": False,
+                    "draft": False,
+                    "html_url": "https://example.test/r",
+                    "assets": [
+                        {
+                            "name": "metroid_bread.apworld",
+                            "browser_download_url": "https://example.test/a.apworld",
+                        }
+                    ],
+                },
+            ]
+
+        with mock.patch.object(au, "_http_get_json", side_effect=fake_get):
+            release, err = au.fetch_latest_release()
+        self.assertEqual(err, "")
+        self.assertIsNotNone(release)
+        assert release is not None
+        self.assertEqual(release["tag_name"], "1.5.0")
 
 
 class InstallTests(unittest.TestCase):
