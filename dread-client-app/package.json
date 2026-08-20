@@ -1,12 +1,12 @@
 {
   "name": "dread-client",
-  "version": "1.4.0",
-  "description": "Dread Client Hub — YAML editor, patcher, and Archipelago client for Metroid Dread",
+  "version": "1.4.1",
+  "description": "Metroid Bread Client Hub — YAML editor, patcher, and Archipelago client",
   "main": "main.js",
   "scripts": {
     "start": "electron ."
   },
-  "author": "Archipelago Dread",
+  "author": "Archipelago Metroid Bread",
   "license": "MIT",
   "dependencies": {
     "adm-zip": "^0.6.0",
@@ -14,5 +14,11 @@
   },
   "devDependencies": {
     "electron": "^33.2.0"
+  },
+  "allowScripts": {
+    "electron": true
+  },
+  "engines": {
+    "node": ">=18 <25"
   }
 }

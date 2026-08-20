@@ -1,4 +1,4 @@
-"""Transport (elevator/shuttle) randomizer for Metroid Dread (working-simple)."""
+"""Transport (elevator/shuttle) randomizer for Metroid Bread (working-simple)."""
 from __future__ import annotations
 
 from collections import defaultdict

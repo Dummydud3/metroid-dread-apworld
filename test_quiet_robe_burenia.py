@@ -1,7 +1,7 @@
 """
 Quiet Robe gates the locked Upper Burenia Hub section (blue gate).
 
-Run: py -3.11 -m worlds.metroid_dread.test_quiet_robe_burenia
+Run: py -3.11 -m worlds.metroid_bread.test_quiet_robe_burenia
 (from Archipelago-main root)
 """
 
@@ -26,8 +26,8 @@ class _FakeWorld:
 class TestQuietRobeUpperBureniaHub(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from worlds.metroid_dread.dread_logic import DreadLogic, ITEM_SHORT_TO_AP
-        from worlds.metroid_dread.Events import EVENT_RESOURCE_TO_ITEM, event_locations
+        from worlds.metroid_bread.dread_logic import DreadLogic, ITEM_SHORT_TO_AP
+        from worlds.metroid_bread.Events import EVENT_RESOURCE_TO_ITEM, event_locations
 
         cls.logic = DreadLogic(_FakeWorld())
         cls.qr = EVENT_RESOURCE_TO_ITEM["Quiet Robe"]

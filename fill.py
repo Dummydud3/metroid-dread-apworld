@@ -1,5 +1,5 @@
 """
-Custom Fill Algorithm for Metroid Dread
+Custom Fill Algorithm for Metroid Bread
 Implements forward-fill that respects game logic and prevents circular dependencies
 """
 
@@ -11,7 +11,7 @@ from pathlib import Path
 import random
 
 
-class MetroidDreadFillAlgorithm:
+class MetroidBreadFillAlgorithm:
     """
     Custom fill algorithm that places items in accessibility order.
     
@@ -233,7 +233,7 @@ def fill_restrictive(multiworld: MultiWorld, base_state: CollectionState, locati
     Archipelago's fill hook for restrictive fill.
     This is called by the main fill algorithm for worlds that need special handling.
     """
-    # This is for the Metroid Dread world - use custom fill
+    # This is for the Metroid Bread world - use custom fill
     if not locations:
         return
     
@@ -241,8 +241,8 @@ def fill_restrictive(multiworld: MultiWorld, base_state: CollectionState, locati
     player = locations[0].player
     world = multiworld.worlds[player]
     
-    # Check if this is Metroid Dread
-    if not hasattr(world, 'game') or world.game != "Metroid Dread":
+    # Check if this is Metroid Bread
+    if not hasattr(world, 'game') or world.game != "Metroid Bread":
         # Not our world, don't interfere
         return
     
@@ -256,13 +256,13 @@ def fill_restrictive(multiworld: MultiWorld, base_state: CollectionState, locati
         else:
             filler_items.append(item)
     
-    print(f"\n[Metroid Dread] Using custom fill algorithm")
+    print(f"\n[Metroid Bread] Using custom fill algorithm")
     print(f"  Progression: {len(progression_items)}")
     print(f"  Filler: {len(filler_items)}")
     
     # Create and run custom fill
-    fill_algorithm = MetroidDreadFillAlgorithm(world)
+    fill_algorithm = MetroidBreadFillAlgorithm(world)
     success = fill_algorithm.custom_fill(locations, progression_items, filler_items)
     
     if not success:
-        raise Exception("Metroid Dread custom fill failed!")
+        raise Exception("Metroid Bread custom fill failed!")

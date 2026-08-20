@@ -1,5 +1,5 @@
 /**
- * Decode Hub child-process exits (MetroidDreadClient / patcher) into UI text.
+ * Decode Hub child-process exits (MetroidBreadClient / patcher) into UI text.
  */
 
 function formatPythonCmd(launcher) {
@@ -42,7 +42,7 @@ function explainClientExit(code, stderrBuf) {
       "Hub normally auto-installs client packages (websockets, etc.) on Connect.\n" +
       "Try Connect again, or run:\n" +
       "  py -3.12 -m pip install -r requirements-client.txt\n" +
-      "(from the metroid_dread world folder / _metroid_dread_runtime)"
+      "(from the metroid_bread world folder / _metroid_bread_runtime)"
     );
   }
 

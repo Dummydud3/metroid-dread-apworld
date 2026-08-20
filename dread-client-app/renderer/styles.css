@@ -460,6 +460,27 @@ button.ghost {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.log-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.log-debug-toggle {
+  margin: 0;
+  margin-top: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.log:not(.show-debug) .log-line.log-debug {
+  display: none;
 }
 
 .log {

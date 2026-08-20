@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class TestDoorRandoConstants(unittest.TestCase):
     def test_basic_change_to_subset(self):
-        from worlds.metroid_dread.DoorRando import (
+        from worlds.metroid_bread.DoorRando import (
             BASIC_DOOR_TYPES,
             DEFAULT_CHANGE_DOORS_TO,
             WEAKNESS_DOOR_TYPE,
@@ -36,7 +36,7 @@ class TestPatchExtrasMerge(unittest.TestCase):
         }
         extras = {
             "door_patches": [
-                {"actor": {"scenario": "s010_cave", "actor": "door_a"}, "door_type": "missile"}
+                {"actor": {"scenario": "s010_cave", "actor": "doorpowerpower_000"}, "door_type": "missile"}
             ],
             "elevators": [
                 {
@@ -407,7 +407,7 @@ class TestPatchExtrasMerge(unittest.TestCase):
 
 class TestDnaArtifactLogic(unittest.TestCase):
     def test_artifacts_open_when_required_zero(self):
-        from worlds.metroid_dread.dread_logic import DreadLogic
+        from worlds.metroid_bread.dread_logic import DreadLogic
 
         class Opt:
             required_dna = type("o", (), {"value": 0})()
@@ -433,7 +433,7 @@ class TestDnaArtifactLogic(unittest.TestCase):
         )
 
     def test_artifacts_need_dna_when_required(self):
-        from worlds.metroid_dread.dread_logic import DreadLogic
+        from worlds.metroid_bread.dread_logic import DreadLogic
 
         class Opt:
             required_dna = type("o", (), {"value": 3})()
@@ -460,9 +460,9 @@ class TestDnaArtifactLogic(unittest.TestCase):
 
 class TestOptionsImport(unittest.TestCase):
     def test_options_dataclass_has_new_fields(self):
-        from worlds.metroid_dread.Options import MetroidDreadOptions
+        from worlds.metroid_bread.Options import MetroidBreadOptions
 
-        fields = MetroidDreadOptions.__dataclass_fields__
+        fields = MetroidBreadOptions.__dataclass_fields__
         for name in (
             "game_goal",
             "required_dna",
@@ -482,7 +482,7 @@ class TestOptionsImport(unittest.TestCase):
 
 class TestTransportRandoSpawn(unittest.TestCase):
     def test_itorash_excluded_from_transport_shuffle(self):
-        from worlds.metroid_dread.TransportRando import (
+        from worlds.metroid_bread.TransportRando import (
             _is_shufflable,
             roll_matching,
         )
@@ -527,7 +527,7 @@ class TestTransportRandoSpawn(unittest.TestCase):
         self.assertEqual(matching.get("Artaria/A/E"), "Cataris/C/E")
 
     def test_arrival_spawn_prefers_local_start_point(self):
-        from worlds.metroid_dread.TransportRando import _arrival_spawn
+        from worlds.metroid_bread.TransportRando import _arrival_spawn
 
         extra = {
             "target_spawn_point": "LE_Platform_Elevator_FromMagma",
@@ -540,7 +540,7 @@ class TestTransportRandoSpawn(unittest.TestCase):
         )
 
     def test_matching_uses_arrival_spawn_and_transporter_name(self):
-        from worlds.metroid_dread.TransportRando import matching_to_elevators
+        from worlds.metroid_bread.TransportRando import matching_to_elevators
 
         transports = {
             "A/Ta/Na": {
@@ -576,7 +576,7 @@ def _fake_start_kit_world(start_node_id, trick_value=5, trick_key="expert"):
     """Minimal world stub for StartKit.build_start_kit unit tests."""
     import random
 
-    from worlds.metroid_dread.dread_logic import DreadLogic
+    from worlds.metroid_bread.dread_logic import DreadLogic
 
     class _O:
         def __init__(self, v=0, key="disabled"):
@@ -617,8 +617,8 @@ def _fake_start_kit_world(start_node_id, trick_value=5, trick_key="expert"):
 class TestStartKitTightFit(unittest.TestCase):
     def test_hanubia_prefers_bomb_over_power_bomb(self):
         """Hanubia must not be handed Power Bomb just to open sphere 0."""
-        from worlds.metroid_dread import StartKit
-        from worlds.metroid_dread.starting_locations import get_by_option_key
+        from worlds.metroid_bread import StartKit
+        from worlds.metroid_bread.starting_locations import get_by_option_key
 
         world = _fake_start_kit_world(
             get_by_option_key("hanubia_navigation_station_save_station").node_id
@@ -634,8 +634,8 @@ class TestStartKitTightFit(unittest.TestCase):
 
     def test_artaria_intro_empty_kit_at_min_two(self):
         """Intro already has two in-logic checks; min=2 must not grant Cloak etc."""
-        from worlds.metroid_dread import StartKit
-        from worlds.metroid_dread.starting_locations import DEFAULT_START
+        from worlds.metroid_bread import StartKit
+        from worlds.metroid_bread.starting_locations import DEFAULT_START
 
         self.assertEqual(StartKit.MIN_START_LOCATIONS, 2)
         world = _fake_start_kit_world(DEFAULT_START)

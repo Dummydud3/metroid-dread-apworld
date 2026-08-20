@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from worlds.metroid_dread import dread_client_bridge as bridge
+from worlds.metroid_bread import dread_client_bridge as bridge
 
 
 class TestShouldSkipLocalInworldGrant(unittest.TestCase):

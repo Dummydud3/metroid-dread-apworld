@@ -1,5 +1,5 @@
 """
-All Bosses goal — canonical combat/story boss list for Metroid Dread.
+All Bosses goal — canonical combat/story boss list for Metroid Bread.
 
 Exact list (verified against Events.py / Locations.py / RDV logic DB):
 
@@ -33,9 +33,6 @@ Client beaten detection (Hub tracker / All Bosses gate), in priority order:
     cross-region; that previously marked Burenia Twin Robots when Ghavoran
     Gold Robot died)
 
-Excluded on purpose: EMMI Central Units / EMMI arena deaths (not named as
-bosses in the Events list above). Chozo-X Trigger / Golzuna Eyedoor / blobs
-are prep events, not separate boss kills.
 """
 
 from __future__ import annotations

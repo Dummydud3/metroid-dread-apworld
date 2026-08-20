@@ -1,5 +1,5 @@
 """
-Victory-implies-clearance for Metroid Dread.
+Victory-implies-clearance for Metroid Bread.
 
 Clearable checks are pickups reachable from the chosen start with a full
 inventory under the rolled logic (doors / transports / tricks). Raven Beak's
@@ -24,7 +24,7 @@ from BaseClasses import CollectionState, Location
 from Fill import FillError
 
 if TYPE_CHECKING:
-    from . import MetroidDreadWorld
+    from . import MetroidBreadWorld
 
 VICTORY_LOCATION = "Raven Beak"
 _GOAL_NODE = ("Itorash", "Raven Beak Arena", "Boss - Raven Beak")
@@ -37,7 +37,7 @@ _GOAL_ONE_HUNDRED_PERCENT = 1
 _GOAL_ALL_BOSSES = 2
 
 
-def clearance_ratio_for_world(world: "MetroidDreadWorld") -> float:
+def clearance_ratio_for_world(world: "MetroidBreadWorld") -> float:
     """Clearance ratio required when Raven Beak becomes reachable."""
     try:
         goal = int(world.options.game_goal.value)
@@ -64,7 +64,7 @@ def allowed_missing_at_victory(clearable_count: int, ratio: float = CLEARANCE_RA
     return max(0, clearable_count - required_clearance_count(clearable_count, ratio))
 
 
-def clearable_pickup_names(world: "MetroidDreadWorld") -> List[str]:
+def clearable_pickup_names(world: "MetroidBreadWorld") -> List[str]:
     """Pickup checks reachable with full inventory from the world's start."""
     nodes = world.logic.get_reachable_nodes(
         world.logic.inventory_from_counts(world._full_inventory_counts())
@@ -80,12 +80,12 @@ def clearable_pickup_names(world: "MetroidDreadWorld") -> List[str]:
     return names
 
 
-def clearable_pickup_nodes(world: "MetroidDreadWorld") -> Tuple[NodeId, ...]:
+def clearable_pickup_nodes(world: "MetroidBreadWorld") -> Tuple[NodeId, ...]:
     names = clearable_pickup_names(world)
     return tuple(world.logic.pickup_nodes[name] for name in names)
 
 
-def real_check_locations(world: "MetroidDreadWorld") -> List[Location]:
+def real_check_locations(world: "MetroidBreadWorld") -> List[Location]:
     """Player pickup checks (addressed locations), excluding events / victory."""
     return [
         loc
@@ -94,7 +94,7 @@ def real_check_locations(world: "MetroidDreadWorld") -> List[Location]:
     ]
 
 
-def eventually_reachable_checks(world: "MetroidDreadWorld") -> Set[Location]:
+def eventually_reachable_checks(world: "MetroidBreadWorld") -> Set[Location]:
     """Real checks obtainable after fill via max sphere sweep (diagnostics)."""
     state = CollectionState(world.multiworld)
     remaining = set(world.multiworld.get_filled_locations())
@@ -109,7 +109,7 @@ def eventually_reachable_checks(world: "MetroidDreadWorld") -> Set[Location]:
     return {loc for loc in real_check_locations(world) if loc.can_reach(state)}
 
 
-def collection_state_at_victory(world: "MetroidDreadWorld") -> CollectionState:
+def collection_state_at_victory(world: "MetroidBreadWorld") -> CollectionState:
     """
     Sweep spheres until Raven Beak is reachable; return that collection state.
 
@@ -121,7 +121,7 @@ def collection_state_at_victory(world: "MetroidDreadWorld") -> CollectionState:
         victory = multiworld.get_location(VICTORY_LOCATION, player)
     except KeyError as exc:
         raise FillError(
-            f"Metroid Dread ({multiworld.get_player_name(player)}): "
+            f"Metroid Bread ({multiworld.get_player_name(player)}): "
             "Raven Beak location is missing after fill."
         ) from exc
 
@@ -140,12 +140,12 @@ def collection_state_at_victory(world: "MetroidDreadWorld") -> CollectionState:
             remaining.discard(loc)
 
     raise FillError(
-        f"Metroid Dread ({multiworld.get_player_name(player)}): "
+        f"Metroid Bread ({multiworld.get_player_name(player)}): "
         "Raven Beak is unreachable after fill."
     )
 
 
-def missing_checks_at_victory(world: "MetroidDreadWorld") -> List[str]:
+def missing_checks_at_victory(world: "MetroidBreadWorld") -> List[str]:
     """Clearable checks still locked when Raven Beak's AP location opens."""
     clearable = set(clearable_pickup_names(world))
     state = collection_state_at_victory(world)
@@ -156,7 +156,7 @@ def missing_checks_at_victory(world: "MetroidDreadWorld") -> List[str]:
     return sorted(missing)
 
 
-def assert_victory_implies_full_clearance(world: "MetroidDreadWorld") -> None:
+def assert_victory_implies_full_clearance(world: "MetroidBreadWorld") -> None:
     """
     Hard generation guarantee: Raven Beak reachability implies the goal's
     clearance ratio of clearable checks.
@@ -175,7 +175,7 @@ def assert_victory_implies_full_clearance(world: "MetroidDreadWorld") -> None:
         required = required_clearance_count(clearable_n, ratio)
         pct = int(ratio * 100)
         raise FillError(
-            f"Metroid Dread ({player_name}): Raven Beak is reachable while "
+            f"Metroid Bread ({player_name}): Raven Beak is reachable while "
             f"{len(missing)} clearable check(s) are not "
             f"(victory must imply >={pct}% clearance: "
             f"need {required}/{clearable_n}, allow {allowed} missing). "
@@ -197,12 +197,12 @@ def assert_victory_implies_full_clearance(world: "MetroidDreadWorld") -> None:
             player_name = world.multiworld.get_player_name(world.player)
             preview = ", ".join(locked[:12])
             raise FillError(
-                f"Metroid Dread ({player_name}): All Bosses goal — Raven Beak "
+                f"Metroid Bread ({player_name}): All Bosses goal — Raven Beak "
                 f"opens while boss node(s) are still locked: {preview}"
             )
 
 
-def raven_beak_sphere_index(world: "MetroidDreadWorld") -> int:
+def raven_beak_sphere_index(world: "MetroidBreadWorld") -> int:
     """
     0-based sphere index containing Raven Beak, or -1 if unreachable / dumped
     into the unreachable set.
@@ -225,7 +225,7 @@ def raven_beak_sphere_index(world: "MetroidDreadWorld") -> int:
 
 
 def inventory_reaches_victory_and_clearance(
-    world: "MetroidDreadWorld",
+    world: "MetroidBreadWorld",
     state: CollectionState,
     clearable_nodes: Sequence[NodeId] | None = None,
 ) -> bool:
@@ -243,7 +243,7 @@ def inventory_reaches_victory_and_clearance(
     return reached >= required_clearance_count(len(clearable_nodes), ratio)
 
 
-def assert_graph_preflight(world: "MetroidDreadWorld") -> None:
+def assert_graph_preflight(world: "MetroidBreadWorld") -> None:
     """
     Fail fast if the rolled door/transport graph cannot support a seed.
 
@@ -259,7 +259,7 @@ def assert_graph_preflight(world: "MetroidDreadWorld") -> None:
         doors = "on" if world.door_assignments else "off"
         transports = "on" if world.transport_matching else "off"
         raise FillError(
-            f"Metroid Dread ({player_name}): Raven Beak is unreachable even "
+            f"Metroid Bread ({player_name}): Raven Beak is unreachable even "
             f"with a full inventory under the rolled graph "
             f"(door_lock_rando={doors}, transport_rando={transports}). "
             f"Re-roll doors/transports or relax those options."
@@ -267,12 +267,12 @@ def assert_graph_preflight(world: "MetroidDreadWorld") -> None:
     clearable = clearable_pickup_names(world)
     if not clearable:
         raise FillError(
-            f"Metroid Dread ({player_name}): no clearable pickup checks from "
+            f"Metroid Bread ({player_name}): no clearable pickup checks from "
             f"the starting location under the rolled logic graph."
         )
 
 
-def assert_location_capacity(world: "MetroidDreadWorld") -> None:
+def assert_location_capacity(world: "MetroidBreadWorld") -> None:
     """
     Fail fast when progression (+ locked DNA) cannot fit in active locations.
     """
@@ -292,7 +292,7 @@ def assert_location_capacity(world: "MetroidDreadWorld") -> None:
     ]
     if len(prog_in_pool) > len(open_locs):
         raise FillError(
-            f"Metroid Dread ({player_name}): not enough open locations for "
+            f"Metroid Bread ({player_name}): not enough open locations for "
             f"progression items ({len(prog_in_pool)} progression vs "
             f"{len(open_locs)} open checks). Enable boss pickups, lower DNA, "
             f"or reduce stacked progressives."

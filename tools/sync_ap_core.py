@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy Archipelago core modules + Metroid Dread datapackage into ap_core/."""
+"""Copy Archipelago core modules + Metroid Bread datapackage into ap_core/."""
 
 from __future__ import annotations
 
@@ -44,9 +44,9 @@ def main() -> int:
         print(f"copied {name}")
 
     from worlds.AutoWorld import data_package_checksum
-    from worlds.metroid_dread import MetroidDreadWorld
+    from worlds.metroid_bread import MetroidBreadWorld
 
-    pkg = MetroidDreadWorld.get_data_package_data()
+    pkg = MetroidBreadWorld.get_data_package_data()
     out = {
         "item_name_groups": {
             k: sorted(v) for k, v in sorted(pkg.get("item_name_groups", {}).items())
@@ -64,7 +64,7 @@ def main() -> int:
         "location_name_to_id": out["location_name_to_id"],
     }
     out["checksum"] = data_package_checksum(ordered)
-    dp_path = AP_CORE / "worlds" / "metroid_dread_datapackage.json"
+    dp_path = AP_CORE / "worlds" / "metroid_bread_datapackage.json"
     dp_path.write_text(json.dumps(out, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
     print(
         f"wrote {dp_path.name} items={len(out['item_name_to_id'])} "

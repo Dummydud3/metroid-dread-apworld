@@ -12,7 +12,7 @@ def _bootstrap():
     from worlds.AutoWorld import AutoWorldRegister, call_all
     from Fill import distribute_items_restrictive
     from test.general import gen_steps, setup_multiworld
-    from worlds.metroid_dread import DoorRando
+    from worlds.metroid_bread import DoorRando
 
     return {
         "AutoWorldRegister": AutoWorldRegister,
@@ -21,7 +21,7 @@ def _bootstrap():
         "gen_steps": gen_steps,
         "setup_multiworld": setup_multiworld,
         "DoorRando": DoorRando,
-        "world_type": AutoWorldRegister.world_types["Metroid Dread"],
+        "world_type": AutoWorldRegister.world_types["Metroid Bread"],
     }
 
 

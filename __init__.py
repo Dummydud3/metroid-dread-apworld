@@ -1,5 +1,5 @@
 """
-Metroid Dread world implementation for Archipelago
+Metroid Bread world implementation for Archipelago
 
 Uses Randovania logic_database as the live reachability engine (see dread_logic.py).
 """
@@ -9,27 +9,29 @@ from __future__ import annotations
 import json
 from typing import List, Optional
 
+# Register launcher component before heavy world imports so a later import
+# failure cannot hide "Metroid Bread Client" from the Archipelago Launcher.
+try:
+    from . import launcher  # noqa: F401
+except ImportError:
+    pass
+
 from BaseClasses import Tutorial, ItemClassification
 from Fill import FillError
 from worlds.AutoWorld import World, WebWorld
-from .Items import MetroidDreadItem, item_table, item_name_groups
-from .Locations import MetroidDreadLocation, location_table, location_name_groups
-from .Options import MetroidDreadOptions, metroid_dread_option_groups
+from .Items import MetroidBreadItem, item_table, item_name_groups
+from .Locations import MetroidBreadLocation, location_table, location_name_groups
+from .Options import MetroidBreadOptions, metroid_bread_option_groups
 from .Regions import create_regions
 from .Rules import set_rules
 from .dread_logic import DreadLogic
 from .starting_locations import get_by_option_key, get_default, load_starting_locations
 from . import DoorRando
+from . import DoorRandoAssigner
 from . import StartKit
 from . import TransportRando
 from . import victory_clearance
 from .logic_options import collect_logic_options_from_options
-
-# Register launcher component
-try:
-    from . import launcher
-except ImportError:
-    pass
 
 DREAD_PATCH_EXTRAS_MARKER = "DREAD_PATCH_EXTRAS_JSON:"
 
@@ -83,10 +85,10 @@ _BOSS_DNA_SUBSTR = (
 )
 
 
-class MetroidDreadWeb(WebWorld):
+class MetroidBreadWeb(WebWorld):
     tutorials = [Tutorial(
         "Multiworld Setup Guide",
-        "A guide to setting up Metroid Dread for Archipelago multiworld",
+        "A guide to setting up Metroid Bread for Archipelago multiworld",
         "English",
         "setup_en.md",
         "setup/en",
@@ -96,15 +98,15 @@ class MetroidDreadWeb(WebWorld):
     bug_report_page = "https://github.com/ArchipelagoMW/Archipelago/issues"
 
 
-class MetroidDreadWorld(World):
+class MetroidBreadWorld(World):
     """
-    Metroid Dread is a 2D action-adventure game and the fifth main installment in the Metroid series.
+    Metroid Bread is a 2D action-adventure game and the fifth main installment in the Metroid series.
     """
-    game = "Metroid Dread"
-    options_dataclass = MetroidDreadOptions
-    options: MetroidDreadOptions
-    option_groups = metroid_dread_option_groups
-    web = MetroidDreadWeb()
+    game = "Metroid Bread"
+    options_dataclass = MetroidBreadOptions
+    options: MetroidBreadOptions
+    option_groups = metroid_bread_option_groups
+    web = MetroidBreadWeb()
     logic: DreadLogic
 
     item_name_to_id = {name: data.id for name, data in item_table.items() if data.id is not None}
@@ -118,6 +120,8 @@ class MetroidDreadWorld(World):
     # Filled during generate_early / pre_fill for spoiler → patcher.
     door_assignments: dict
     door_patches: list
+    # Physical keys selected for Individual Doors (locks assigned in post_fill).
+    door_shuffled_keys: list
     transport_matching: dict
     elevator_patches: list
     patch_extras: dict
@@ -129,6 +133,7 @@ class MetroidDreadWorld(World):
         self.logic = DreadLogic(self)
         self.door_assignments = {}
         self.door_patches = []
+        self.door_shuffled_keys = []
         self.transport_matching = {}
         self.elevator_patches = []
         self.patch_extras = {}
@@ -156,7 +161,7 @@ class MetroidDreadWorld(World):
             else:
                 goal_note = "90% clearance"
             print(
-                f"[Metroid Dread Player {self.player}] accessibility "
+                f"[Metroid Bread Player {self.player}] accessibility "
                 f"'minimal' upgraded to 'items' (victory implies {goal_note})"
             )
 
@@ -184,7 +189,7 @@ class MetroidDreadWorld(World):
                 self._revert_randomizers(vanilla_kit)
                 if last_preflight is not None:
                     print(
-                        f"[Metroid Dread Player {self.player}] "
+                        f"[Metroid Bread Player {self.player}] "
                         f"door/transport preflight failed after re-rolls"
                         f"{' + door soften' if want_doors else ''} "
                         f"({last_preflight}); reverted to vanilla graph"
@@ -316,7 +321,7 @@ class MetroidDreadWorld(World):
             return
         self.options.accessibility.value = self.options.accessibility.option_items
         print(
-            f"[Metroid Dread Player {self.player}] accessibility "
+            f"[Metroid Bread Player {self.player}] accessibility "
             f"'full' downgraded to 'items' (some checks need tricks that "
             f"are disabled)"
         )
@@ -350,7 +355,7 @@ class MetroidDreadWorld(World):
             self.start_kit = StartKit.build_start_kit(self)
             if self._kit_is_ok():
                 print(
-                    f"[Metroid Dread Player {self.player}] starting location "
+                    f"[Metroid Bread Player {self.player}] starting location "
                     f"{'/'.join(original)} has too little in logic to fill from; "
                     f"moved to {info.path}"
                 )
@@ -366,26 +371,33 @@ class MetroidDreadWorld(World):
         self.logic.set_starting_node(node)
         self.door_assignments = {}
         self.door_patches = []
+        self.door_shuffled_keys = []
         self.transport_matching = {}
         self.elevator_patches = []
         self.start_kit = list(kit)
 
     def _roll_door_and_transport_rando(self) -> None:
-        """Apply one door-lock / transport shuffle onto the current vanilla graph."""
+        """Apply one door-lock / transport shuffle onto the current vanilla graph.
+
+        Individual Doors: pre-fill unlocks ~60% of eligible docks (Power Beam);
+        real locks are assigned in ``post_fill`` via reach-gated selection.
+        """
         self.door_assignments = {}
         self.door_patches = []
+        self.door_shuffled_keys = []
         self.transport_matching = {}
         self.elevator_patches = []
 
         if self.options.door_lock_rando.value == 1:
-            self.door_assignments = DoorRando.roll_assignments(
+            assignments, shuffled = DoorRandoAssigner.pre_fill_roll(
                 self.logic,
                 self.random,
                 doors_to_change=self.options.doors_to_change.value,
                 change_doors_to=self.options.change_doors_to.value,
-                mode="individual_doors",
                 start_counts=StartKit.kit_counts(self.start_kit),
             )
+            self.door_assignments = assignments
+            self.door_shuffled_keys = list(shuffled)
             DoorRando.apply_assignments(self.logic.parser, self.door_assignments)
             self.door_patches = DoorRando.assignments_to_door_patches(
                 self.door_assignments
@@ -406,9 +418,11 @@ class MetroidDreadWorld(World):
         """Reset to vanilla logic, then re-apply stored transport + door assignments."""
         matching = dict(self.transport_matching or {})
         doors = dict(self.door_assignments or {})
+        shuffled = list(self.door_shuffled_keys or [])
         self._reset_logic_graph(vanilla_kit)
         self.transport_matching = matching
         self.door_assignments = doors
+        self.door_shuffled_keys = shuffled
         if matching:
             transports = TransportRando.collect_transports(self.logic.parser)
             TransportRando.apply_matching(self.logic.parser, transports, matching)
@@ -453,7 +467,7 @@ class MetroidDreadWorld(World):
             if err is None:
                 if attempt > 0:
                     print(
-                        f"[Metroid Dread Player {self.player}] "
+                        f"[Metroid Bread Player {self.player}] "
                         f"accepted door/transport graph on re-roll "
                         f"{attempt + 1}/{_GRAPH_REROLL_ATTEMPTS}"
                     )
@@ -515,7 +529,7 @@ class MetroidDreadWorld(World):
             self._reapply_door_and_transport(vanilla_kit)
             err = self._graph_state_acceptable()
             print(
-                f"[Metroid Dread Player {self.player}] door soften pass "
+                f"[Metroid Bread Player {self.player}] door soften pass "
                 f"{pass_i + 1}/{_DOOR_SOFTEN_PASSES}: opened {len(changed)} "
                 f"door(s) toward denser checks"
                 f"{'' if err is None else f' (still failing: {err})'}"
@@ -577,7 +591,7 @@ class MetroidDreadWorld(World):
                 if self.patch_extras is not None:
                     self.patch_extras["door_patches"] = self.door_patches
                 print(
-                    f"[Metroid Dread Player {self.player}] fill failed "
+                    f"[Metroid Bread Player {self.player}] fill failed "
                     f"({exc}); softened {len(keys)} door(s) for retry "
                     f"{attempt + 1}/{_DOOR_SOFTEN_PASSES}"
                 )
@@ -588,7 +602,7 @@ class MetroidDreadWorld(World):
         """Drop door / transport rando and go back to the vanilla graph."""
         self._reset_logic_graph(vanilla_kit)
         print(
-            f"[Metroid Dread Player {self.player}] door / transport rando left "
+            f"[Metroid Bread Player {self.player}] door / transport rando left "
             f"{'/'.join(self.logic.starting_node)} with too little in logic; "
             f"reverted to vanilla"
         )
@@ -620,7 +634,7 @@ class MetroidDreadWorld(World):
         self.forced_boss_locations = set(sinks[:keep])
         if self.forced_boss_locations:
             print(
-                f"[Metroid Dread Player {self.player}] keeping "
+                f"[Metroid Bread Player {self.player}] keeping "
                 f"{len(self.forced_boss_locations)} boss/EMMI check(s) as DNA "
                 f"sinks (include_boss_pickups is off)"
             )
@@ -679,7 +693,7 @@ class MetroidDreadWorld(World):
             info = get_by_option_key(key)
             if info is None:
                 raise Exception(
-                    f"Unknown Metroid Dread starting_location option: {key!r}"
+                    f"Unknown Metroid Bread starting_location option: {key!r}"
                 )
 
         if not self._start_is_viable(info.node_id):
@@ -687,7 +701,7 @@ class MetroidDreadWorld(World):
                 (s for s in starts if self._start_is_viable(s.node_id)), None
             ) or get_default()
             print(
-                f"[Metroid Dread Player {self.player}] starting location "
+                f"[Metroid Bread Player {self.player}] starting location "
                 f"{info.path} cannot reach Raven Beak; falling back to {fallback.path}"
             )
             info = fallback
@@ -879,11 +893,11 @@ class MetroidDreadWorld(World):
             ]
         return names
 
-    def create_item(self, name: str) -> MetroidDreadItem:
+    def create_item(self, name: str) -> MetroidBreadItem:
         item_data = item_table[name]
         if item_data.id is None:
-            return MetroidDreadItem(name, item_data.classification, None, self.player)
-        return MetroidDreadItem(name, item_data.classification, item_data.id, self.player)
+            return MetroidBreadItem(name, item_data.classification, None, self.player)
+        return MetroidBreadItem(name, item_data.classification, item_data.id, self.player)
 
     def set_rules(self):
         set_rules(self.multiworld, self.player, self.options)
@@ -904,7 +918,30 @@ class MetroidDreadWorld(World):
         victory_clearance.assert_location_capacity(self)
 
     def post_fill(self) -> None:
-        """Reject fills where Raven Beak opens before the goal's clearance ratio."""
+        """Assign reach-gated door locks (Individual Doors), then clearance check."""
+        if (
+            self.options.door_lock_rando.value == 1
+            and self.door_shuffled_keys
+        ):
+            self.door_assignments = DoorRandoAssigner.post_fill_assign(
+                self,
+                self.door_shuffled_keys,
+                self.random,
+                change_doors_to=self.options.change_doors_to.value,
+            )
+            DoorRando.apply_assignments(self.logic.parser, self.door_assignments)
+            self.door_patches = DoorRando.assignments_to_door_patches(
+                self.door_assignments
+            )
+            self.logic.rebuild_graph()
+            if self.patch_extras is not None:
+                self.patch_extras["door_patches"] = self.door_patches
+                self.patch_extras["door_assignments"] = [
+                    {"scenario": scenario, "actor": actor, "weakness": weakness}
+                    for (scenario, actor), weakness in sorted(
+                        (self.door_assignments or {}).items()
+                    )
+                ]
         victory_clearance.assert_victory_implies_full_clearance(self)
 
     def _dna_candidate_locations(self) -> List[str]:
@@ -965,7 +1002,7 @@ class MetroidDreadWorld(World):
     def generate_basic(self):
         kit = ", ".join(StartKit.logical_names(self.start_kit)) or "none"
         print(
-            f"[Metroid Dread Player {self.player}] "
+            f"[Metroid Bread Player {self.player}] "
             f"RDV logic graph active (start={self.logic.starting_node}); "
             f"doors={len(self.door_patches)} elevators={len(self.elevator_patches)} "
             f"dna={self.options.required_dna.value} start_kit={kit}"

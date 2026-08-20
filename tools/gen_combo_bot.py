@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Sweep Metroid Dread on/off generation options (solo) and log pass/fail.
+Sweep Metroid Bread on/off generation options (solo) and log pass/fail.
 
 Tests the 11 binary options that change seed generation (excludes
 start_with_pulse_radar and cosmetics). Uses in-process AP generation through
 fill + accessibility — does not write .zip / spoiler output.
 
 Usage (from Archipelago repo root):
-  py -3.11 worlds/metroid_dread/tools/gen_combo_bot.py
-  py -3.11 worlds/metroid_dread/tools/gen_combo_bot.py --limit 8 --seed 1
-  py -3.11 worlds/metroid_dread/tools/gen_combo_bot.py --resume
+  py -3.11 worlds/metroid_bread/tools/gen_combo_bot.py
+  py -3.11 worlds/metroid_bread/tools/gen_combo_bot.py --limit 8 --seed 1
+  py -3.11 worlds/metroid_bread/tools/gen_combo_bot.py --resume
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-GAME = "Metroid Dread"
+GAME = "Metroid Bread"
 
 # Cached after bootstrap (Fill must NOT be imported before worlds finish loading).
 _AP: dict[str, Any] | None = None
@@ -106,7 +106,7 @@ def bootstrap_ap() -> dict[str, Any]:
     # Worlds first — this triggers world package loading safely.
     from worlds.AutoWorld import AutoWorldRegister, call_all  # noqa: WPS433
     if GAME not in AutoWorldRegister.world_types:
-        raise RuntimeError(f"{GAME!r} is not registered. Is worlds/metroid_dread present?")
+        raise RuntimeError(f"{GAME!r} is not registered. Is worlds/metroid_bread present?")
 
     # Now Fill is safe to import.
     from Fill import distribute_items_restrictive  # noqa: WPS433
@@ -227,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Resume: {len(done)} already logged")
 
     # Warm imports / RDV load once before the loop timing.
-    print("Warming Archipelago + Metroid Dread world…")
+    print("Warming Archipelago + Metroid Bread world…")
     print("(first import loads all worlds — wait for Warm gen line)")
     bootstrap_ap()
     warm_ok, warm_s, warm_err = run_one(dict(DEFAULT_FIXED, **{

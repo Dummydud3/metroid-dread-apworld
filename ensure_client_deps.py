@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Ensure Metroid Dread Hub client Python packages are installed.
+Ensure Metroid Bread Hub client Python packages are installed.
 
 On Linux, packages are installed into a local virtualenv under the world
-directory (``_metroid_dread_venv``) — never systemwide / ``pip install --user``.
+directory (``_metroid_bread_venv``) — never systemwide / ``pip install --user``.
 Windows keeps the previous behavior (install into the selected system Python).
 """
 
@@ -36,7 +36,7 @@ EXIT_OK = 0
 EXIT_PYTHON_MISSING = 2
 EXIT_PIP_FAILED = 3
 
-VENV_DIRNAME = "_metroid_dread_venv"
+VENV_DIRNAME = "_metroid_bread_venv"
 
 VERSION_OK_CODE = (
     "import sys; raise SystemExit("
@@ -126,8 +126,34 @@ def _base_python_candidates() -> List[List[str]]:
     ]
 
 
+def _managed_python_cmd() -> Optional[List[str]]:
+    """Prefer DREAD_HUB_PYTHON env, then portable tools/python-3.12."""
+    env_py = (os.environ.get("DREAD_HUB_PYTHON") or "").strip()
+    if env_py:
+        cmd = [env_py]
+        if _probe(cmd, VERSION_OK_CODE):
+            return cmd
+    try:
+        try:
+            from hub_launcher import managed_python_cmd
+        except ImportError:
+            from worlds.metroid_bread.hub_launcher import managed_python_cmd
+        cmd = managed_python_cmd()
+        if cmd and _probe(cmd, VERSION_OK_CODE):
+            return list(cmd)
+        # Accept managed binary even if version probe is slow/odd when file exists.
+        if cmd and Path(cmd[0]).is_file():
+            return list(cmd)
+    except Exception:
+        pass
+    return None
+
+
 def find_base_python() -> Optional[List[str]]:
-    """Locate a system / host Python 3.11–3.13 (prefer open-dread-rando)."""
+    """Locate a system / host Python 3.11–3.13 (prefer managed, then open-dread-rando)."""
+    managed = _managed_python_cmd()
+    if managed:
+        return managed
     has_odr = "import open_dread_rando"
     for cmd in _base_python_candidates():
         if _probe(cmd, has_odr):
@@ -142,12 +168,16 @@ def find_client_python(world: Optional[Path] = None) -> Optional[List[str]]:
     """
     Interpreter used for Hub client deps / launch.
 
-    On Linux, prefer an existing local venv when present and version-ok.
+    On Linux, prefer an existing local venv (deps live there). Otherwise prefer
+    managed portable CPython / DREAD_HUB_PYTHON, then host discovery.
     """
     if uses_linux_venv():
         vpy = venv_python_path(world)
         if vpy.is_file() and _probe([str(vpy)], VERSION_OK_CODE):
             return [str(vpy)]
+    managed = _managed_python_cmd()
+    if managed:
+        return managed
     return find_base_python()
 
 
@@ -158,7 +188,7 @@ def ensure_linux_venv(
     log: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Optional[List[str]], str]:
     """
-    Create or reuse ``_metroid_dread_venv`` next to the world package.
+    Create or reuse ``_metroid_bread_venv`` next to the world package.
 
     Uses ``--system-site-packages`` so a host open-dread-rando install remains
     importable; new client packages still land only in the venv.
@@ -282,6 +312,65 @@ def missing_imports(python_cmd: Sequence[str]) -> List[str]:
     return [p for p in blob.split(",") if p]
 
 
+def _looks_like_pip_missing(detail: str) -> bool:
+    blob = (detail or "").lower()
+    return (
+        "no module named pip" in blob
+        or "no module named 'pip'" in blob
+        or "pip is not installed" in blob
+        or "/usr/bin/pip: not found" in blob
+        or "failed to find pip" in blob
+    )
+
+
+def pip_install_hint_lines(python_cmd: Sequence[str]) -> List[str]:
+    """OS-specific steps to get pip when ``python -m pip`` is unavailable."""
+    py = format_cmd(python_cmd)
+    lines = [
+        "If pip is missing, bootstrap it then retry Connect:",
+        f"  {py} -m ensurepip --upgrade",
+        f"  {py} -m pip --version",
+        "",
+    ]
+    if sys.platform == "win32":
+        lines.extend(
+            [
+                "Windows (if ensurepip fails):",
+                "  • Re-run the Python installer → Modify → enable pip",
+                "  • Or install from https://www.python.org/downloads/ (Add to PATH)",
+                "  • Or:  py install 3.12   then   py -3.12 -m ensurepip --upgrade",
+            ]
+        )
+    elif sys.platform.startswith("linux"):
+        lines.extend(
+            [
+                "Linux / Manjaro / Arch:",
+                "  sudo pacman -S python-pip",
+                "Debian / Ubuntu (ensurepip often stripped):",
+                "  sudo apt install python3-pip   # or: sudo apt install python3-venv",
+                "Fedora:",
+                "  sudo dnf install python3-pip",
+            ]
+        )
+        if uses_linux_venv():
+            lines.extend(
+                [
+                    "",
+                    "Use the Hub venv python above after fixing pip;",
+                    "do not pip install --user or as root into system Python.",
+                ]
+            )
+    else:
+        lines.extend(
+            [
+                "macOS / other:",
+                f"  {py} -m ensurepip --upgrade",
+                "  or:  brew install python   (Homebrew Python includes pip)",
+            ]
+        )
+    return lines
+
+
 def pip_failure_message(
     python_cmd: Sequence[str],
     *,
@@ -297,7 +386,7 @@ def pip_failure_message(
         pkgs = " ".join(req for _, req in CLIENT_IMPORTS)
         install_line = f"{py} -m pip install {pkgs}"
     parts = [
-        "Failed to install Metroid Dread client Python packages.",
+        "Failed to install Metroid Bread client Python packages.",
         "",
         f"Interpreter: {py}",
     ]
@@ -313,19 +402,19 @@ def pip_failure_message(
             "Try manually:",
             f"  {install_line}",
             "",
-            "If pip is missing or Python is not on PATH:",
-            "  1. Install Python 3.11 or 3.12 from https://www.python.org/downloads/",
-            '     (check "Add python.exe to PATH")',
-            "  2. Or:  py install 3.12",
-            "  3. Confirm with:  py -0",
-            "  4. Restart the Hub and Connect again.",
         ]
     )
-    if uses_linux_venv():
+    parts.extend(pip_install_hint_lines(python_cmd))
+    if not _looks_like_pip_missing(detail):
         parts.extend(
             [
                 "",
-                "Linux: use the venv python above; do not pip install --user or as root.",
+                "If Python itself is missing or not on PATH:",
+                "  1. Install Python 3.11 or 3.12 from https://www.python.org/downloads/",
+                '     (check "Add python.exe to PATH")',
+                "  2. Or:  py install 3.12",
+                "  3. Confirm with:  py -0",
+                "  4. Restart the Hub and Connect again.",
             ]
         )
     if detail.strip():
@@ -333,8 +422,68 @@ def pip_failure_message(
     return "\n".join(parts)
 
 
-def _install_packages(python_cmd: Sequence[str], world: Optional[Path] = None) -> Tuple[bool, str]:
+def pip_available(python_cmd: Sequence[str]) -> bool:
+    """True when ``python -m pip`` runs successfully on python_cmd."""
+    return _probe(python_cmd, "import pip; raise SystemExit(0)")
+
+
+def ensure_pip(
+    python_cmd: Sequence[str],
+    *,
+    log: Optional[Callable[[str], None]] = None,
+) -> Tuple[bool, str]:
+    """
+    Best-effort bootstrap of pip via ``python -m ensurepip --upgrade``.
+
+    Safe to call when pip is already present (ensurepip is a no-op / upgrades).
+    Returns (ok, detail). ok means pip is importable afterward.
+    """
+    def _log(msg: str) -> None:
+        if log:
+            log(msg)
+        else:
+            print(msg, flush=True)
+
+    if pip_available(python_cmd):
+        return True, ""
+
+    _log(f"pip missing for {format_cmd(python_cmd)}; trying ensurepip...")
+    try:
+        proc = subprocess.run(
+            list(python_cmd) + ["-m", "ensurepip", "--upgrade"],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"ensurepip failed: {exc}"
+
+    combined = f"{proc.stdout or ''}\n{proc.stderr or ''}".strip()
+    if pip_available(python_cmd):
+        _log("pip available after ensurepip.")
+        return True, combined
+    detail = combined or f"ensurepip exited {proc.returncode}"
+    return False, detail
+
+
+def _install_packages(
+    python_cmd: Sequence[str],
+    world: Optional[Path] = None,
+    *,
+    log: Optional[Callable[[str], None]] = None,
+) -> Tuple[bool, str]:
     req = requirements_file(world)
+    if not pip_available(python_cmd):
+        ok_pip, pip_detail = ensure_pip(python_cmd, log=log)
+        if not ok_pip:
+            return False, pip_failure_message(
+                python_cmd,
+                req_path=req,
+                detail=pip_detail or "No module named pip",
+                world=world,
+            )
+
     # Never pass --user; target interpreter should already be a venv on Linux.
     if req.is_file():
         cmd = list(python_cmd) + ["-m", "pip", "install", "-r", str(req)]
@@ -352,6 +501,26 @@ def _install_packages(python_cmd: Sequence[str], world: Optional[Path] = None) -
         return False, pip_failure_message(python_cmd, req_path=req, detail=str(exc), world=world)
     combined = f"{proc.stdout or ''}\n{proc.stderr or ''}".strip()
     if proc.returncode != 0:
+        # One more ensurepip attempt if the failure looks like missing pip
+        # (e.g. race / broken venv) then retry once.
+        if _looks_like_pip_missing(combined):
+            ok_pip, _ = ensure_pip(python_cmd, log=log)
+            if ok_pip:
+                try:
+                    proc = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=600,
+                        shell=False,
+                    )
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    return False, pip_failure_message(
+                        python_cmd, req_path=req, detail=str(exc), world=world
+                    )
+                combined = f"{proc.stdout or ''}\n{proc.stderr or ''}".strip()
+                if proc.returncode == 0:
+                    return True, combined
         return False, pip_failure_message(python_cmd, req_path=req, detail=combined, world=world)
     return True, combined
 
@@ -365,7 +534,7 @@ def ensure_client_deps(
     """
     Ensure client packages exist in the target interpreter.
 
-    On Linux the target is always ``<world>/_metroid_dread_venv``.
+    On Linux the target is always ``<world>/_metroid_bread_venv``.
 
     Returns (ok, message, exit_code).
     """
@@ -393,7 +562,7 @@ def ensure_client_deps(
         f"Installing missing Python packages {where} ({format_cmd(cmd)}): "
         + ", ".join(missing)
     )
-    ok, detail = _install_packages(cmd, world=world)
+    ok, detail = _install_packages(cmd, world=world, log=_log)
     if not ok:
         return False, detail, EXIT_PIP_FAILED
 

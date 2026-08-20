@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Path helpers for the Metroid Dread client / direct patcher.
+Path helpers for the Metroid Bread client / direct patcher.
 
 Canonical layout (after client↔world merge):
-  worlds/metroid_dread/          ← WORLD_DIR (this package)
-    MetroidDreadClient.py
+  worlds/metroid_bread/          ← WORLD_DIR (this package)
+    MetroidBreadClient.py
     dread_direct_patch.py
     dread-client-app/
     ap_core/                     ← bundled import root for frozen installs
@@ -163,7 +163,7 @@ def resolve_ap_roots(world_dir: Optional[Path] = None) -> Tuple[Path, Path]:
     except Exception:
         pass
 
-    # Legacy layout: worlds/metroid_dread → repo root (wrong for runtime extracts).
+    # Legacy layout: worlds/metroid_bread → repo root (wrong for runtime extracts).
     try:
         legacy = base.parents[1].resolve()
     except IndexError:
@@ -175,7 +175,7 @@ def resolve_ap_root(world_dir: Optional[Path] = None) -> Path:
     """
     Resolve the Archipelago root used for PYTHONPATH / CommonClient imports.
 
-    Runtime extracts live at custom_worlds/_metroid_dread_runtime — parents[1] is the
+    Runtime extracts live at custom_worlds/_metroid_bread_runtime — parents[1] is the
     install folder (often frozen-only). Prefer env, then a real source tree, then the
     bundled ``ap_core/`` next to the world package.
     """
@@ -220,12 +220,12 @@ def bind_utils_install_root(install_root: Optional[Path] = None) -> None:
                 pass
 
 
-def _attach_world_package_spec(pkg: Any, name: str = "worlds.metroid_dread") -> None:
+def _attach_world_package_spec(pkg: Any, name: str = "worlds.metroid_bread") -> None:
     """
     Give a synthetic package a real ModuleSpec.
 
     Without ``__spec__``, ``pkgutil.get_data`` / ``importlib.util.find_spec`` raise
-    ``ValueError: worlds.metroid_dread.__spec__ is None`` (seen when the direct
+    ``ValueError: worlds.metroid_bread.__spec__ is None`` (seen when the direct
     patcher resolves starting locations from logic_database under ap_core).
     """
     import importlib.machinery
@@ -247,14 +247,14 @@ def _attach_world_package_spec(pkg: Any, name: str = "worlds.metroid_dread") -> 
 
 def ensure_runtime_world_namespace() -> None:
     """
-    Expose WORLD_DIR as ``worlds.metroid_dread`` when the AP import root is ap_core.
+    Expose WORLD_DIR as ``worlds.metroid_bread`` when the AP import root is ap_core.
 
     Frozen installs use a stub ``worlds`` package (no game loaders). Patcher / client
-    helpers still do ``from worlds.metroid_dread...`` and need this namespace.
+    helpers still do ``from worlds.metroid_bread...`` and need this namespace.
     """
     import types
 
-    name = "worlds.metroid_dread"
+    name = "worlds.metroid_bread"
     existing = sys.modules.get(name)
     if existing is not None:
         # Repair incomplete synthetic packages left by older Hub builds.

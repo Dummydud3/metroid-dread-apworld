@@ -12,8 +12,8 @@ warnings.filterwarnings("ignore")
 
 class TestTrackerTransportLogic(unittest.TestCase):
     def test_transport_matching_rewrites_connections(self):
-        from worlds.metroid_dread.dread_logic import DreadLogic
-        from worlds.metroid_dread import TransportRando
+        from worlds.metroid_bread.dread_logic import DreadLogic
+        from worlds.metroid_bread import TransportRando
 
         class _Opt:
             def __getattr__(self, name):
@@ -55,7 +55,7 @@ class TestTrackerTransportLogic(unittest.TestCase):
         import re
         from pathlib import Path
 
-        from worlds.metroid_dread.dread_logic import DreadLogic
+        from worlds.metroid_bread.dread_logic import DreadLogic
 
         spoiler = Path(__file__).resolve().parents[2] / (
             "build/dread_dist/DreadClient_fresh/output/_patcher_extract/"
@@ -90,7 +90,7 @@ class TestTrackerTransportLogic(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             logic = DreadLogic(_World())
 
-        from worlds.metroid_dread import DoorRando, TransportRando
+        from worlds.metroid_bread import DoorRando, TransportRando
 
         elev_n = 0
         transports = TransportRando.collect_transports(logic.parser)
@@ -139,7 +139,7 @@ class TestTrackerTransportLogic(unittest.TestCase):
         from test.general import gen_steps, setup_multiworld
         from worlds.AutoWorld import AutoWorldRegister
 
-        world_type = AutoWorldRegister.world_types["Metroid Dread"]
+        world_type = AutoWorldRegister.world_types["Metroid Bread"]
         mw = setup_multiworld(
             world_type,
             steps=gen_steps,
@@ -163,7 +163,7 @@ class TestTrackerTransportLogic(unittest.TestCase):
         from unittest.mock import patch
 
         from dread_client_bridge import counts_from_starting_items
-        from worlds.metroid_dread.dread_logic import DreadLogic
+        from worlds.metroid_bread.dread_logic import DreadLogic
 
         # Same ODR ids as AP_23206167140589219116 start kit (Cross Bomb = LINE_BOMB).
         starting_items = {
@@ -234,7 +234,7 @@ class TestTrackerTransportLogic(unittest.TestCase):
             net.status_colors = {}
             sys.modules["NetUtils"] = net
 
-        import MetroidDreadClient as mdc
+        import MetroidBreadClient as mdc
 
         def _init(self, *args, **kwargs):
             self.items_received = []
@@ -243,8 +243,8 @@ class TestTrackerTransportLogic(unittest.TestCase):
             self._patch_extras = {"starting_items": dict(starting_items)}
             self._slot_data = {}
 
-        with patch.object(mdc.MetroidDreadContext, "__init__", _init):
-            ctx = mdc.MetroidDreadContext.__new__(mdc.MetroidDreadContext)
+        with patch.object(mdc.MetroidBreadContext, "__init__", _init):
+            ctx = mdc.MetroidBreadContext.__new__(mdc.MetroidBreadContext)
             _init(ctx)
 
         counts = ctx._tracker_item_counts()
@@ -264,9 +264,9 @@ class TestTrackerTransportLogic(unittest.TestCase):
         from pathlib import Path
 
         from dread_client_bridge import counts_from_starting_items
-        from worlds.metroid_dread import DoorRando, TransportRando
-        from worlds.metroid_dread.dread_logic import DreadLogic
-        from worlds.metroid_dread.logic_options import (
+        from worlds.metroid_bread import DoorRando, TransportRando
+        from worlds.metroid_bread.dread_logic import DreadLogic
+        from worlds.metroid_bread.logic_options import (
             parse_logic_options_from_spoiler_text,
         )
 

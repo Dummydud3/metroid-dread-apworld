@@ -107,7 +107,7 @@ async def try_handshake(host: str, port: int) -> str:
         return f"CONNECT FAILED: {e}"
 
     try:
-        # PACKET_HANDSHAKE + MULTIWORLD interest (same as MetroidDreadClient / DreadExecutor)
+        # PACKET_HANDSHAKE + MULTIWORLD interest (same as MetroidBreadClient / DreadExecutor)
         writer.write(b"1" + (2).to_bytes(1, "little"))
         await asyncio.wait_for(writer.drain(), timeout=5)
         resp = await asyncio.wait_for(reader.read(1024), timeout=5)
@@ -180,7 +180,7 @@ def main() -> int:
     if not bound:
         print("Mod looks good, but nothing is listening.")
         print("  1. Enable the DreadRandovania mod in Ryujinx")
-        print("  2. Boot Metroid Dread and wait until title/boot finishes (RL.Init runs in init)")
+        print("  2. Boot Metroid Bread and wait until title/boot finishes (RL.Init runs in init)")
         return 3
 
     if bound and not accepting:

@@ -1,5 +1,5 @@
 ﻿Item tracker icons copied from Randovania:
 randovania/data/gui_assets/tracker/game-images/dread/
 
-Used by Randovania's Automatic Item Tracker for Metroid Dread.
-See https://github.com/randovania/randovania
+Used by Randovania's Automatic Item Tracker for Metroid Bread.
+See https://github.com/randovania/randovania

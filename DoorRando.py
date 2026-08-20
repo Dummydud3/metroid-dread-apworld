@@ -1,13 +1,18 @@
-"""Door-lock randomizer for Metroid Dread (working-simple).
+"""Door-lock randomizer for Metroid Bread.
 
-Enumerates physical doors from logic_database dock nodes, rolls BASIC lock
-types with a start-frontier guard, mutates default_dock_weakness in-memory,
-and emits open-dread-rando door_patches.
+Enumerates physical doors from logic_database dock nodes, mutates
+default_dock_weakness in-memory, and emits open-dread-rando door_patches.
+
+Individual Doors assignment is a light RDV-style two-phase flow (see
+``DoorRandoAssigner``): pre-fill unlock → item fill → post-fill reach-gated
+locks. Softening remains emergency-only for fill / preflight repair.
 """
 from __future__ import annotations
 
 from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple  # Any used by slot_data helpers
+
+from . import door_rando_db as _door_db
 
 NodeId = Tuple[str, str, str]
 
@@ -23,10 +28,11 @@ REGION_TO_SCENARIO: Dict[str, str] = {
     "Itorash": "s090_skybase",
 }
 
-BASIC_DOOR_TYPES = frozenset({
-    "power_beam", "charge_beam", "grapple_beam",
-    "wide_beam", "wave_beam", "plasma_beam", "missile", "super_missile",
-})
+BASIC_DOOR_TYPES = _door_db.BASIC_ODR_DOOR_TYPES
+
+# ODR DoorType.PRESENCE has can_be_added=False — never emit these as targets.
+# phase_shift is not an ODR DoorType at all.
+ODR_CANNOT_ADD_DOOR_TYPES = _door_db.ODR_CANNOT_ADD_DOOR_TYPES
 
 SHIELDED_DOOR_TYPES = frozenset({
     "wide_beam", "plasma_beam", "wave_beam", "missile", "super_missile",
@@ -58,15 +64,11 @@ WEAKNESS_DOOR_TYPE: Dict[str, str] = {
 
 ALL_DOOR_WEAKNESS_NAMES = frozenset(WEAKNESS_DOOR_TYPE)
 
-DEFAULT_DOORS_TO_CHANGE = frozenset({
-    "Access Open", "Charge Beam Door", "Grapple Beam Door", "Missile Door",
-    "Plasma Beam Door", "Power Beam Door", "Sensor Lock Door",
-    "Super Missile Door", "Wave Beam Door", "Wide Beam Door",
-})
+# RDV change_from (sensors may be converted away; never placed as targets).
+DEFAULT_DOORS_TO_CHANGE = _door_db.header_change_from()
 
-DEFAULT_CHANGE_DOORS_TO = frozenset(
-    name for name, dt in WEAKNESS_DOOR_TYPE.items() if dt in BASIC_DOOR_TYPES
-)
+# Basic ODR-safe change_to only (no Sensor / Phase / blast / closed).
+DEFAULT_CHANGE_DOORS_TO = _door_db.basic_change_to_weaknesses()
 
 # Assignments: physical_key -> weakness name
 PhysicalKey = Tuple[str, str]  # (scenario, actor)
@@ -84,18 +86,19 @@ def _iter_door_docks(parser) -> Iterable[Tuple[NodeId, dict]]:
 
 
 def physical_key_for_node(region: str, node: dict) -> Optional[PhysicalKey]:
+    """Return (scenario, actor) only for ODR-patchable Mercury door actors.
+
+    Hard-excludes Phase Shift shutters (``doorshutter_*``), thermal
+    ``doorheat_*``, and other actordefs outside ODR ``DoorType`` /
+    ``ActorData``. Symbolic labels like ``Door006 (CG-CG)`` stay skipped.
+    """
+    if not _door_db.is_patchable_door_source_node(node):
+        return None
     actor = (node.get("extra") or {}).get("actor_name")
-    if not actor:
-        return None
-    # open-dread-rando door_patches need Mercury actor instance names
-    # (doorpowerpower_000). Logic DB also has symbolic labels like
-    # "Door006 (CG-CG)" — skip those until we have an actor map.
-    if not str(actor).startswith("door"):
-        return None
     scenario = REGION_TO_SCENARIO.get(region)
-    if not scenario:
+    if not scenario or not actor:
         return None
-    return (scenario, actor)
+    return (scenario, str(actor))
 
 
 def collect_physical_doors(parser) -> Dict[PhysicalKey, List[Tuple[NodeId, dict]]]:
@@ -143,6 +146,17 @@ def start_frontier_keys(logic, start_inventory) -> Set[PhysicalKey]:
     return protected
 
 
+def incompatible_weaknesses_for_key(
+    groups: Dict[PhysicalKey, List[Tuple[NodeId, dict]]],
+    key: PhysicalKey,
+) -> Set[str]:
+    """Union of ``incompatible_dock_weaknesses`` on both sides of a physical door."""
+    bans: Set[str] = set()
+    for _nid, node in groups.get(key) or ():
+        bans.update(node.get("incompatible_dock_weaknesses") or [])
+    return bans
+
+
 def roll_assignments(
     logic,
     rng,
@@ -152,61 +166,24 @@ def roll_assignments(
     mode: str = "individual_doors",
     start_counts: Optional[Dict[str, int]] = None,
 ) -> Dict[PhysicalKey, str]:
-    """Return { (scenario, actor): weakness_name }. Empty when vanilla."""
+    """Pre-fill unlock assignments for Individual Doors (locks assigned post-fill).
+
+    Returns ``{ (scenario, actor): unlocked_weakness }`` for ~``to_shuffle_proportion``
+    of eligible docks. Empty when vanilla. Prefer ``DoorRandoAssigner.pre_fill_roll``
+    when the shuffled key list is also needed.
+    """
     if mode in ("vanilla", "off", None) or mode == 0:
         return {}
 
-    change_from = set(doors_to_change) & ALL_DOOR_WEAKNESS_NAMES
-    change_to = [
-        w for w in change_doors_to
-        if w in ALL_DOOR_WEAKNESS_NAMES and WEAKNESS_DOOR_TYPE.get(w) in BASIC_DOOR_TYPES
-    ]
-    if not change_from or not change_to:
-        return {}
+    from . import DoorRandoAssigner
 
-    groups = collect_physical_doors(logic.parser)
-    # Include any guaranteed starting items, otherwise the frontier we keep
-    # vanilla is smaller than what the player actually opens with.
-    start_inv = logic.inventory_from_counts(dict(start_counts or {}))
-    protected = start_frontier_keys(logic, start_inv)
-
-    # Per-scenario shield budget (each shielded door costs 2 ids).
-    shield_used: Dict[str, int] = defaultdict(int)
-    for key, sides in groups.items():
-        scenario, _ = key
-        weakness = sides[0][1].get("default_dock_weakness") or "Power Beam Door"
-        dt = WEAKNESS_DOOR_TYPE.get(weakness)
-        if dt in SHIELDED_DOOR_TYPES:
-            shield_used[scenario] += 2
-
-    assignments: Dict[PhysicalKey, str] = {}
-    eligible_keys = []
-    for key, sides in groups.items():
-        if key in protected:
-            continue
-        vanilla = sides[0][1].get("default_dock_weakness") or "Power Beam Door"
-        if vanilla not in change_from:
-            continue
-        eligible_keys.append(key)
-
-    rng.shuffle(eligible_keys)
-    for key in eligible_keys:
-        scenario, _ = key
-        pool = list(change_to)
-        rng.shuffle(pool)
-        chosen = None
-        for weakness in pool:
-            dt = WEAKNESS_DOOR_TYPE[weakness]
-            cost = 2 if dt in SHIELDED_DOOR_TYPES else 0
-            if cost and shield_used[scenario] + cost > SHIELD_IDS_PER_SCENARIO - SHIELD_BUDGET_MARGIN:
-                continue
-            chosen = weakness
-            shield_used[scenario] += cost
-            break
-        if chosen is None:
-            continue
-        assignments[key] = chosen
-
+    assignments, _keys = DoorRandoAssigner.pre_fill_roll(
+        logic,
+        rng,
+        doors_to_change=doors_to_change,
+        change_doors_to=change_doors_to,
+        start_counts=start_counts,
+    )
     return assignments
 
 
@@ -222,10 +199,13 @@ def apply_assignments(parser, assignments: Dict[PhysicalKey, str]) -> None:
 
 
 def assignments_to_door_patches(assignments: Dict[PhysicalKey, str]) -> List[dict]:
+    """Serialize assignments to ODR ``door_patches``, dropping non-patchable actors."""
     patches = []
     for (scenario, actor), weakness in sorted(assignments.items()):
+        if not _door_db.is_odr_patchable_door_actor(str(actor)):
+            continue
         door_type = WEAKNESS_DOOR_TYPE.get(weakness)
-        if not door_type:
+        if not door_type or door_type in ODR_CANNOT_ADD_DOOR_TYPES:
             continue
         patches.append({
             "actor": {"scenario": scenario, "actor": actor},

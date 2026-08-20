@@ -1,5 +1,5 @@
 """
-Minimal ``worlds`` package for Hub / MetroidDreadClient under frozen Archipelago installs.
+Minimal ``worlds`` package for Hub / MetroidBreadClient under frozen Archipelago installs.
 
 Frozen ProgramData builds only ship ``CommonClient`` as Python 3.13 ``.pyc`` inside
 ``lib/library.zip``, which system Python cannot import. The Hub therefore runs against
@@ -20,7 +20,7 @@ class AutoWorldRegister:
 
 
 def _load_dread_datapackage() -> Dict[str, Any]:
-    path = Path(__file__).resolve().parent / "metroid_dread_datapackage.json"
+    path = Path(__file__).resolve().parent / "metroid_bread_datapackage.json"
     if not path.is_file():
         return {}
     try:
@@ -32,5 +32,5 @@ def _load_dread_datapackage() -> Dict[str, Any]:
 
 _dread = _load_dread_datapackage()
 network_data_package: Dict[str, Any] = {
-    "games": {"Metroid Dread": _dread} if _dread else {},
+    "games": {"Metroid Bread": _dread} if _dread else {},
 }

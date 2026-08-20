@@ -1,13 +1,58 @@
-﻿__pycache__/
+﻿# Python
+__pycache__/
 *.py[cod]
+*$py.class
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtualenvs (Hub / client)
+_metroid_bread_venv/
+**/_metroid_bread_venv/
+_metroid_dread_venv/
+.venv/
+**/.venv/
+venv/
+
+# npm / Electron (Hub installs these locally — never commit)
 node_modules/
+**/node_modules/
 dread-client-app/node_modules/
+dread-client-app/dist/
+dread-client-app/out/
+dread-client-app/release/
+dread-client-app/.vite/
+.vite/
+.cache/
+
+# Hub Setup Wizard portable Node/Python — must live under Archipelago's
+# custom_worlds/, NOT inside this world repo. Nesting them here bloated
+# packs to ~7k files / ~80MB+ (node.exe, CPython, .pdbs, site-packages).
+custom_worlds/
+**/_metroid_bread_runtime/
+**/_metroid_dread_runtime/
+**/tools/node-*/
+**/tools/python-*/
+*.pdb
+
+# Local runtime configs / logs / outputs
 *.log
 logs/
 output/
-.DS_Store
 dread_client_ui_config.json
 dread_direct_patch_config.json
-_metroid_dread_venv/
-.venv/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Large binary artifacts that are rebuilt locally (keep intentional assets tracked)
+# icons.bctex / PNGs under assets/ ARE tracked on purpose.

@@ -134,50 +134,35 @@
     "itorash",
   ];
 
-  const DOOR_WEAKNESSES = [
+  // Align with Options.py valid_keys (RDV change_from / basic change_to).
+  // Never offer Sensor / Phase Shift / blast as Change Doors To targets.
+  const DOORS_TO_CHANGE_KEYS = [
     "Access Open",
-    "Access Permanently Closed",
-    "Bomb Door",
     "Charge Beam Door",
-    "Cross Bomb Door",
-    "Diffusion Beam Door",
     "Grapple Beam Door",
-    "Ice Missile Door",
     "Missile Door",
-    "Phase Shift Door",
     "Plasma Beam Door",
     "Power Beam Door",
-    "Power Bomb Door",
     "Sensor Lock Door",
-    "Storm Missile Door",
     "Super Missile Door",
     "Wave Beam Door",
     "Wide Beam Door",
   ];
 
-  const DEFAULT_DOORS_TO_CHANGE = new Set([
-    "Access Open",
+  const CHANGE_DOORS_TO_KEYS = [
     "Charge Beam Door",
     "Grapple Beam Door",
     "Missile Door",
     "Plasma Beam Door",
     "Power Beam Door",
-    "Sensor Lock Door",
     "Super Missile Door",
     "Wave Beam Door",
     "Wide Beam Door",
-  ]);
+  ];
 
-  const DEFAULT_CHANGE_DOORS_TO = new Set([
-    "Charge Beam Door",
-    "Grapple Beam Door",
-    "Missile Door",
-    "Plasma Beam Door",
-    "Power Beam Door",
-    "Super Missile Door",
-    "Wave Beam Door",
-    "Wide Beam Door",
-  ]);
+  const DEFAULT_DOORS_TO_CHANGE = new Set(DOORS_TO_CHANGE_KEYS);
+
+  const DEFAULT_CHANGE_DOORS_TO = new Set(CHANGE_DOORS_TO_KEYS);
 
   // RDV LayoutTrickLevel names + per-trick used levels from Dread header.json.
   const TRICK_LEVEL_LABEL = {
@@ -245,8 +230,10 @@
     unsubStatus: null,
     unsubPatchLog: null,
     unsubPatchProgress: null,
-    // Last loaded / saved Metroid Dread YAML block (preserves unknown keys).
+    // Last loaded / saved Metroid Bread YAML block (preserves unknown keys).
     yamlLoadedDread: null,
+    // Hub Log: false = hide @@APLOG@@debug@@ / .log-debug lines (default).
+    debugLogs: false,
   };
 
   const ANSI_RE = /\u001b\[[0-9;]*m/g;
@@ -359,10 +346,23 @@
     el.scrollTop = el.scrollHeight;
   }
 
-  function appendPlainLine(text, target) {
+  function applyDebugLogsPreference(enabled) {
+    state.debugLogs = Boolean(enabled);
+    const logEl = $("log");
+    if (logEl) {
+      logEl.classList.toggle("show-debug", state.debugLogs);
+    }
+    const toggle = $("debug-logs");
+    if (toggle) {
+      toggle.checked = state.debugLogs;
+    }
+  }
+
+  function appendPlainLine(text, target, level) {
     const el = target || $("log");
     const cleaned = String(text || "").replace(ANSI_RE, "");
     if (!cleaned) return;
+    const isDebug = level === "debug";
     if (el.tagName === "PRE") {
       el.textContent += cleaned;
       scrollLog(el);
@@ -373,7 +373,7 @@
       const part = parts[i];
       if (part === "" && i === parts.length - 1) continue;
       const line = document.createElement("div");
-      line.className = "log-line";
+      line.className = isDebug ? "log-line log-debug" : "log-line";
       line.textContent = part;
       el.appendChild(line);
     }
@@ -395,7 +395,9 @@
       return;
     }
     const text = payload.text || "";
-    appendPlainLine(text);
+    const level = payload.level === "debug" ? "debug" : "normal";
+    appendPlainLine(text, null, level);
+    // Volume modal still ingests AP_VOL even when Debug logs is off.
     ingestVolumeLog(text);
   }
 
@@ -610,8 +612,8 @@
       });
       appendSelect(doors, "transport_rando", "Transport Randomizer", TRANSPORT);
     }
-    appendOptionSet($("yaml-doors-to-change"), "doors_to_change", DOOR_WEAKNESSES, DEFAULT_DOORS_TO_CHANGE);
-    appendOptionSet($("yaml-change-doors-to"), "change_doors_to", DOOR_WEAKNESSES, DEFAULT_CHANGE_DOORS_TO);
+    appendOptionSet($("yaml-doors-to-change"), "doors_to_change", DOORS_TO_CHANGE_KEYS, DEFAULT_DOORS_TO_CHANGE);
+    appendOptionSet($("yaml-change-doors-to"), "change_doors_to", CHANGE_DOORS_TO_KEYS, DEFAULT_CHANGE_DOORS_TO);
 
     const syncDoorSets = () => {
       const on = $("yaml-door-lock")?.value === "individual_doors";
@@ -792,7 +794,7 @@
   }
 
   function applyYamlToForm(config) {
-    const dread = (config && config["Metroid Dread"]) || {};
+    const dread = (config && config["Metroid Bread"]) || {};
     $("yaml-name").value = config.name || "DreadPlayer";
 
     // Migrate legacy Hub DNA keys → required_dna.
@@ -886,9 +888,9 @@
     state.yamlLoadedDread = { ...dread };
     return {
       name: $("yaml-name").value.trim() || "DreadPlayer",
-      game: "Metroid Dread",
-      description: "Metroid Dread player options",
-      "Metroid Dread": dread,
+      game: "Metroid Bread",
+      description: "Metroid Bread player options",
+      "Metroid Bread": dread,
     };
   }
 
@@ -1064,8 +1066,8 @@
   async function onApConnected(st) {
     if (state.waitingServerSpoiler) return;
     const game = st.game || "";
-    if (game && game !== "Metroid Dread") {
-      setConnectStatus(`Slot is "${game}", not Metroid Dread.`, true);
+    if (game && game !== "Metroid Bread") {
+      setConnectStatus(`Slot is "${game}", not Metroid Bread.`, true);
       appendPlainLine(`[app] Rejected slot — game is ${game}`);
       await hub.stopClient();
       state.connecting = false;
@@ -1640,11 +1642,11 @@
     }
     if (result.ryujinx) $("ryujinx-path").value = result.ryujinx;
     if (result.rom) $("dread-rom").value = result.rom;
-    const waitSec = Math.round((result.connectDelayMs || 30000) / 1000);
+    const waitSec = Math.round((result.connectDelayMs || 3000) / 1000);
     appendPlainLine(
       `[app] Launched Ryujinx with ${result.rom}\n` +
-        `      Waiting ${waitSec}s for the game to boot, then connecting Remote Lua…\n` +
-        `      Tip: stay on the title screen or fully in-game — avoid connecting mid-load.`
+        `      After ${waitSec}s the client waits passively until RemoteLua (:6969) accepts.\n` +
+        `      Tip: stay on the title screen or fully in-game — avoid mid-load if grants stall.`
     );
   });
 
@@ -1662,6 +1664,26 @@
   });
   $("btn-clear-log").addEventListener("click", () => {
     $("log").textContent = "";
+  });
+  $("debug-logs").addEventListener("change", () => {
+    applyDebugLogsPreference($("debug-logs").checked);
+    hub.saveConfig({ debug_logs: state.debugLogs }).catch(() => {});
+  });
+  $("btn-open-logs").addEventListener("click", async () => {
+    const result = await hub.openLogsFolder();
+    if (!result || !result.ok) {
+      appendPlainLine(
+        `[app] Could not open logs folder: ${(result && result.error) || "unknown"}`
+      );
+    }
+  });
+  $("btn-check-updates").addEventListener("click", async () => {
+    appendPlainLine("[app] Checking for apworld updates…");
+    try {
+      await hub.promptApworldUpdate({ interactiveIfCurrent: true });
+    } catch (err) {
+      appendPlainLine(`[app] Update check failed: ${err && err.message ? err.message : err}`);
+    }
   });
   $("cmd-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1687,6 +1709,7 @@
     $("freesink").checked = cfg.freesink !== false;
     $("ryujinx-path").value = cfg.ryujinx_path || "";
     $("dread-rom").value = cfg.dread_rom_path || "";
+    applyDebugLogsPreference(Boolean(cfg.debug_logs));
     if (cfg.room_id) state.roomId = cfg.room_id;
 
     // Launcher may leave a full archipelago:// URI in the server field.

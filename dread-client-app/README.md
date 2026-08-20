@@ -1,6 +1,6 @@
-# Dread Client Hub
+# Metroid Bread Client Hub
 
-One app for Metroid Dread Archipelago: **YAML Editor** + **Client** (connect → patch → play).
+One app for Metroid Bread Archipelago: **YAML Editor** + **Client** (connect → patch → play).
 
 ## Install (recommended)
 
@@ -10,10 +10,10 @@ The installer can:
 
 - Install / update npm dependencies
 - Create a **Desktop** shortcut
-- Add the app to the **Start Menu** (`Programs → Dread Client Hub`)
+- Add the app to the **Start Menu** (`Programs → Metroid Bread Client Hub`)
 - Optionally launch the hub when finished
 
-Uninstall shortcuts anytime from **Start Menu → Dread Client Hub → Uninstall Dread Client Hub**, or:
+Uninstall shortcuts anytime from **Start Menu → Metroid Bread Client Hub → Uninstall Metroid Bread Client Hub**, or:
 
 ```bat
 powershell -NoProfile -ExecutionPolicy Bypass -File dread-client-app\Install_Dread_Client_Hub.ps1 -Uninstall
@@ -36,19 +36,21 @@ Or double-click either:
 
 First run installs npm deps (Electron + adm-zip) if needed.
 
+If Node/npm are missing when launching from the Archipelago Launcher, the **Hub Setup Wizard** can install portable **Node 24** and **Python 3.12** under `_metroid_bread_runtime/tools/`, repair Electron, or open the Kivy client via **Just open Kivy version**.
+
 ## Menu
 
 Use **Menu** in the top-right:
 
 | Section | Purpose |
 |---------|---------|
-| **YAML Editor** | Edit common Metroid Dread player options and save a YAML into `Players/` |
+| **YAML Editor** | Edit common Metroid Bread player options and save a YAML into `Players/` |
 | **Client** | Connect → patch → play flow |
 
 ## Client flow
 
 1. **Connect** — server address, optional password, slot name → **Connect**
-2. On success the hub checks the slot is **Metroid Dread**, then **asks the Archipelago server** for your placements (`LocationScouts`) and builds seed data automatically — no local AP zip / spoiler import
+2. On success the hub checks the slot is **Metroid Bread**, then **asks the Archipelago server** for your placements (`LocationScouts`) and builds seed data automatically — no local AP zip / spoiler import
 3. **Patch** — set source path (`md rando` decompiled RomFS), Ryujinx mod output, hit **Patch!**
 4. **Play** — status, chat, DeathLink, Map Tracker, and **Launch Ryujinx + Play**
 

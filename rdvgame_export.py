@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Convert an Archipelago Metroid Dread spoiler.txt into a Randovania .rdvgame file.
+Convert an Archipelago Metroid Bread spoiler.txt into a Randovania .rdvgame file.
 
 Features
 --------
@@ -541,7 +541,7 @@ def apply_placements(template_data, placements, our_player_slot=1, require_full_
     
     # Archipelago multiworld still exports a *solo* Dread .rdvgame.
     # Randovania only allows Export Game from Game Details when world_count == 1
-    # (frozen builds). Cross-game sync is handled by MetroidDreadClient, not RDV.
+    # (frozen builds). Cross-game sync is handled by MetroidBreadClient, not RDV.
     if is_mw:
         print("[INFO] Archipelago multiworld detected")
         print("[INFO] Exporting solo Dread .rdvgame (foreign items as Nothing)")
@@ -860,7 +860,7 @@ def extract_from_ap_output(ap_output_folder: str, player_name: str, player_slot:
     
     # Find template file
     if template_path is None:
-        # Look for template in the Metroid Dread world directory
+        # Look for template in the Metroid Bread world directory
         script_dir = Path(__file__).parent
         template_path = script_dir / "dread_template.rdvgame"
         
@@ -970,7 +970,7 @@ def print_remote_lua_export_reminder():
 def main():
 
     parser = argparse.ArgumentParser(
-        description="Convert Archipelago Metroid Dread spoiler to .rdvgame file (with multiworld support)"
+        description="Convert Archipelago Metroid Bread spoiler to .rdvgame file (with multiworld support)"
     )
 
     parser.add_argument("--template", help="Path to template .rdvgame file")

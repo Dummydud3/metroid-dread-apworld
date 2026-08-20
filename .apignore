@@ -21,10 +21,19 @@ logs/
 .cache/
 
 # Linux Hub client virtualenv (created at runtime; never ship)
-_metroid_dread_venv/
-**/_metroid_dread_venv/
+_metroid_bread_venv/
+**/_metroid_bread_venv/
 .venv/
 **/.venv/
+
+# Hub Setup Wizard portable Node/Python — must live under Archipelago
+# custom_worlds/, NOT inside the world package. A nested copy here bloated
+# the apworld to ~84MB (node.exe + CPython + .pdbs). Target ~2.5MB.
+custom_worlds/
+**/_metroid_bread_runtime/
+**/tools/node-*/
+**/tools/python-*/
+*.pdb
 
 # Electron / frontend build artifacts (if produced locally)
 dread-client-app/dist/

@@ -63,7 +63,7 @@ def main() -> int:
             {
                 "version": 1,
                 "comment": (
-                    "Vanilla Metroid Dread minimap categories. `items` drives ODR's "
+                    "Vanilla Metroid Bread minimap categories. `items` drives ODR's "
                     "ItemCustom{n} numbering: a pickup whose map actor is absent from "
                     "its scenario's `items` list gets no custom icon."
                 ),

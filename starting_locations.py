@@ -1,5 +1,5 @@
 """
-Valid Metroid Dread starting locations (Randovania valid_starting_location).
+Valid Metroid Bread starting locations (Randovania valid_starting_location).
 
 Default spawn is Artaria Intro Room Start Point (StartPoint0).
 Random mode picks among all RDV-valid starts (save/map/nav platforms + intro).

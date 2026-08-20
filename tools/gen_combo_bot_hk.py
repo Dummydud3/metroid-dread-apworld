@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Sweep Metroid Dread on/off generation options in a 2-player multiworld
-(Metroid Dread + Hollow Knight) and log pass/fail.
+Sweep Metroid Bread on/off generation options in a 2-player multiworld
+(Metroid Bread + Hollow Knight) and log pass/fail.
 
 Same 11 Dread axes as gen_combo_bot.py. Hollow Knight options stay fixed
 at safe defaults. Solo-only cosmetics / pulse radar are not swept.
 
 Usage (from Archipelago repo root):
-  py -3.11 worlds/metroid_dread/tools/gen_combo_bot_hk.py --quiet
-  py -3.11 worlds/metroid_dread/tools/gen_combo_bot_hk.py --quiet --resume
-  py -3.11 worlds/metroid_dread/tools/gen_combo_bot_hk.py --limit 4 --seed 1
+  py -3.11 worlds/metroid_bread/tools/gen_combo_bot_hk.py --quiet
+  py -3.11 worlds/metroid_bread/tools/gen_combo_bot_hk.py --quiet --resume
+  py -3.11 worlds/metroid_bread/tools/gen_combo_bot_hk.py --limit 4 --seed 1
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ from gen_combo_bot import (  # noqa: E402
     load_done_indices,
 )
 
-DREAD_GAME = "Metroid Dread"
+DREAD_GAME = "Metroid Bread"
 HK_GAME = "Hollow Knight"
 
 _AP: dict[str, Any] | None = None

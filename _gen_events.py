@@ -2,7 +2,7 @@
 Regenerate Events.py from logic_database.
 
 Usage (from Archipelago-main):
-  py -3.11 -m worlds.metroid_dread._gen_events
+  py -3.11 -m worlds.metroid_bread._gen_events
 """
 
 from pathlib import Path
@@ -35,9 +35,9 @@ def main():
 
     lines = [
         '"""',
-        "Metroid Dread event items and locked event locations",
+        "Metroid Bread event items and locked event locations",
         "AUTO-GENERATED from logic_database — do not hand-edit.",
-        "Regenerate: python -m worlds.metroid_dread._gen_events",
+        "Regenerate: python -m worlds.metroid_bread._gen_events",
         '"""',
         "",
         "from typing import Dict, List, NamedTuple, Tuple",

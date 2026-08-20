@@ -2,11 +2,12 @@
 Unit tests for ensure_client_deps (no network / no real pip install).
 
 Run:
-  py -3.12 -m worlds.metroid_dread.test_ensure_client_deps
+  py -3.12 -m worlds.metroid_bread.test_ensure_client_deps
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -17,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from worlds.metroid_dread import ensure_client_deps as ecd  # noqa: E402
+from worlds.metroid_bread import ensure_client_deps as ecd  # noqa: E402
 
 
 class MessageTests(unittest.TestCase):
@@ -38,7 +39,21 @@ class MessageTests(unittest.TestCase):
             self.assertIn("py -3.12 -m pip install -r", msg)
             self.assertIn("requirements-client.txt", msg)
             self.assertIn("python.org", msg)
+            self.assertIn("ensurepip", msg)
             self.assertIn("boom", msg)
+
+    def test_pip_missing_detail_shows_ensurepip_hints(self):
+        msg = ecd.pip_failure_message(
+            ["py", "-3.12"],
+            detail="No module named pip",
+        )
+        self.assertIn("ensurepip --upgrade", msg)
+        self.assertIn("No module named pip", msg)
+        # pip-missing path should not bury the user in "reinstall Python" first.
+        self.assertTrue(
+            msg.index("ensurepip") < msg.index("pip output:"),
+            msg,
+        )
 
 
 class EnsureLogicTests(unittest.TestCase):
@@ -65,6 +80,34 @@ class EnsureLogicTests(unittest.TestCase):
         self.assertEqual(code, ecd.EXIT_OK)
         install.assert_called_once()
         self.assertIn("websockets", msg)
+
+    def test_ensure_pip_skipped_when_available(self):
+        with mock.patch.object(ecd, "pip_available", return_value=True):
+            with mock.patch.object(ecd, "subprocess") as sp:
+                ok, detail = ecd.ensure_pip(["py", "-3.12"], log=lambda _m: None)
+        self.assertTrue(ok)
+        self.assertEqual(detail, "")
+        sp.run.assert_not_called()
+
+    def test_install_packages_bootstraps_pip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            world = Path(tmp)
+            (world / "requirements-client.txt").write_text("websockets>=13\n", encoding="utf-8")
+            fake_proc = mock.Mock(returncode=0, stdout="ok", stderr="")
+            with mock.patch.object(ecd, "pip_available", return_value=False):
+                with mock.patch.object(
+                    ecd, "ensure_pip", return_value=(True, "bootstrapped")
+                ) as boot:
+                    with mock.patch.object(
+                        ecd.subprocess, "run", return_value=fake_proc
+                    ) as run:
+                        ok, _detail = ecd._install_packages(
+                            ["py", "-3.12"], world=world, log=lambda _m: None
+                        )
+            self.assertTrue(ok)
+            boot.assert_called_once()
+            run.assert_called_once()
+            self.assertIn("pip", run.call_args[0][0])
 
     def test_python_missing_exit_code(self):
         with mock.patch.object(
@@ -140,6 +183,29 @@ class EnsureLogicTests(unittest.TestCase):
         self.assertIn(ecd.VENV_DIRNAME, msg)
         self.assertIn("not systemwide", msg)
         self.assertIn("nope", msg)
+
+
+class ManagedPythonTests(unittest.TestCase):
+    def test_find_base_python_prefers_dread_hub_python_env(self):
+        with mock.patch.dict(os.environ, {"DREAD_HUB_PYTHON": r"C:\managed\python.exe"}):
+            with mock.patch.object(ecd, "_probe", return_value=True) as probe:
+                with mock.patch.object(
+                    ecd, "_managed_python_cmd", wraps=ecd._managed_python_cmd
+                ):
+                    # Force env path through _managed_python_cmd
+                    cmd = ecd._managed_python_cmd()
+        self.assertEqual(cmd, [r"C:\managed\python.exe"])
+        probe.assert_called()
+
+    def test_find_client_python_uses_managed_on_windows(self):
+        with mock.patch.object(ecd, "uses_linux_venv", return_value=False):
+            with mock.patch.object(
+                ecd, "_managed_python_cmd", return_value=[r"C:\tools\python-3.12\python.exe"]
+            ):
+                with mock.patch.object(ecd, "find_base_python") as base:
+                    out = ecd.find_client_python()
+        self.assertEqual(out, [r"C:\tools\python-3.12\python.exe"])
+        base.assert_not_called()
 
 
 def main() -> None:

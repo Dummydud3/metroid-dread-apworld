@@ -1,7 +1,7 @@
 """
 Tracker must not auto-grant Quiet Robe / ElunReleaseX until confirmed.
 
-Run: py -3.11 -m worlds.metroid_dread.test_tracker_gate_events
+Run: py -3.11 -m worlds.metroid_bread.test_tracker_gate_events
 (from Archipelago-main root)
 """
 
@@ -26,9 +26,9 @@ class _FakeWorld:
 class TestTrackerGateEvents(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from worlds.metroid_dread.dread_logic import DreadLogic, ITEM_SHORT_TO_AP
-        from worlds.metroid_dread.Events import EVENT_RESOURCE_TO_ITEM
-        from worlds.metroid_dread.tracker_gate_events import (
+        from worlds.metroid_bread.dread_logic import DreadLogic, ITEM_SHORT_TO_AP
+        from worlds.metroid_bread.Events import EVENT_RESOURCE_TO_ITEM
+        from worlds.metroid_bread.tracker_gate_events import (
             ELUN_RELEASE_X_EVENT,
             QUIET_ROBE_EVENT,
             TRACKER_EXCLUDE_AUTO_EVENTS,

@@ -12,7 +12,7 @@ import zipfile
 from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple
 
-logger = logging.getLogger("MetroidDread.HubLauncher")
+logger = logging.getLogger("MetroidBread.HubLauncher")
 
 ELECTRON_REINSTALL_MARKERS = (
     "Electron failed to install correctly",
@@ -22,22 +22,29 @@ ELECTRON_REINSTALL_MARKERS = (
 
 HUB_DIR_NAME = "dread-client-app"
 CONFIG_NAME = "dread_client_ui_config.json"
-CLIENT_SCRIPT_NAME = "MetroidDreadClient.py"
+CLIENT_SCRIPT_NAME = "MetroidBreadClient.py"
 # When the world is loaded from a .apworld zip, Hub assets are not real files.
 # Extract under custom_worlds so npm/Electron can run from a writable tree.
 # Leading underscore: Archipelago skips "_*" entries under custom_worlds as worlds.
-RUNTIME_WORLD_DIRNAME = "_metroid_dread_runtime"
+RUNTIME_WORLD_DIRNAME = "_metroid_bread_runtime"
 APWORLD_STAMP_NAME = ".apworld_hub_source"
 # Bump when extract layout changes so stale runtime trees are refreshed.
-APWORLD_EXTRACT_LAYOUT = "world-pkg-v11"
-WORLD_ZIP_PREFIX = "metroid_dread/"
-HUB_ZIP_PREFIX = "metroid_dread/dread-client-app/"
+APWORLD_EXTRACT_LAYOUT = "world-pkg-v14"
+# Electron 33 install.js → extract-zip stalls / silently incomplete on Node 26.x
+# (and historically some 24.16+ builds). Refuse majors ≥25; recommend managed Node 24.
+ELECTRON_UNSUPPORTED_NODE_MAJOR = 25
+NODE_MIN_MAJOR = 18
+NODE_LTS_RECOMMENDED = "24"
+MANAGED_NODE_DIRNAME = "node-v24"
+MANAGED_PYTHON_DIRNAME = "python-3.12"
+WORLD_ZIP_PREFIX = "metroid_bread/"
+HUB_ZIP_PREFIX = "metroid_bread/dread-client-app/"
 # Paths inside the apworld that must never be extracted (bloat / not usable from zip).
 _EXTRACT_SKIP_PREFIXES = (
-    "metroid_dread/dread-client-app/node_modules/",
-    "metroid_dread/node_modules/",
-    "metroid_dread/.git/",
-    "metroid_dread/dread-client-app/.git/",
+    "metroid_bread/dread-client-app/node_modules/",
+    "metroid_bread/node_modules/",
+    "metroid_bread/.git/",
+    "metroid_bread/dread-client-app/.git/",
 )
 _EXTRACT_SKIP_PARTS = ("/__pycache__/", "/.pytest_cache/", "/.mypy_cache/")
 
@@ -100,21 +107,191 @@ def hub_deps_installed(hub_dir: Path) -> bool:
     return (hub / "node_modules").is_dir() and (hub / "package.json").is_file()
 
 
+def managed_tools_dir() -> Path:
+    """Writable tools root under ``_metroid_bread_runtime/tools``."""
+    return runtime_world_dir() / "tools"
+
+
+def managed_node_dir() -> Path:
+    return managed_tools_dir() / MANAGED_NODE_DIRNAME
+
+
+def managed_python_dir() -> Path:
+    return managed_tools_dir() / MANAGED_PYTHON_DIRNAME
+
+
+def managed_node_executable() -> Optional[Path]:
+    """Path to portable Node under tools/node-v24, if present."""
+    try:
+        from ensure_portable_node import find_node_in_dir
+    except ImportError:
+        try:
+            from worlds.metroid_bread.ensure_portable_node import find_node_in_dir
+        except ImportError:
+            return None
+    return find_node_in_dir(managed_node_dir())
+
+
+def managed_npm_executable() -> Optional[Path]:
+    try:
+        from ensure_portable_node import find_npm_in_dir
+    except ImportError:
+        try:
+            from worlds.metroid_bread.ensure_portable_node import find_npm_in_dir
+        except ImportError:
+            return None
+    return find_npm_in_dir(managed_node_dir())
+
+
+def managed_python_cmd() -> Optional[list]:
+    """Command list for managed CPython 3.12 under tools/python-3.12."""
+    try:
+        from ensure_portable_python import managed_python_cmd_from_dir
+    except ImportError:
+        try:
+            from worlds.metroid_bread.ensure_portable_python import (
+                managed_python_cmd_from_dir,
+            )
+        except ImportError:
+            return None
+    return managed_python_cmd_from_dir(managed_python_dir())
+
+
+def node_major_usable(major: Optional[int]) -> bool:
+    """True when major is Hub-compatible (18–24 inclusive)."""
+    if major is None:
+        return False
+    return NODE_MIN_MAJOR <= major < ELECTRON_UNSUPPORTED_NODE_MAJOR
+
+
+def prepend_managed_node_path(env: Optional[MutableMapping[str, str]] = None) -> dict:
+    """Prepend managed Node's directory to PATH when the binary exists."""
+    merged = dict(env or os.environ)
+    node = managed_node_executable()
+    if not node:
+        return merged
+    bindir = str(node.parent)
+    path = merged.get("PATH", "")
+    parts = path.split(os.pathsep) if path else []
+    if bindir not in parts:
+        merged["PATH"] = bindir + (os.pathsep + path if path else "")
+    return merged
+
+
 def find_npm() -> Optional[str]:
-    """Locate npm (npm.cmd / npm.exe on Windows)."""
-    for name in ("npm", "npm.cmd", "npm.exe"):
+    """Locate npm (prefer managed Node, then npm.cmd / npm.exe on Windows; never npm.ps1)."""
+    managed = managed_npm_executable()
+    if managed is not None:
+        node = managed_node_executable()
+        major = node_major_version(str(node)) if node else None
+        if node_major_usable(major) or major is None:
+            return str(managed)
+
+    # On Windows, bare `npm` can resolve to npm.ps1 when .PS1 is in PATHEXT.
+    # PowerShell then fails under Restricted execution policy; CreateProcess
+    # cannot run .ps1 either. Prefer the cmd shim Node ships.
+    if os.name == "nt":
+        candidates = ("npm.cmd", "npm.exe", "npm")
+    else:
+        candidates = ("npm",)
+    for name in candidates:
         found = shutil.which(name)
-        if found:
+        if found and not str(found).lower().endswith(".ps1"):
             return found
     return None
 
 
 def find_node() -> Optional[str]:
+    """Locate node; prefer managed portable Node 24 when usable."""
+    managed = managed_node_executable()
+    managed_major = node_major_version(str(managed)) if managed else None
+    if managed and node_major_usable(managed_major):
+        return str(managed)
+
+    system: Optional[str] = None
     for name in ("node", "node.exe"):
         found = shutil.which(name)
         if found:
-            return found
+            system = found
+            break
+
+    if system:
+        sys_major = node_major_version(system)
+        # System Node ≥25 cannot drive Electron install; prefer managed even if
+        # its version probe failed, so the wizard/repair can still use it.
+        if (
+            sys_major is not None
+            and sys_major >= ELECTRON_UNSUPPORTED_NODE_MAJOR
+            and managed is not None
+        ):
+            return str(managed)
+        return system
+
+    if managed is not None:
+        return str(managed)
     return None
+
+
+def node_major_version(node: Optional[str] = None) -> Optional[int]:
+    """Return the major version of ``node``, or None if unknown / unavailable."""
+    if node:
+        exe = node
+    else:
+        # Prefer an explicit path without re-entering find_node preference logic.
+        managed = managed_node_executable()
+        exe = str(managed) if managed else None
+        if not exe:
+            for name in ("node", "node.exe"):
+                found = shutil.which(name)
+                if found:
+                    exe = found
+                    break
+    if not exe:
+        return None
+    try:
+        proc = subprocess.run(
+            [exe, "-p", "process.versions.node.split('.')[0]"],
+            capture_output=True,
+            text=True,
+            shell=False,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    raw = (proc.stdout or "").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def node_electron_compat_message(major: Optional[int]) -> Optional[str]:
+    """
+    User-facing message when Node is too new for Electron 33's install.js.
+
+    Returns None when the version is acceptable or unknown.
+    """
+    if major is None or major < ELECTRON_UNSUPPORTED_NODE_MAJOR:
+        return None
+    return (
+        f"Node.js {major} is not supported for the Metroid Bread Client Hub.\n"
+        "Electron binary download fails on Node 26.x "
+        "(extract-zip silently leaves path.txt missing).\n"
+        f"Use the Hub Setup Wizard to install managed Node.js {NODE_LTS_RECOMMENDED}, "
+        f"or install Node.js {NODE_LTS_RECOMMENDED} from https://nodejs.org/dist/latest-v24.x/, "
+        "delete node_modules (or at least node_modules/electron), then "
+        "run: npm install --no-ignore-scripts"
+    )
+
+
+def ensure_node_supports_electron() -> None:
+    """Raise RuntimeError when Node major is known-broken for Electron install."""
+    major = node_major_version()
+    msg = node_electron_compat_message(major)
+    if msg:
+        raise RuntimeError(msg)
 
 
 def world_package_dir() -> Path:
@@ -168,7 +345,7 @@ def _should_skip_apworld_member(name: str) -> bool:
 
 
 def runtime_tree_ready(dest_world: Path) -> bool:
-    """True when extracted runtime has Hub + MetroidDreadClient.py (Hub's WORLD_DIR layout)."""
+    """True when extracted runtime has Hub + MetroidBreadClient.py (Hub's WORLD_DIR layout)."""
     dest_hub = dest_world / HUB_DIR_NAME
     return (
         (dest_hub / "package.json").is_file()
@@ -185,7 +362,7 @@ def _extract_apworld_members(
     include_hub: bool,
     skip_existing_configs: bool = True,
 ) -> int:
-    """Extract metroid_dread/* members into dest_world. Returns file count."""
+    """Extract metroid_bread/* members into dest_world. Returns file count."""
     preserved = set()
     if skip_existing_configs:
         for cfg_name in (CONFIG_NAME, "dread_direct_patch_config.json"):
@@ -219,10 +396,10 @@ def _extract_apworld_members(
 
 def materialize_hub_from_apworld(apworld: Path, dest_world: Path) -> Path:
     """
-    Extract the metroid_dread world package from the apworld into dest_world.
+    Extract the metroid_bread world package from the apworld into dest_world.
 
-    Layout matches source worlds/metroid_dread/:
-      dest_world/MetroidDreadClient.py
+    Layout matches source worlds/metroid_bread/:
+      dest_world/MetroidBreadClient.py
       dest_world/dread_direct_patch.py
       dest_world/dread-client-app/{package.json,main.js,...}
 
@@ -244,7 +421,7 @@ def materialize_hub_from_apworld(apworld: Path, dest_world: Path) -> Path:
     client_ok = (dest_world / CLIENT_SCRIPT_NAME).is_file()
 
     # Fast path: Hub already on disk (possibly with locked node_modules) but the
-    # older hub-only extract omitted MetroidDreadClient.py — fill world files only.
+    # older hub-only extract omitted MetroidBreadClient.py — fill world files only.
     if hub_ok and not client_ok:
         logger.info(
             "Completing runtime world files from %s → %s (Hub already present)",
@@ -263,7 +440,7 @@ def materialize_hub_from_apworld(apworld: Path, dest_world: Path) -> Path:
         return dest_hub
 
     logger.info(
-        "Extracting Metroid Dread world+Hub from %s → %s", apworld, dest_world
+        "Extracting Metroid Bread world+Hub from %s → %s", apworld, dest_world
     )
 
     # Park node_modules so a refresh does not force a full reinstall.
@@ -287,7 +464,7 @@ def materialize_hub_from_apworld(apworld: Path, dest_world: Path) -> Path:
             if not runtime_tree_ready(dest_world):
                 raise FileNotFoundError(
                     f"Could not refresh Hub (node_modules locked) and runtime is incomplete "
-                    f"at {dest_world} (extracted {extracted} files). Close Dread Client Hub "
+                    f"at {dest_world} (extracted {extracted} files). Close Metroid Bread Client Hub "
                     f"and retry."
                 ) from exc
             stamp_path.write_text(stamp, encoding="utf-8")
@@ -321,7 +498,7 @@ def materialize_hub_from_apworld(apworld: Path, dest_world: Path) -> Path:
         raise FileNotFoundError(
             f"apworld {apworld} is missing Hub and/or {CLIENT_SCRIPT_NAME} "
             f"(extracted {extracted} files into {dest_world}). "
-            f"Rebuild/reinstall metroid_dread.apworld with client + dread-client-app sources."
+            f"Rebuild/reinstall metroid_bread.apworld with client + dread-client-app sources."
         )
 
     if parked_modules and parked_modules.is_dir():
@@ -365,7 +542,7 @@ def candidate_hub_parents(extra: Optional[Iterable[Path]] = None) -> list[Path]:
     """
     Folders that may directly contain dread-client-app/.
 
-    Preferred: worlds/metroid_dread (colocated). Also accept legacy AP-root
+    Preferred: worlds/metroid_bread (colocated). Also accept legacy AP-root
     layout and portable DreadClient packages for one release cycle.
     """
     roots: list[Path] = []
@@ -391,7 +568,7 @@ def candidate_hub_parents(extra: Optional[Iterable[Path]] = None) -> list[Path]:
     add(runtime_world_dir())
 
     world = world_package_dir()
-    add(world)  # canonical: worlds/metroid_dread/dread-client-app
+    add(world)  # canonical: worlds/metroid_bread/dread-client-app
     add(Path.cwd())
     add(world.parents[1])  # Archipelago / portable root (legacy hub location)
     add(world.parent)  # worlds/ (custom apworld extract)
@@ -399,7 +576,7 @@ def candidate_hub_parents(extra: Optional[Iterable[Path]] = None) -> list[Path]:
     try:
         from Utils import local_path
         add(Path(local_path()))
-        add(Path(local_path()) / "worlds" / "metroid_dread")
+        add(Path(local_path()) / "worlds" / "metroid_bread")
         add(Path(local_path()) / "custom_worlds" / RUNTIME_WORLD_DIRNAME)
     except Exception:
         pass
@@ -413,9 +590,9 @@ def candidate_hub_parents(extra: Optional[Iterable[Path]] = None) -> list[Path]:
     # Portable dist next to this tree, or common build outputs.
     here = Path(__file__).resolve()
     for parent in here.parents:
-        add(parent / "build" / "dread_dist" / "DreadClient_fresh" / "worlds" / "metroid_dread")
+        add(parent / "build" / "dread_dist" / "DreadClient_fresh" / "worlds" / "metroid_bread")
         add(parent / "build" / "dread_dist" / "DreadClient_fresh")
-        add(parent / "build" / "dread_dist" / "DreadClient" / "worlds" / "metroid_dread")
+        add(parent / "build" / "dread_dist" / "DreadClient" / "worlds" / "metroid_bread")
         add(parent / "build" / "dread_dist" / "DreadClient")
         add(parent)
 
@@ -435,8 +612,8 @@ def _hub_at(root: Path) -> Optional[Path]:
         resolved_root = root
     for hub in (
         resolved_root / HUB_DIR_NAME,
-        resolved_root / "metroid_dread" / HUB_DIR_NAME,
-        resolved_root / "worlds" / "metroid_dread" / HUB_DIR_NAME,
+        resolved_root / "metroid_bread" / HUB_DIR_NAME,
+        resolved_root / "worlds" / "metroid_bread" / HUB_DIR_NAME,
     ):
         if (hub / "package.json").is_file() and (hub / "main.js").is_file():
             return hub.resolve()
@@ -473,8 +650,8 @@ def find_ap_root_for_hub(hub_dir: Path) -> Path:
     """
     Archipelago import root (contains CommonClient.py + Options.py).
 
-    Hub itself lives under worlds/metroid_dread/; climb until a real filesystem root
-    is found. Runtime extracts under custom_worlds/_metroid_dread_runtime fall back
+    Hub itself lives under worlds/metroid_bread/; climb until a real filesystem root
+    is found. Runtime extracts under custom_worlds/_metroid_bread_runtime fall back
     to the bundled ``ap_core/`` when the nearby install is frozen-only.
     """
     world = find_world_dir_for_hub(hub_dir)
@@ -525,7 +702,7 @@ def find_ap_root_for_hub(hub_dir: Path) -> Path:
     except Exception:
         pass
 
-    # Fallback: conventional worlds/metroid_dread → repo root
+    # Fallback: conventional worlds/metroid_bread → repo root
     return world.parents[1] if len(world.parents) >= 2 else world
 
 
@@ -587,7 +764,7 @@ def parse_launcher_connect_args(args: Sequence[str]) -> dict:
     Extract connect info from Archipelago Launcher passthrough args.
 
     Supports:
-      archipelago://slot:pass@host:port?game=Metroid%20Dread&room=...
+      archipelago://slot:pass@host:port?game=Metroid%20Bread&room=...
       --connect host:port --name slot --password pass --dread-ip ip
     """
     info: dict = {
@@ -705,7 +882,7 @@ def hub_env_from_connect(
     *,
     hub_dir: Optional[Path] = None,
 ) -> dict:
-    env = dict(base or os.environ)
+    env = prepend_managed_node_path(dict(base or os.environ))
     env.setdefault("SKIP_REQUIREMENTS_UPDATE", "1")
     if connect.get("server"):
         env["DREAD_HUB_CONNECT"] = str(connect["server"])
@@ -723,10 +900,24 @@ def hub_env_from_connect(
         env["DREAD_HUB_GAME"] = str(connect["game"])
     if connect.get("auto_connect"):
         env["DREAD_HUB_AUTO_CONNECT"] = "1"
+    # Prefer managed portable CPython for Hub-spawned MetroidBreadClient.
+    # On Linux, prefer the local venv once it exists (client packages land there).
+    managed_py = managed_python_cmd()
+    if managed_py:
+        env["DREAD_HUB_PYTHON"] = managed_py[0]
     # Point Electron/system Python at a filesystem Archipelago import root.
     try:
         hub_path = Path(hub_dir) if hub_dir else find_hub_dir() or Path.cwd()
         world = find_world_dir_for_hub(hub_path)
+        try:
+            from ensure_client_deps import uses_linux_venv, venv_python_path
+
+            if uses_linux_venv():
+                vpy = venv_python_path(world)
+                if vpy.is_file():
+                    env["DREAD_HUB_PYTHON"] = str(vpy)
+        except Exception:
+            pass
         try:
             import dread_paths
 
@@ -752,6 +943,28 @@ def hub_env_from_connect(
     return env
 
 
+# Project .npmrc shipped with dread-client-app (Electron postinstall must run).
+_HUB_NPMRC_BODY = (
+    "# Electron's postinstall downloads the platform binary (install.js).\n"
+    "# Never skip lifecycle scripts for this Hub app.\n"
+    "ignore-scripts=false\n"
+    "\n"
+    "# npm 11.16+ / 12 install-scripts / allowScripts policy:\n"
+    "# Hub only needs Electron's postinstall; escape hatch keeps installs working\n"
+    "# even before allowScripts entries are present (older trees / fresh clones).\n"
+    "# Older npm versions ignore unknown keys.\n"
+    "dangerously-allow-all-scripts=true\n"
+)
+
+# npm / CI env knobs that skip dependency lifecycle scripts (block Electron binary).
+_NPM_SCRIPT_BLOCK_ENV = (
+    "ELECTRON_SKIP_BINARY_DOWNLOAD",
+    "npm_config_ignore_scripts",
+    "NPM_CONFIG_IGNORE_SCRIPTS",
+    "npm_config_ignore-scripts",
+)
+
+
 def remove_electron_package(hub_dir: Path) -> None:
     """Delete corrupted node_modules/electron so npm can reinstall the binary."""
     pkg = electron_package_dir(hub_dir)
@@ -760,16 +973,77 @@ def remove_electron_package(hub_dir: Path) -> None:
         shutil.rmtree(pkg, ignore_errors=True)
 
 
+def ensure_hub_npmrc(hub_dir: Path) -> bool:
+    """
+    Ensure dread-client-app/.npmrc allows Electron's postinstall.
+
+    Writes the file when missing or when it still enables ignore-scripts.
+    Appends dangerously-allow-all-scripts when that npm 11.16+ / 12 escape
+    hatch is missing (even if ignore-scripts=false is already set).
+    Returns True if the file was created or updated.
+    """
+    hub = Path(hub_dir)
+    npmrc = hub / ".npmrc"
+    if npmrc.is_file():
+        try:
+            text = npmrc.read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        compact = text.lower().replace(" ", "")
+        # Blocked scripts: replace with the known-good Hub body.
+        if "ignore-scripts=true" in compact:
+            npmrc.write_text(_HUB_NPMRC_BODY, encoding="utf-8")
+            logger.info("Rewrote Hub .npmrc (was ignore-scripts=true) at %s", npmrc)
+            return True
+        # Append missing allow-script keys without wiping unrelated settings.
+        additions = []
+        if "ignore-scripts=" not in compact:
+            additions.append("ignore-scripts=false")
+        if "dangerously-allow-all-scripts=" not in compact:
+            additions.append("dangerously-allow-all-scripts=true")
+        if not additions:
+            return False
+        suffix = ("\n" if text and not text.endswith("\n") else "") + "\n".join(additions) + "\n"
+        npmrc.write_text(text + suffix, encoding="utf-8")
+        logger.info("Updated Hub .npmrc to allow Electron install scripts")
+        return True
+    npmrc.write_text(_HUB_NPMRC_BODY, encoding="utf-8")
+    logger.info("Wrote Hub .npmrc (ignore-scripts=false) at %s", npmrc)
+    return True
+
+
+def npm_install_env(base: Optional[Mapping[str, str]] = None) -> dict:
+    """Env for Hub npm install: never skip Electron binary download / scripts."""
+    merged = prepend_managed_node_path(dict(base or os.environ))
+    for key in _NPM_SCRIPT_BLOCK_ENV:
+        merged.pop(key, None)
+    # Force project-local override even if a parent npmrc set ignore-scripts.
+    merged["npm_config_ignore_scripts"] = "false"
+    return merged
+
+
+def npm_install_args(extra: Optional[Sequence[str]] = None) -> list[str]:
+    """
+    Args for `npm install` that keep Electron postinstall enabled.
+
+    Prefer project .npmrc / allowScripts; also pass --no-ignore-scripts so a
+    user-level ignore-scripts=true cannot strip Electron's binary download.
+    Unknown flags on very old npm are avoided by only using long-supported ones.
+    """
+    args = ["install", "--no-ignore-scripts"]
+    if extra:
+        args.extend(extra)
+    return args
+
+
 def run_npm(hub_dir: Path, npm_args: Sequence[str], *, env: Optional[Mapping[str, str]] = None) -> subprocess.CompletedProcess:
     npm = find_npm()
     if not npm:
         raise RuntimeError(
             "Node.js / npm not found. Install Node.js LTS from https://nodejs.org "
-            "or use the Python Metroid Dread client."
+            "or use the Python Metroid Bread client."
         )
-    merged = dict(env or os.environ)
-    # Ensure electron postinstall downloads the platform binary.
-    merged.pop("ELECTRON_SKIP_BINARY_DOWNLOAD", None)
+    merged = npm_install_env(env)
     logger.info("Running: %s %s (cwd=%s)", npm, " ".join(npm_args), hub_dir)
     return subprocess.run(
         [npm, *npm_args],
@@ -781,6 +1055,41 @@ def run_npm(hub_dir: Path, npm_args: Sequence[str], *, env: Optional[Mapping[str
     )
 
 
+def _combined_output(proc: subprocess.CompletedProcess) -> str:
+    return f"{proc.stdout or ''}\n{proc.stderr or ''}"
+
+
+def run_electron_install_js(hub_dir: Path, *, env: Optional[Mapping[str, str]] = None) -> Tuple[bool, str]:
+    """
+    Re-run electron/install.js to download the platform binary without npm.
+
+    Bypasses npm install-scripts / allowScripts policy when the package tree
+    is present but postinstall was skipped.
+    """
+    hub = Path(hub_dir)
+    install_js = electron_package_dir(hub) / "install.js"
+    if not install_js.is_file():
+        return False, f"missing {install_js}"
+    node = find_node()
+    if not node:
+        return False, "node not found"
+    merged = npm_install_env(env)
+    logger.info("Running Electron install.js to fetch platform binary...")
+    proc = subprocess.run(
+        [node, str(install_js)],
+        cwd=str(electron_package_dir(hub)),
+        env=merged,
+        capture_output=True,
+        text=True,
+    )
+    output = _combined_output(proc)
+    if proc.returncode != 0:
+        return False, output.strip() or f"exit {proc.returncode}"
+    if not electron_is_healthy(hub):
+        return False, output.strip() or "install.js finished but electron binary still missing"
+    return True, output
+
+
 def ensure_hub_packages(hub_dir: Path, *, force_reinstall_electron: bool = False) -> bool:
     """
     Download/install Hub npm deps when missing; repair Electron when unhealthy.
@@ -789,6 +1098,14 @@ def ensure_hub_packages(hub_dir: Path, *, force_reinstall_electron: bool = False
     """
     hub = Path(hub_dir)
     repaired = False
+
+    # Refuse Node majors where Electron's install.js cannot produce path.txt.
+    # Check before any npm/install.js work so the message is actionable.
+    if force_reinstall_electron or not electron_is_healthy(hub) or not hub_deps_installed(hub):
+        ensure_node_supports_electron()
+
+    if ensure_hub_npmrc(hub):
+        repaired = True
 
     if force_reinstall_electron or (hub_deps_installed(hub) and not electron_is_healthy(hub)):
         remove_electron_package(hub)
@@ -801,35 +1118,48 @@ def ensure_hub_packages(hub_dir: Path, *, force_reinstall_electron: bool = False
         or not (hub / "node_modules" / "adm-zip").is_dir()
     )
     if not need_install:
-        return False
+        return repaired
 
-    logger.info("Installing / repairing Dread Client Hub npm packages...")
-    result = run_npm(hub, ["install"])
+    logger.info("Installing / repairing Metroid Bread Client Hub npm packages...")
+    result = run_npm(hub, npm_install_args())
     if result.returncode != 0:
         combined = f"{result.stdout or ''}\n{result.stderr or ''}"
         raise RuntimeError(
-            "npm install failed for Dread Client Hub.\n"
+            "npm install failed for Metroid Bread Client Hub.\n"
             f"{combined.strip() or f'exit {result.returncode}'}"
         )
+
+    # If npm skipped Electron postinstall (install-scripts / allowScripts),
+    # run install.js directly before tearing the package down again.
+    if not electron_is_healthy(hub):
+        ok, detail = run_electron_install_js(hub)
+        if ok:
+            logger.info("Electron binary restored via install.js")
+            repaired = True
+        else:
+            logger.info("Electron install.js did not restore binary (%s)", detail)
 
     # Explicit electron rebuild if still missing after npm install (devDependency edge cases).
     if not electron_is_healthy(hub):
         logger.info("Electron binary still missing; installing electron package explicitly...")
         remove_electron_package(hub)
-        result = run_npm(hub, ["install", "electron", "--save-dev"])
-        if result.returncode != 0 or not electron_is_healthy(hub):
-            combined = f"{result.stdout or ''}\n{result.stderr or ''}"
-            raise RuntimeError(
-                "Electron failed to install correctly after repair.\n"
-                f"{combined.strip()}"
-            )
+        result = run_npm(hub, npm_install_args(["electron", "--save-dev"]))
+        if not electron_is_healthy(hub):
+            ok, detail = run_electron_install_js(hub)
+            if not ok:
+                combined = f"{result.stdout or ''}\n{result.stderr or ''}\n{detail}"
+                node_hint = node_electron_compat_message(node_major_version()) or (
+                    f"If Node is 26.x+, install managed Node.js {NODE_LTS_RECOMMENDED} "
+                    "via the Hub Setup Wizard (or from https://nodejs.org/dist/latest-v24.x/) "
+                    "and wipe node_modules."
+                )
+                raise RuntimeError(
+                    "Electron failed to install correctly after repair.\n"
+                    f"{combined.strip()}\n\n{node_hint}"
+                )
         repaired = True
 
-    return True or repaired
-
-
-def _combined_output(proc: subprocess.CompletedProcess) -> str:
-    return f"{proc.stdout or ''}\n{proc.stderr or ''}"
+    return True
 
 
 def probe_electron_load(hub_dir: Path, *, env: Optional[Mapping[str, str]] = None) -> Tuple[bool, str]:
@@ -878,8 +1208,11 @@ def start_hub_process(
     if not npm:
         raise RuntimeError("npm not found")
 
-    merged = dict(env or os.environ)
+    merged = prepend_managed_node_path(dict(env or os.environ))
     merged.setdefault("SKIP_REQUIREMENTS_UPDATE", "1")
+    managed_py = managed_python_cmd()
+    if managed_py:
+        merged.setdefault("DREAD_HUB_PYTHON", managed_py[0])
 
     if not wait:
         subprocess.Popen(
@@ -909,7 +1242,7 @@ def ensure_system_client_python_deps(world_dir: Optional[Path] = None) -> str:
     Archipelago Launcher / Text Client use a bundled interpreter that already
     has deps; Hub spawns host Python with SKIP_REQUIREMENTS_UPDATE=1, so those
     packages must be installed separately. On Linux, ensure_client_deps uses a
-    local ``_metroid_dread_venv`` (never systemwide / ``pip install --user``);
+    local ``_metroid_bread_venv`` (never systemwide / ``pip install --user``);
     ODR may land in the venv or remain visible via ``--system-site-packages``.
     Raises RuntimeError with a clear user-facing message on failure.
     """
@@ -926,8 +1259,8 @@ def ensure_system_client_python_deps(world_dir: Optional[Path] = None) -> str:
             script = runtime if runtime.is_file() else script
         if not script.is_file():
             raise RuntimeError(
-                "ensure_client_deps.py missing from the Metroid Dread world package.\n"
-                "Reinstall/update metroid_dread.apworld, then try again."
+                "ensure_client_deps.py missing from the Metroid Bread world package.\n"
+                "Reinstall/update metroid_bread.apworld, then try again."
             )
         spec = importlib.util.spec_from_file_location("ensure_client_deps", script)
         if spec is None or spec.loader is None:
@@ -950,10 +1283,16 @@ def launch_hub_with_repair(
     """
     Ensure packages, probe Electron, auto-repair once if needed, then start Hub.
     """
+    # Fail fast on Node 26+ before npm start can throw the cryptic reinstall Error.
+    if not electron_is_healthy(hub_dir):
+        ensure_node_supports_electron()
+
     ensure_hub_packages(hub_dir)
 
     ok, probe_out = probe_electron_load(hub_dir, env=env)
     if not ok or not electron_is_healthy(hub_dir):
+        # Re-check Node before a doomed reinstall loop on 26.x.
+        ensure_node_supports_electron()
         logger.warning(
             "Electron install looks broken (%s); deleting node_modules/electron and reinstalling...",
             (probe_out or "unhealthy binary").strip().splitlines()[:1],
@@ -961,10 +1300,19 @@ def launch_hub_with_repair(
         ensure_hub_packages(hub_dir, force_reinstall_electron=True)
         ok, probe_out = probe_electron_load(hub_dir, env=env)
         if not ok or not electron_is_healthy(hub_dir):
+            node_hint = node_electron_compat_message(node_major_version()) or ""
             raise RuntimeError(
                 "Electron still failed after automatic repair.\n"
                 + (probe_out.strip() or "electron binary missing")
+                + (f"\n\n{node_hint}" if node_hint else "")
             )
+
+    if not electron_is_healthy(hub_dir):
+        raise RuntimeError(
+            "Refusing to start Hub: Electron path.txt / binary still missing.\n"
+            "Delete node_modules/electron and run npm install --no-ignore-scripts "
+            f"under Node.js {NODE_LTS_RECOMMENDED} (managed tools/node-v24 or system)."
+        )
 
     return start_hub_process(hub_dir, env=env, wait=wait)
 
@@ -974,9 +1322,9 @@ def ensure_filesystem_world_dir() -> Path:
     Return a real on-disk world package directory.
 
     When the launcher is loaded from a ``.apworld`` zip, Path(__file__) looks like
-    ``…/metroid_dread.apworld/metroid_dread`` but is not a directory — reading
+    ``…/metroid_bread.apworld/metroid_bread`` but is not a directory — reading
     ``Items.py`` then raises NotADirectoryError. Extract to
-    ``custom_worlds/_metroid_dread_runtime`` first (same tree Hub uses).
+    ``custom_worlds/_metroid_bread_runtime`` first (same tree Hub uses).
     """
     world = world_package_dir()
     if (world / CLIENT_SCRIPT_NAME).is_file() and (world / "Items.py").is_file():
@@ -1003,9 +1351,9 @@ def ensure_filesystem_world_dir() -> Path:
     return world
 
 
-def _load_metroid_dread_client_module(world: Optional[Path] = None):
+def _load_metroid_bread_client_module(world: Optional[Path] = None):
     """
-    Load MetroidDreadClient from a real file path, or via zipimport / package import
+    Load MetroidBreadClient from a real file path, or via zipimport / package import
     when the world lives inside a .apworld.
     """
     import importlib
@@ -1025,7 +1373,7 @@ def _load_metroid_dread_client_module(world: Optional[Path] = None):
         client_path = base / CLIENT_SCRIPT_NAME
         if not client_path.is_file():
             continue
-        spec = importlib.util.spec_from_file_location("metroid_dread_client_impl", client_path)
+        spec = importlib.util.spec_from_file_location("metroid_bread_client_impl", client_path)
         if spec is None or spec.loader is None:
             continue
         mdc = importlib.util.module_from_spec(spec)
@@ -1039,27 +1387,27 @@ def _load_metroid_dread_client_module(world: Optional[Path] = None):
     if apworld is not None:
         # zipimport can load the submodule without reading a bare filesystem path.
         try:
-            return importlib.import_module("worlds.metroid_dread.MetroidDreadClient")
+            return importlib.import_module("worlds.metroid_bread.MetroidBreadClient")
         except Exception as exc:
-            logger.warning("zipimport of MetroidDreadClient failed (%s); trying zip read", exc)
+            logger.warning("zipimport of MetroidBreadClient failed (%s); trying zip read", exc)
             import types
 
-            member = "metroid_dread/MetroidDreadClient.py"
+            member = "metroid_bread/MetroidBreadClient.py"
             with zipfile.ZipFile(apworld, "r") as zf:
                 source = zf.read(member)
-            mod = types.ModuleType("metroid_dread_client_impl")
+            mod = types.ModuleType("metroid_bread_client_impl")
             mod.__file__ = str(apworld / member)
             sys.modules[mod.__name__] = mod
             exec(compile(source, mod.__file__, "exec"), mod.__dict__)
             return mod
 
     raise ImportError(
-        f"Cannot load MetroidDreadClient (tried {[str(b) for b in bases]})"
+        f"Cannot load MetroidBreadClient (tried {[str(b) for b in bases]})"
     )
 
 
 def launch_python_client(args: Sequence[str]) -> None:
-    """Fallback: run MetroidDreadClient in-process (used inside launcher subprocess)."""
+    """Fallback: run MetroidBreadClient in-process (used inside launcher subprocess)."""
     import asyncio
 
     # Prefer a real extracted folder over zipimport fake paths (Items.py reads).
@@ -1125,13 +1473,13 @@ def launch_python_client(args: Sequence[str]) -> None:
             logger.warning("ensure_client_deps: %s", dep_exc)
 
     # Prefer filesystem load from extracted runtime; zipimport only as last resort.
-    mdc = _load_metroid_dread_client_module(world)
+    mdc = _load_metroid_bread_client_module(world)
     main = mdc.main
     get_base_parser = mdc.get_base_parser
 
     from CommonClient import handle_url_arg
 
-    parser = get_base_parser(description="Metroid Dread Client for Archipelago")
+    parser = get_base_parser(description="Metroid Bread Client for Archipelago")
     parser.add_argument("--dread-ip", default="127.0.0.1",
                         help="IP address of Ryujinx running Dread")
     parser.add_argument("--name", default=None, help="Slot name to connect as")
@@ -1157,9 +1505,68 @@ def launch_python_client(args: Sequence[str]) -> None:
     asyncio.run(main(parsed))
 
 
+def ensure_portable_node24(log=None) -> Tuple[bool, str]:
+    """Download managed Node 24 into runtime tools/node-v24."""
+    try:
+        from ensure_portable_node import install_portable_node24
+    except ImportError:
+        from worlds.metroid_bread.ensure_portable_node import install_portable_node24
+    return install_portable_node24(managed_node_dir(), log=log)
+
+
+def ensure_portable_python312(log=None) -> Tuple[bool, str]:
+    """Download managed CPython 3.12 into runtime tools/python-3.12."""
+    try:
+        from ensure_portable_python import install_portable_python312
+    except ImportError:
+        from worlds.metroid_bread.ensure_portable_python import install_portable_python312
+    return install_portable_python312(managed_python_dir(), log=log)
+
+
+def _run_setup_wizard_or_python(
+    args: Sequence[str],
+    *,
+    reason: str,
+    wait: bool = True,
+) -> str:
+    """
+    Show the Hub Setup Wizard; fall back to Kivy if tkinter is unavailable.
+
+    Returns ``\"hub\"`` or ``\"python\"``.
+    """
+    try:
+        try:
+            from hub_setup_wizard import run_setup_wizard
+        except ImportError:
+            from worlds.metroid_bread.hub_setup_wizard import run_setup_wizard
+    except ImportError as exc:
+        logger.warning(
+            "Hub Setup Wizard unavailable (%s); falling back to Python client",
+            exc,
+        )
+        launch_python_client(args)
+        return "python"
+
+    try:
+        choice = run_setup_wizard(reason=reason, args=args, wait=wait)
+    except Exception as exc:
+        # Includes tkinter ImportError raised inside the wizard module.
+        logger.warning(
+            "Hub Setup Wizard failed (%s); falling back to Python client",
+            exc,
+        )
+        launch_python_client(args)
+        return "python"
+
+    if choice == "hub":
+        return "hub"
+    launch_python_client(args)
+    return "python"
+
+
 def launch_hub_or_fallback(args: Sequence[str] = (), *, wait: bool = True) -> str:
     """
-    Preferred entry: Hub when possible, else Python client.
+    Preferred entry: Hub when possible, else Setup Wizard, else Python client.
 
     Returns which path was used: "hub" or "python".
     """
@@ -1182,7 +1589,7 @@ def launch_hub_or_fallback(args: Sequence[str] = (), *, wait: bool = True) -> st
             else:
                 logger.warning(
                     "No filesystem CommonClient.py found for Hub — ensure "
-                    "metroid_dread/ap_core is present, or set DREAD_HUB_AP_ROOT."
+                    "metroid_bread/ap_core is present, or set DREAD_HUB_AP_ROOT."
                 )
             # Install websockets/etc. into system Python before Hub can spawn it.
             # Soft-fail: Hub Connect re-checks and surfaces pythonMissingError / pip text.
@@ -1193,22 +1600,26 @@ def launch_hub_or_fallback(args: Sequence[str] = (), *, wait: bool = True) -> st
                     "Could not ensure Hub client Python packages before launch:\n%s",
                     dep_exc,
                 )
-            logger.info("Launching Dread Client Hub from %s", hub)
+            logger.info("Launching Metroid Bread Client Hub from %s", hub)
             # After a successful start, do not fall back to Python just because
             # Electron returned a non-zero code on window close.
             launch_hub_with_repair(hub, env=env, wait=wait)
             return "hub"
         except Exception as exc:
-            logger.warning("Hub launch failed (%s); falling back to Python client", exc)
-    else:
-        reasons = []
-        if not hub:
-            reasons.append("dread-client-app not found")
-        if not node:
-            reasons.append("node not found")
-        if not npm:
-            reasons.append("npm not found")
-        logger.info("Using Python Metroid Dread client (%s)", ", ".join(reasons) or "fallback")
+            logger.warning("Hub launch failed (%s); opening Setup Wizard", exc)
+            return _run_setup_wizard_or_python(
+                args,
+                reason=f"Hub launch failed:\n{exc}",
+                wait=wait,
+            )
 
-    launch_python_client(args)
-    return "python"
+    reasons = []
+    if not hub:
+        reasons.append("dread-client-app not found")
+    if not node:
+        reasons.append("node not found")
+    if not npm:
+        reasons.append("npm not found")
+    reason = ", ".join(reasons) or "Hub prerequisites missing"
+    logger.info("Opening Hub Setup Wizard (%s)", reason)
+    return _run_setup_wizard_or_python(args, reason=reason, wait=wait)

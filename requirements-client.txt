@@ -1,4 +1,4 @@
-# Minimal packages for MetroidDreadClient + ap_core CommonClient / Utils
+# Minimal packages for MetroidBreadClient + ap_core CommonClient / Utils
 # when Hub spawns system Python (SKIP_REQUIREMENTS_UPDATE skips full AP requirements).
 # Also installs open-dread-rando so Patch can use the same interpreter Hub/Connect ensures.
 websockets>=13.0.1,<14

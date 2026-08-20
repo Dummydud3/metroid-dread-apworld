@@ -1,7 +1,7 @@
 """
-Regression tests for Metroid Dread Randovania logic bridge.
+Regression tests for Metroid Bread Randovania logic bridge.
 
-Run: py -3.11 -m worlds.metroid_dread.test_rdv_logic
+Run: py -3.11 -m worlds.metroid_bread.test_rdv_logic
 (from Archipelago-main root)
 """
 
@@ -25,7 +25,7 @@ class _FakeWorld:
 
 
 def _make_logic():
-    from worlds.metroid_dread.dread_logic import DreadLogic
+    from worlds.metroid_bread.dread_logic import DreadLogic
     return DreadLogic(_FakeWorld())
 
 
@@ -33,7 +33,7 @@ class TestRdvLogic(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.logic = _make_logic()
-        from worlds.metroid_dread.Events import EVENT_RESOURCE_TO_ITEM, event_locations
+        from worlds.metroid_bread.Events import EVENT_RESOURCE_TO_ITEM, event_locations
         cls.EVENT_RESOURCE_TO_ITEM = EVENT_RESOURCE_TO_ITEM
         cls.event_locations = event_locations
 
@@ -142,7 +142,7 @@ class TestRdvLogic(unittest.TestCase):
 
     def test_nerf_power_bombs_blocks_open_charge_door_pb_path(self):
         """With Knowledge + PB, charge doors open via PB only when nerf is off."""
-        from worlds.metroid_dread.dread_logic import DreadLogic
+        from worlds.metroid_bread.dread_logic import DreadLogic
 
         tmpl = self.logic.parser.templates["Open Charge Door"]["requirement"]
         # Lay Power Bomb needs Morph + MainPB + PB ammo.
@@ -194,11 +194,11 @@ class TestGenerationSmoke(unittest.TestCase):
         # Prefer WorldTest pattern if available
         try:
             from test.general import setup_solo_multiworld
-            from worlds.metroid_dread import MetroidDreadWorld
+            from worlds.metroid_bread import MetroidBreadWorld
         except Exception as e:
             self.skipTest(f"test harness unavailable: {e}")
 
-        multiworld = setup_solo_multiworld(MetroidDreadWorld)
+        multiworld = setup_solo_multiworld(MetroidBreadWorld)
         # If setup places items, assert completion condition exists
         self.assertIn(1, multiworld.completion_condition)
         filled = [loc for loc in multiworld.get_locations(1) if loc.item]

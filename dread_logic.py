@@ -1,5 +1,5 @@
 """
-Live Randovania logic bridge for Metroid Dread Archipelago.
+Live Randovania logic bridge for Metroid Bread Archipelago.
 
 Evaluates the logic_database node graph against CollectionState so assumed fill
 respects one-ways, events, and lock-ins (e.g. ElunReleaseX / frozen Artaria).
@@ -17,14 +17,14 @@ from .logic_parser import RandovaniaLogicParser
 from .Events import EVENT_RESOURCE_TO_ITEM
 
 if TYPE_CHECKING:
-    from . import MetroidDreadWorld
+    from . import MetroidBreadWorld
 
 NodeId = Tuple[str, str, str]  # region, area, node
 
 # RDV misc resources that are always enabled (matches dread bootstrap defaults).
 MISC_ALWAYS_ON: FrozenSet[str] = frozenset({"SeparateBeams", "SeparateMissiles"})
 
-# RDV misc short name -> MetroidDreadOptions field (truthy value enables the resource).
+# RDV misc short name -> MetroidBreadOptions field (truthy value enables the resource).
 # Matches randovania dread generator bootstrap logical_patches / dock / teleporter flags.
 MISC_TO_OPTION: Dict[str, str] = {
     "NerfPowerBombs": "nerf_power_bombs",
@@ -32,7 +32,7 @@ MISC_TO_OPTION: Dict[str, str] = {
     "Teleporters": "transport_rando",
 }
 
-# RDV trick short name -> MetroidDreadOptions field
+# RDV trick short name -> MetroidBreadOptions field
 TRICK_TO_OPTION: Dict[str, str] = {
     "Knowledge": "knowledge_tricks",
     "Movement": "movement_tricks",
@@ -151,7 +151,7 @@ ITEM_SHORT_TO_AP: Dict[str, Optional[str]] = {
 class DreadLogic:
     """Per-player Randovania graph evaluator."""
 
-    def __init__(self, world: "MetroidDreadWorld"):
+    def __init__(self, world: "MetroidBreadWorld"):
         self.world = world
         self.player = world.player
         logic_path = Path(__file__).parent / "logic_database"

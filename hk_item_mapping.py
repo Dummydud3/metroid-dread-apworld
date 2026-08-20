@@ -1,6 +1,6 @@
-# Hollow Knight → Metroid Dread Item Mapping
+# Hollow Knight → Metroid Bread Item Mapping
 # 
-# This mapping translates Hollow Knight items to equivalent Metroid Dread items
+# This mapping translates Hollow Knight items to equivalent Metroid Bread items
 # for Randovania .rdvgame file generation. The mapping is based on item function,
 # progression importance, and rarity.
 
@@ -104,13 +104,13 @@ HOLLOW_KNIGHT_TO_DREAD_ITEM_MAP = {
 
 def map_hk_item_to_dread(hk_item_name):
     """
-    Map a Hollow Knight item name to an equivalent Metroid Dread item.
+    Map a Hollow Knight item name to an equivalent Metroid Bread item.
     
     Args:
         hk_item_name: The Hollow Knight item name (e.g., "Rancid_Egg")
     
     Returns:
-        A valid Metroid Dread item name
+        A valid Metroid Bread item name
     """
     # Direct mapping
     if hk_item_name in HOLLOW_KNIGHT_TO_DREAD_ITEM_MAP:
@@ -120,7 +120,7 @@ def map_hk_item_to_dread(hk_item_name):
     return HOLLOW_KNIGHT_TO_DREAD_ITEM_MAP["_default"]
 
 
-# For reference: Valid Metroid Dread items
+# For reference: Valid Metroid Bread items
 VALID_DREAD_ITEMS = [
     "Energy Part",
     "Energy Tank",

@@ -4,6 +4,12 @@ const { parseConnectServerString } = require("./room_info_gate");
 contextBridge.exposeInMainWorld("dreadHub", {
   getConfig: () => ipcRenderer.invoke("get-config"),
   saveConfig: (partial) => ipcRenderer.invoke("save-config", partial),
+  openLogsFolder: () => ipcRenderer.invoke("open-logs-folder"),
+  checkApworldUpdate: () => ipcRenderer.invoke("check-apworld-update"),
+  installApworldUpdate: (opts) =>
+    ipcRenderer.invoke("install-apworld-update", opts),
+  promptApworldUpdate: (opts) =>
+    ipcRenderer.invoke("prompt-apworld-update", opts),
   startClient: (opts) => ipcRenderer.invoke("start-client", opts),
   probeRoomInfo: (server) => ipcRenderer.invoke("probe-room-info", server),
   parseConnectServer: (server) => parseConnectServerString(server || ""),

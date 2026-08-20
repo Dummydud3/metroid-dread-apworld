@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Dread Client Hub</title>
+    <title>Metroid Bread Client Hub</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -38,7 +38,7 @@
               <button type="button" id="yaml-save" class="primary">Save YAML</button>
             </div>
           </div>
-          <p class="hint">Build a Metroid Dread player YAML for Archipelago. Save it into your Players folder, then generate a seed.</p>
+          <p class="hint">Build a Metroid Bread player YAML for Archipelago. Save it into your Players folder, then generate a seed.</p>
 
           <div class="row2">
             <label>
@@ -312,7 +312,24 @@
           <section class="panel log-panel">
             <div class="log-head">
               <h2>Log</h2>
-              <button id="btn-clear-log" class="ghost" type="button">Clear</button>
+              <div class="log-head-actions">
+                <label class="check inline log-debug-toggle" title="Show Remote Lua / OdrMap / client diagnostic spam">
+                  <input id="debug-logs" type="checkbox" />
+                  <span>Debug logs</span>
+                </label>
+                <button id="btn-open-logs" class="ghost" type="button" title="Open the Archipelago logs folder">
+                  Open logs folder
+                </button>
+                <button
+                  id="btn-check-updates"
+                  class="ghost"
+                  type="button"
+                  title="Check GitHub Releases for a newer metroid_bread.apworld"
+                >
+                  Check for updates
+                </button>
+                <button id="btn-clear-log" class="ghost" type="button">Clear</button>
+              </div>
             </div>
             <div id="log" class="log" aria-live="polite"></div>
             <form id="cmd-form" class="cmd-form">

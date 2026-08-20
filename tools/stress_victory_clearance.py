@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Stress-test Metroid Dread victory-implies-90% clearance across extreme YAMLs.
+Stress-test Metroid Bread victory-implies-90% clearance across extreme YAMLs.
 
 Usage (from Archipelago repo root):
-  py -3.12 worlds/metroid_dread/tools/stress_victory_clearance.py
-  py -3.12 worlds/metroid_dread/tools/stress_victory_clearance.py --count 40 --seed 100
+  py -3.12 worlds/metroid_bread/tools/stress_victory_clearance.py
+  py -3.12 worlds/metroid_bread/tools/stress_victory_clearance.py --count 40 --seed 100
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-GAME = "Metroid Dread"
+GAME = "Metroid Bread"
 _AP: dict[str, Any] | None = None
 
 TRICK_KEYS = (
@@ -73,7 +73,7 @@ def bootstrap() -> dict[str, Any]:
     from worlds.AutoWorld import AutoWorldRegister, call_all
     from Fill import distribute_items_restrictive
     from test.general import gen_steps, setup_multiworld
-    from worlds.metroid_dread import victory_clearance
+    from worlds.metroid_bread import victory_clearance
 
     if GAME not in AutoWorldRegister.world_types:
         raise RuntimeError(f"{GAME!r} is not registered")

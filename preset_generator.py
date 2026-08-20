@@ -22,7 +22,7 @@ def create_minimal_preset(game_name, player_name):
         "Metroid Prime 3": "prime3",
         "Super Metroid": "super_metroid",
         "Cave Story": "cave_story",
-        "Metroid Dread": "dread",
+        "Metroid Bread": "dread",
         "AM2R": "am2r",
         "Metroid Fusion": "fusion",
         "Samus Returns": "samus_returns",
@@ -103,7 +103,7 @@ def get_minimal_configuration(game_id):
         return get_minimal_prime_config()
     
     elif game_id == "dread":
-        # Metroid Dread configuration
+        # Metroid Bread configuration
         return {
             "trick_level": {
                 "minimal_logic": False,
@@ -441,7 +441,7 @@ def create_minimal_game_modification(game_id, player_index):
 RANDOVANIA_SUPPORTED_GAMES = {
     "am2r": "AM2R",
     "cave_story": "Cave Story",
-    "dread": "Metroid Dread",
+    "dread": "Metroid Bread",
     "echoes": "Metroid Prime 2: Echoes",
     "fusion": "Metroid Fusion",
     "hk": "Hollow Knight",  # If supported
@@ -460,7 +460,7 @@ GAME_NAME_MAPPING = {
     "Metroid Prime 3": "prime3",
     "Super Metroid": "super_metroid",
     "Cave Story": "cave_story",
-    "Metroid Dread": "dread",
+    "Metroid Bread": "dread",
     "AM2R": "am2r",
     "Metroid Fusion": "fusion",
     "Samus Returns": "samus_returns",

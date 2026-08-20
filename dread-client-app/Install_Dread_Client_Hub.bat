@@ -1,5 +1,5 @@
 @echo off
-REM Install Dread Client Hub — Desktop + Start Menu shortcuts
+REM Install Metroid Bread Client Hub — Desktop + Start Menu shortcuts
 cd /d "%~dp0"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install_Dread_Client_Hub.ps1" %*
 if errorlevel 1 (

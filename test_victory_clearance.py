@@ -1,5 +1,5 @@
 """
-Tests for Metroid Dread victory-implies-90% clearance.
+Tests for Metroid Bread victory-implies-90% clearance.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ def _bootstrap():
     from worlds.AutoWorld import AutoWorldRegister, call_all
     from Fill import FillError, distribute_items_restrictive
     from test.general import gen_steps, setup_multiworld
-    from worlds.metroid_dread import victory_clearance
-    import worlds.metroid_dread as md
+    from worlds.metroid_bread import victory_clearance
+    import worlds.metroid_bread as md
 
     return {
         "AutoWorldRegister": AutoWorldRegister,
@@ -26,7 +26,7 @@ def _bootstrap():
         "setup_multiworld": setup_multiworld,
         "victory_clearance": victory_clearance,
         "md": md,
-        "world_type": AutoWorldRegister.world_types["Metroid Dread"],
+        "world_type": AutoWorldRegister.world_types["Metroid Bread"],
     }
 
 
@@ -54,7 +54,7 @@ class TestVictoryClearance(unittest.TestCase):
         self.assertEqual(vc.allowed_missing_at_victory(100, 1.0), 0)
 
     def test_game_goal_option_names(self):
-        from worlds.metroid_dread.Options import GameGoal
+        from worlds.metroid_bread.Options import GameGoal
 
         self.assertEqual(GameGoal.get_option_name(GameGoal.option_one_hundred_percent), "100%")
         self.assertEqual(GameGoal.get_option_name(GameGoal.option_all_bosses), "All Bosses")
@@ -63,7 +63,7 @@ class TestVictoryClearance(unittest.TestCase):
         self.assertEqual(GameGoal.option_all_bosses, 2)
 
     def test_boss_catalog_covers_required_fights(self):
-        from worlds.metroid_dread import bosses
+        from worlds.metroid_bread import bosses
 
         keys = {b.key for b in bosses.ALL_BOSSES}
         for required in (
@@ -120,7 +120,7 @@ class TestVictoryClearance(unittest.TestCase):
     def test_all_bosses_post_fill(self):
         """All Bosses: Raven Beak opens only with every boss node in logic."""
         vc = self.ap["victory_clearance"]
-        from worlds.metroid_dread import bosses
+        from worlds.metroid_bread import bosses
 
         mw = self._gen(
             22,

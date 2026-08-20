@@ -1,7 +1,7 @@
 """
 Build a synthetic Archipelago spoiler from live server LocationInfo + slot_data.
 
-Used by MetroidDreadClient so players can patch without a local seed zip.
+Used by MetroidBreadClient so players can patch without a local seed zip.
 """
 
 from __future__ import annotations
@@ -38,13 +38,13 @@ def build_synthetic_spoiler(
         f"Archipelago Version (server download)  -  Seed: {seed_name or 'unknown'}",
         "",
         f"Players:                         {max(1, len(player_names or {}))}",
-        f"Game:                            Metroid Dread",
+        f"Game:                            Metroid Bread",
         "",
     ]
 
     # Multiworld-style player header so ap_to_patcher can resolve the slot.
     lines.append(f"Player 1: {player_name}")
-    lines.append("Game: Metroid Dread")
+    lines.append("Game: Metroid Bread")
     lines.append("")
 
     if starting_path:

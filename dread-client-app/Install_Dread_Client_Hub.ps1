@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Install Dread Client Hub shortcuts (Desktop + Start Menu) and ensure npm deps.
+  Install Metroid Bread Client Hub shortcuts (Desktop + Start Menu) and ensure npm deps.
 #>
 param(
   [switch]$Silent,
@@ -13,7 +13,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$AppName = "Dread Client Hub"
+$AppName = "Metroid Bread Client Hub"
 $AppDir = $PSScriptRoot
 $RepoRoot = Split-Path -Parent $AppDir
 $LauncherVbs = Join-Path $AppDir "Launch_Dread_Hub.vbs"
@@ -44,7 +44,7 @@ function Ensure-AppIcon {
 
 function Get-ShortcutPaths {
   $desktop = [Environment]::GetFolderPath("Desktop")
-  $startMenu = Join-Path ([Environment]::GetFolderPath("StartMenu")) "Programs\Dread Client Hub"
+  $startMenu = Join-Path ([Environment]::GetFolderPath("StartMenu")) "Programs\Metroid Bread Client Hub"
   [pscustomobject]@{
     DesktopLnk   = Join-Path $desktop "$AppName.lnk"
     StartMenuDir = $startMenu
@@ -113,13 +113,115 @@ function Install-NpmDeps {
   Write-Host "Installing / verifying npm dependencies..."
   Push-Location $AppDir
   try {
-    $npm = Get-Command npm -ErrorAction SilentlyContinue
-    if (-not $npm) {
-      throw "Node.js / npm not found. Install Node.js LTS from https://nodejs.org then re-run this installer."
+    # Prefer npm.cmd: bare `npm` resolves to npm.ps1, which fails under Restricted policy.
+    $npm = $null
+    foreach ($name in @("npm.cmd", "npm.exe")) {
+      $cmd = Get-Command $name -ErrorAction SilentlyContinue
+      if ($cmd) { $npm = $cmd.Source; break }
     }
-    & npm install
+    if (-not $npm) {
+      throw "Node.js / npm not found. Install Node.js 24 from https://nodejs.org/dist/latest-v24.x/ then re-run this installer."
+    }
+
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $nodeCmd) {
+      throw "Node.js not found. Install Node.js 24 from https://nodejs.org/dist/latest-v24.x/ then re-run this installer."
+    }
+    $nodeMajor = 0
+    try {
+      $nodeMajor = [int](& $nodeCmd.Source -p "process.versions.node.split('.')[0]").Trim()
+    } catch {
+      $nodeMajor = 0
+    }
+    if ($nodeMajor -ge 25) {
+      throw (
+        "Node.js $nodeMajor is not supported for the Metroid Bread Client Hub.`n" +
+        "Electron binary download fails on Node 26.x (extract-zip leaves path.txt missing).`n" +
+        "Install Node.js 24 from https://nodejs.org/dist/latest-v24.x/, then re-run this installer."
+      )
+    }
+
+    # Electron postinstall must run (downloads platform binary).
+    Remove-Item Env:ELECTRON_SKIP_BINARY_DOWNLOAD -ErrorAction SilentlyContinue
+    $env:npm_config_ignore_scripts = "false"
+
+    $npmrc = Join-Path $AppDir ".npmrc"
+    $npmrcText = ""
+    if (Test-Path -LiteralPath $npmrc) {
+      $npmrcText = Get-Content -LiteralPath $npmrc -Raw -ErrorAction SilentlyContinue
+    }
+    $compact = (($npmrcText) + "").ToLower().Replace(" ", "")
+    if (-not (Test-Path -LiteralPath $npmrc) -or $compact.Contains("ignore-scripts=true")) {
+      @(
+        "ignore-scripts=false"
+        "dangerously-allow-all-scripts=true"
+      ) | Set-Content -LiteralPath $npmrc -Encoding ascii
+    } else {
+      $lines = @()
+      if (-not $compact.Contains("ignore-scripts=")) { $lines += "ignore-scripts=false" }
+      if (-not $compact.Contains("dangerously-allow-all-scripts=")) {
+        $lines += "dangerously-allow-all-scripts=true"
+      }
+      if ($lines.Count -gt 0) {
+        Add-Content -LiteralPath $npmrc -Value ($lines -join "`n") -Encoding ascii
+      }
+    }
+
+    function Test-ElectronHealthy {
+      $pkg = Join-Path $AppDir "node_modules\electron"
+      $pathTxt = Join-Path $pkg "path.txt"
+      $exe = Join-Path $pkg "dist\electron.exe"
+      $bin = Join-Path $pkg "dist\electron"
+      return (Test-Path -LiteralPath $pathTxt) -and (
+        (Test-Path -LiteralPath $exe) -or (Test-Path -LiteralPath $bin)
+      )
+    }
+
+    function Invoke-ElectronInstallJs {
+      $pkg = Join-Path $AppDir "node_modules\electron"
+      $installJs = Join-Path $pkg "install.js"
+      if (-not (Test-Path -LiteralPath $installJs)) { return }
+      $node = Get-Command node -ErrorAction SilentlyContinue
+      if (-not $node) { return }
+      Write-Host "Electron binary missing; running install.js..."
+      Push-Location $pkg
+      try {
+        & $node.Source "install.js"
+      } finally {
+        Pop-Location
+      }
+    }
+
+    & $npm install --no-ignore-scripts
     if ($LASTEXITCODE -ne 0) {
       throw "npm install failed (exit $LASTEXITCODE)."
+    }
+
+    if (-not (Test-ElectronHealthy)) {
+      Invoke-ElectronInstallJs
+    }
+
+    # Still broken: delete package and reinstall so postinstall can download the binary.
+    if (-not (Test-ElectronHealthy)) {
+      $electronPkg = Join-Path $AppDir "node_modules\electron"
+      Write-Host "Electron still incomplete; deleting node_modules\electron and reinstalling..."
+      if (Test-Path -LiteralPath $electronPkg) {
+        Remove-Item -LiteralPath $electronPkg -Recurse -Force -ErrorAction SilentlyContinue
+      }
+      & $npm install --no-ignore-scripts
+      if ($LASTEXITCODE -ne 0) {
+        throw "Electron repair npm install failed (exit $LASTEXITCODE)."
+      }
+      if (-not (Test-ElectronHealthy)) {
+        Invoke-ElectronInstallJs
+      }
+      if (-not (Test-ElectronHealthy)) {
+        throw (
+          "Electron failed to install correctly. Delete node_modules\electron " +
+          "(or all of node_modules) and run: npm install --no-ignore-scripts`n" +
+          "If Node is 26.x+, install Node.js 24 from https://nodejs.org/dist/latest-v24.x/ first."
+        )
+      }
     }
   } finally {
     Pop-Location
@@ -150,14 +252,14 @@ function Install-Hub {
   if ($Desktop) {
     New-Shortcut -LinkPath $paths.DesktopLnk -TargetPath $wscript `
       -Arguments "`"$LauncherVbs`"" -WorkDir $AppDir -IconPath $icon `
-      -Description "Metroid Dread Archipelago Client Hub"
+      -Description "Metroid Bread Archipelago Client Hub"
     Write-Host "Desktop shortcut: $($paths.DesktopLnk)"
   }
 
   if ($StartMenu) {
     New-Shortcut -LinkPath $paths.StartMenuLnk -TargetPath $wscript `
       -Arguments "`"$LauncherVbs`"" -WorkDir $AppDir -IconPath $icon `
-      -Description "Metroid Dread Archipelago Client Hub"
+      -Description "Metroid Bread Archipelago Client Hub"
     Write-Host "Start Menu shortcut: $($paths.StartMenuLnk)"
 
     # Uninstall entry in the same Start Menu folder
@@ -165,7 +267,7 @@ function Install-Hub {
     New-Shortcut -LinkPath $paths.UninstallLnk -TargetPath "powershell.exe" `
       -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$uninstallPs1`" -Uninstall" `
       -WorkDir $AppDir -IconPath $icon `
-      -Description "Remove Dread Client Hub shortcuts"
+      -Description "Remove Metroid Bread Client Hub shortcuts"
     Write-Host "Start Menu uninstall: $($paths.UninstallLnk)"
   }
 
@@ -235,7 +337,7 @@ function Show-InstallerUi {
   $form.Controls.Add($title)
 
   $sub = New-Object System.Windows.Forms.Label
-  $sub.Text = "Create shortcuts and prepare the Metroid Dread Archipelago hub."
+  $sub.Text = "Create shortcuts and prepare the Metroid Bread Archipelago hub."
   $sub.Location = New-Object System.Drawing.Point(26, 54)
   $sub.Size = New-Object System.Drawing.Size(400, 40)
   $sub.ForeColor = [System.Drawing.Color]::FromArgb(138, 167, 181)

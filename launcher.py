@@ -1,11 +1,11 @@
 """
-Metroid Dread Launcher Component
-Registers the Metroid Dread Client Hub in the Archipelago Launcher.
+Metroid Bread Launcher Component
+Registers the Metroid Bread Client Hub in the Archipelago Launcher.
 
 Launch path:
-  1. Prefer our Electron Dread Client Hub (dread-client-app)
+  1. Prefer our Electron Metroid Bread Client Hub (dread-client-app)
   2. Download npm packages when missing; auto-repair incomplete Electron installs
-  3. Fall back to the Python MetroidDreadClient when Hub cannot start
+  3. Fall back to the Python MetroidBreadClient when Hub cannot start
 """
 
 from worlds.LauncherComponents import Component, components, Type, launch_subprocess
@@ -25,25 +25,25 @@ def run_hub_or_client(*args):
     launch_hub_or_fallback(args, wait=True)
 
 
-def launch_metroid_dread_client(*args):
-    """Launch our Metroid Dread Client Hub (or Python fallback)."""
-    launch_subprocess(run_hub_or_client, name="Metroid Dread Client Hub", args=args)
+def launch_metroid_bread_client(*args):
+    """Launch our Metroid Bread Client Hub (or Python fallback)."""
+    launch_subprocess(run_hub_or_client, name="Metroid Bread Client Hub", args=args)
 
 
-# Register the Metroid Dread client component
+# Register the Metroid Bread client component
 components.append(
     Component(
-        display_name="Metroid Dread Client",
-        script_name="MetroidDreadClient",
-        frozen_name="ArchipelagoMetroidDreadClient",
-        func=launch_metroid_dread_client,
+        display_name="Metroid Bread Client",
+        script_name="MetroidBreadClient",
+        frozen_name="ArchipelagoMetroidBreadClient",
+        func=launch_metroid_bread_client,
         component_type=Type.CLIENT,
-        icon="metroid_dread",
-        game_name="Metroid Dread",
+        icon="metroid_bread",
+        game_name="Metroid Bread",
         supports_uri=True,
         cli=False,
         description=(
-            "Launch the Metroid Dread Client Hub (patcher + tracker + connect UI). "
+            "Launch the Metroid Bread Client Hub (patcher + tracker + connect UI). "
         ),
     )
 )

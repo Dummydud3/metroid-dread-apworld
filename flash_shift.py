@@ -1,4 +1,4 @@
-"""Flash Shift pool / grant helpers for Metroid Dread Archipelago.
+"""Flash Shift pool / grant helpers for Metroid Bread Archipelago.
 
 Modes (see Options.py):
 - Vanilla ON: one main Flash Shift = ITEM_GHOST_AURA + included_ammo chains (RDV/ODR).

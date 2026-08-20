@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
@@ -16,7 +16,7 @@ const {
   explainClientExit,
 } = require("./client_exit");
 
-// Hub lives at worlds/metroid_dread/dread-client-app — world package is parent.
+// Hub lives at worlds/metroid_bread/dread-client-app — world package is parent.
 const WORLD_DIR = path.resolve(__dirname, "..");
 const AP_CORE_DIRNAME = "ap_core";
 
@@ -148,8 +148,8 @@ function resolveApRoots(worldDir) {
     };
   }
 
-  // Conventional checkout: worlds/metroid_dread → repo root (may lack CommonClient
-  // when Hub runs from custom_worlds/_metroid_dread_runtime next to a frozen install).
+  // Conventional checkout: worlds/metroid_bread → repo root (may lack CommonClient
+  // when Hub runs from custom_worlds/_metroid_bread_runtime next to a frozen install).
   const legacy = path.resolve(worldDir, "..", "..");
   return { importRoot: legacy, installRoot: frozen ? path.resolve(frozen) : legacy };
 }
@@ -157,13 +157,15 @@ function resolveApRoots(worldDir) {
 const { importRoot: AP_ROOT, installRoot: INSTALL_ROOT } = resolveApRoots(WORLD_DIR);
 const CONFIG_PATH = path.join(WORLD_DIR, "dread_client_ui_config.json");
 const PATCH_CONFIG_PATH = path.join(WORLD_DIR, "dread_direct_patch_config.json");
-const CLIENT_SCRIPT = path.join(WORLD_DIR, "MetroidDreadClient.py");
+const CLIENT_SCRIPT = path.join(WORLD_DIR, "MetroidBreadClient.py");
 const PATCHER_SCRIPT = path.join(WORLD_DIR, "dread_direct_patch.py");
 const CATALOG_PATH = path.join(__dirname, "tracker", "catalog.json");
 const DEFAULT_OUTPUT_SCAN = path.join(INSTALL_ROOT, "output");
 const EXTRACT_ROOT = path.join(INSTALL_ROOT, "output", "_patcher_extract");
 const PLAYERS_DIR = path.join(INSTALL_ROOT, "Players");
 const UI_PREFIX = "@@APUI@@";
+const UI_LOG_PREFIX = "@@APLOG@@";
+const UI_LOG_RE = /^@@APLOG@@(debug|normal)@@(.*)$/i;
 const DREAD_TITLE_ID = "010093801237c000";
 
 const DEFAULT_CONFIG = {
@@ -187,6 +189,8 @@ const DEFAULT_CONFIG = {
   clean_output: false,
   yaml_path: path.join(PLAYERS_DIR, "dread_player.yaml"),
   hub_stage: "connect",
+  // Hub Log panel: off = AP/normal only; on = full debug (@@APLOG@@debug@@…).
+  debug_logs: false,
 };
 
 function pythonSpawnEnv(extra = {}) {
@@ -219,7 +223,7 @@ function createWindow() {
     minWidth: 780,
     minHeight: 660,
     backgroundColor: "#071016",
-    title: "Dread Client Hub",
+    title: "Metroid Bread Client Hub",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -397,25 +401,42 @@ function saveConfig(partial) {
 
 let cachedPythonLauncher = null;
 const ENSURE_CLIENT_DEPS_SCRIPT = path.join(WORLD_DIR, "ensure_client_deps.py");
+const APWORLD_UPDATER_SCRIPT = path.join(WORLD_DIR, "apworld_updater.py");
+const APWORLD_RELEASES_URL =
+  "https://github.com/Dummydud3/metroid-dread-apworld/releases";
 
 function findPythonLauncher() {
   if (cachedPythonLauncher) {
     return cachedPythonLauncher;
   }
+
+  const versionOkShared =
+    "import sys; raise SystemExit(0 if (3,11,9) <= sys.version_info < (3,14) else 1)";
+
   if (process.platform !== "win32") {
-    const versionOk =
-      "import sys; raise SystemExit(0 if (3,11,9) <= sys.version_info < (3,14) else 1)";
+    const versionOk = versionOkShared;
     const probeUnix = (candidate, code) =>
       spawnSync(candidate.cmd, [...candidate.prefixArgs, "-c", code], {
         timeout: 30000,
       }).status === 0;
 
     // Linux Hub client deps live in a local venv (never systemwide pip).
-    const venvPython = path.join(WORLD_DIR, "_metroid_dread_venv", "bin", "python");
+    // Prefer venv over DREAD_HUB_PYTHON (which may point at managed install_only).
+    const venvPython = path.join(WORLD_DIR, "_metroid_bread_venv", "bin", "python");
     if (process.platform === "linux" && fs.existsSync(venvPython)) {
       const venvLauncher = { cmd: venvPython, prefixArgs: [] };
       if (probeUnix(venvLauncher, versionOk)) {
         cachedPythonLauncher = venvLauncher;
+        return cachedPythonLauncher;
+      }
+    }
+
+    // Managed portable CPython from Hub Setup Wizard / hub_launcher.
+    const dreadHubPython = (process.env.DREAD_HUB_PYTHON || "").trim();
+    if (dreadHubPython && fs.existsSync(dreadHubPython)) {
+      const managed = { cmd: dreadHubPython, prefixArgs: [] };
+      if (probeUnix(managed, versionOk) || probeUnix(managed, "import open_dread_rando")) {
+        cachedPythonLauncher = managed;
         return cachedPythonLauncher;
       }
     }
@@ -432,6 +453,21 @@ function findPythonLauncher() {
       unixCandidates.find((c) => probeUnix(c, versionOk));
     cachedPythonLauncher = foundUnix || null;
     return cachedPythonLauncher;
+  }
+
+  // Windows: managed portable CPython from Hub Setup Wizard / hub_launcher.
+  const dreadHubPython = (process.env.DREAD_HUB_PYTHON || "").trim();
+  if (dreadHubPython && fs.existsSync(dreadHubPython)) {
+    const managed = { cmd: dreadHubPython, prefixArgs: [] };
+    const probeManaged = (code) =>
+      spawnSync(managed.cmd, [...managed.prefixArgs, "-c", code], {
+        timeout: 30000,
+        windowsHide: true,
+      }).status === 0;
+    if (probeManaged(versionOkShared) || probeManaged("import open_dread_rando")) {
+      cachedPythonLauncher = managed;
+      return cachedPythonLauncher;
+    }
   }
 
   // The patcher imports mercury-engine-data-structures in-process, so prefer an
@@ -467,8 +503,8 @@ function findPythonLauncher() {
 
 /**
  * Install websockets/etc. for the Hub client.
- * Shares worlds/metroid_dread/ensure_client_deps.py with hub_launcher / bat / sh.
- * On Linux, ensure_client_deps creates/uses ``_metroid_dread_venv`` (not system pip).
+ * Shares worlds/metroid_bread/ensure_client_deps.py with hub_launcher / bat / sh.
+ * On Linux, ensure_client_deps creates/uses ``_metroid_bread_venv`` (not system pip).
  */
 function ensureClientDeps(launcher) {
   if (!launcher) {
@@ -479,7 +515,7 @@ function ensureClientDeps(launcher) {
       ok: false,
       error:
         `ensure_client_deps.py not found:\n${ENSURE_CLIENT_DEPS_SCRIPT}\n` +
-        "Reinstall/update metroid_dread.apworld (or refresh _metroid_dread_runtime).",
+        "Reinstall/update metroid_bread.apworld (or refresh _metroid_bread_runtime).",
     };
   }
   const result = spawnSync(
@@ -525,7 +561,7 @@ function ensureClientDeps(launcher) {
         `Failed to install Python client packages (exit ${result.status}).`,
     };
   }
-  // Linux: ensure may have just created _metroid_dread_venv — prefer it for launch.
+  // Linux: ensure may have just created _metroid_bread_venv — prefer it for launch.
   if (process.platform === "linux") {
     cachedPythonLauncher = null;
   }
@@ -683,7 +719,7 @@ function openTrackerWindow() {
     minWidth: 820,
     minHeight: 560,
     backgroundColor: "#071016",
-    title: "Dread Map Tracker",
+    title: "Metroid Bread Map Tracker",
     parent: mainWindow || undefined,
     webPreferences: {
       preload: path.join(__dirname, "tracker", "preload.js"),
@@ -709,8 +745,33 @@ function sendToRenderer(channel, payload) {
   }
 }
 
-function appendLog(stream, text) {
-  sendToRenderer("client-log", { stream, text });
+function appendLog(stream, text, level = "normal") {
+  sendToRenderer("client-log", {
+    stream,
+    text,
+    level: level === "debug" ? "debug" : "normal",
+  });
+}
+
+function getLogsDir() {
+  // Matches Utils.user_path("logs") when Hub sets DREAD_HUB_INSTALL_ROOT /
+  // Utils.local_path to INSTALL_ROOT (writable Archipelago install).
+  const dir = path.join(INSTALL_ROOT, "logs");
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (_) {
+    /* ignore — openPath still attempts the path */
+  }
+  return dir;
+}
+
+async function openLogsFolder() {
+  const dir = getLogsDir();
+  const err = await shell.openPath(dir);
+  if (err) {
+    return { ok: false, error: err, path: dir };
+  }
+  return { ok: true, path: dir };
 }
 
 function handleStdoutLine(line) {
@@ -732,7 +793,16 @@ function handleStdoutLine(line) {
   if (line.startsWith("[tracker-logic]")) {
     return;
   }
-  appendLog("stdout", line + "\n");
+  let level = "normal";
+  let text = line;
+  if (line.startsWith(UI_LOG_PREFIX)) {
+    const m = line.match(UI_LOG_RE);
+    if (m) {
+      level = m[1].toLowerCase() === "debug" ? "debug" : "normal";
+      text = m[2];
+    }
+  }
+  appendLog("stdout", text + "\n", level);
 }
 
 function stopClient() {
@@ -819,7 +889,7 @@ function startClient(opts) {
     const frozenHint = isFrozenApInstall(INSTALL_ROOT)
       ? `\nDetected frozen Archipelago install:\n${INSTALL_ROOT}\n` +
         `Expected bundled import root at:\n${path.join(WORLD_DIR, AP_CORE_DIRNAME)}\n\n` +
-        `Reinstall/update metroid_dread.apworld (includes ap_core), or set ` +
+        `Reinstall/update metroid_bread.apworld (includes ap_core), or set ` +
         `DREAD_HUB_AP_ROOT to an Archipelago source/portable folder with CommonClient.py.`
       : `\nSet DREAD_HUB_AP_ROOT to your Archipelago source/portable folder, or launch ` +
         `from a checkout that contains CommonClient.py.`;
@@ -861,7 +931,7 @@ function startClient(opts) {
     appendLog(
       "stdout",
       `[app] Linux: client packages install into local venv ` +
-        `${path.join(WORLD_DIR, "_metroid_dread_venv")} (not systemwide).\n`
+        `${path.join(WORLD_DIR, "_metroid_bread_venv")} (not systemwide).\n`
     );
   }
   const deps = ensureClientDeps(launcher);
@@ -1065,7 +1135,7 @@ function isSoloDreadSpoiler(spoilerPath) {
       sawPlayerHeader = true;
       break;
     }
-    if (line.startsWith("Game:") && line.slice(line.indexOf(":") + 1).trim() === "Metroid Dread") {
+    if (line.startsWith("Game:") && line.slice(line.indexOf(":") + 1).trim() === "Metroid Bread") {
       sawSoloGame = true;
     }
   }
@@ -1075,7 +1145,7 @@ function isSoloDreadSpoiler(spoilerPath) {
 function detectDreadPlayers(spoilerPath) {
   if (!spoilerPath || !fs.existsSync(spoilerPath)) return [];
   if (isSoloDreadSpoiler(spoilerPath)) {
-    return ["(solo Metroid Dread)"];
+    return ["(solo Metroid Bread)"];
   }
   const text = fs.readFileSync(spoilerPath, "utf8");
   const players = [];
@@ -1090,7 +1160,7 @@ function detectDreadPlayers(spoilerPath) {
     }
     if (current != null && line.startsWith("Game:")) {
       const game = line.slice(line.indexOf(":") + 1).trim();
-      if (game === "Metroid Dread") players.push(current);
+      if (game === "Metroid Bread") players.push(current);
       current = null;
     }
   }
@@ -1282,10 +1352,10 @@ async function tryDownloadSpoilerFromRoom(roomId, slotName) {
       Array.isArray(p) &&
       String(p[0] || "").toLowerCase() === String(slotName || "").toLowerCase()
   );
-  if (match && match[1] && match[1] !== "Metroid Dread") {
+  if (match && match[1] && match[1] !== "Metroid Bread") {
     return {
       ok: false,
-      error: `Slot "${slotName}" is ${match[1]}, not Metroid Dread.`,
+      error: `Slot "${slotName}" is ${match[1]}, not Metroid Bread.`,
       game: match[1],
     };
   }
@@ -1386,7 +1456,7 @@ function findSeedForSlot({ gamesFolder, slotName, seedName }) {
   if (!scored.length) {
     return {
       ok: false,
-      error: `No Metroid Dread spoiler found for slot "${slotName}" under:\n${folder}`,
+      error: `No Metroid Bread spoiler found for slot "${slotName}" under:\n${folder}`,
     };
   }
 
@@ -1644,16 +1714,18 @@ function launchRyujinx(opts = {}) {
     return { ok: false, error: String(err.message || err) };
   }
 
-  // Give Ryujinx / Dread time to boot before Remote Lua attach.
-  const CONNECT_DELAY_MS = 30000;
+  // Passive wait in MetroidBreadClient (poll until :6969 accepts). Only a short
+  // grace so Ryujinx can spawn — do not use a blind 30s one-shot connect.
+  const CONNECT_DELAY_MS = 3000;
   if (clientProcess) {
     const ip = cfg.dread_ip || "127.0.0.1";
     appendLog(
       "stdout",
-      `[app] Waiting ${CONNECT_DELAY_MS / 1000}s for Ryujinx/Dread to boot before connecting…\n`
+      `[app] Waiting ${CONNECT_DELAY_MS / 1000}s, then passive RemoteLua connect ` +
+        `(retries until ${ip}:6969 accepts)…\n`
     );
     setTimeout(() => {
-      appendLog("stdout", `[app] Connecting Remote Lua at ${ip}:6969…\n`);
+      appendLog("stdout", `[app] Waiting for Remote Lua at ${ip}:6969…\n`);
       sendCommand(`/connect_dread ${ip}`);
     }, CONNECT_DELAY_MS);
   }
@@ -1666,9 +1738,9 @@ function launchRyujinx(opts = {}) {
 function defaultYamlConfig() {
   return {
     name: "DreadPlayer",
-    game: "Metroid Dread",
-    description: "Metroid Dread player options",
-    "Metroid Dread": {
+    game: "Metroid Bread",
+    description: "Metroid Bread player options",
+    "Metroid Bread": {
       death_link: false,
       progression_balancing: 50,
       accessibility: "items",
@@ -1780,13 +1852,13 @@ function yamlEscape(value) {
 }
 
 function configToYaml(config) {
-  const dread = config["Metroid Dread"] || {};
+  const dread = config["Metroid Bread"] || {};
   const lines = [
-    `description: ${yamlEscape(config.description || "Metroid Dread player options")}`,
+    `description: ${yamlEscape(config.description || "Metroid Bread player options")}`,
     `name: ${yamlEscape(config.name || "DreadPlayer")}`,
-    `game: Metroid Dread`,
+    `game: Metroid Bread`,
     ``,
-    `Metroid Dread:`,
+    `Metroid Bread:`,
   ];
   for (const [key, value] of Object.entries(dread)) {
     if (value == null) continue;
@@ -1813,13 +1885,13 @@ function configToYaml(config) {
 function parseSimpleYaml(text) {
   // Minimal parser for the flat Dread player YAML we write/read (incl. option sets).
   const result = defaultYamlConfig();
-  const dread = { ...result["Metroid Dread"] };
+  const dread = { ...result["Metroid Bread"] };
   let inDread = false;
   let listKey = null;
   for (const raw of String(text || "").split(/\r?\n/)) {
     const line = raw.replace(/\t/g, "  ");
     if (!line.trim() || line.trim().startsWith("#")) continue;
-    if (/^Metroid Dread:\s*$/.test(line.trim()) || /^"Metroid Dread":\s*$/.test(line.trim())) {
+    if (/^Metroid Bread:\s*$/.test(line.trim()) || /^"Metroid Bread":\s*$/.test(line.trim())) {
       inDread = true;
       listKey = null;
       continue;
@@ -1885,7 +1957,7 @@ function parseSimpleYaml(text) {
   delete dread.dna_count;
   delete dread.dna_required;
 
-  result["Metroid Dread"] = dread;
+  result["Metroid Bread"] = dread;
   return result;
 }
 
@@ -1919,6 +1991,166 @@ function saveYamlFile(opts = {}) {
   }
 }
 
+/* ---------- Apworld updater (GitHub Releases) ---------- */
+
+function runApworldUpdater(actionArgs, { timeoutMs = 180000 } = {}) {
+  const launcher = findPythonLauncher();
+  if (!launcher) {
+    return {
+      ok: false,
+      update_available: false,
+      message: pythonMissingError(),
+      error: "python_missing",
+    };
+  }
+  if (!fs.existsSync(APWORLD_UPDATER_SCRIPT)) {
+    return {
+      ok: false,
+      update_available: false,
+      message: `apworld_updater.py not found:\n${APWORLD_UPDATER_SCRIPT}`,
+      error: "script_missing",
+    };
+  }
+  const result = spawnSync(
+    launcher.cmd,
+    [
+      ...launcher.prefixArgs,
+      APWORLD_UPDATER_SCRIPT,
+      "--json",
+      "--world-dir",
+      WORLD_DIR,
+      ...actionArgs,
+    ],
+    {
+      cwd: WORLD_DIR,
+      encoding: "utf8",
+      timeout: timeoutMs,
+      windowsHide: true,
+      env: pythonSpawnEnv(),
+    }
+  );
+  const stdout = String(result.stdout || "").trim();
+  const stderr = String(result.stderr || "").trim();
+  if (result.error) {
+    return {
+      ok: false,
+      update_available: false,
+      message: String(result.error.message || result.error),
+      error: "spawn_failed",
+      detail: stderr,
+    };
+  }
+  // Last JSON object on stdout (ignore log lines if any).
+  let payload = null;
+  const lines = stdout.split(/\r?\n/).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      payload = JSON.parse(lines[i]);
+      break;
+    } catch (_err) {
+      /* keep scanning */
+    }
+  }
+  if (!payload || typeof payload !== "object") {
+    return {
+      ok: false,
+      update_available: false,
+      message: stdout || stderr || `Updater exited ${result.status}`,
+      error: "bad_json",
+    };
+  }
+  return payload;
+}
+
+function checkApworldUpdate() {
+  try {
+    return runApworldUpdater(["check"], { timeoutMs: 30000 });
+  } catch (err) {
+    return {
+      ok: false,
+      update_available: false,
+      message: String(err.message || err),
+      error: "check_exception",
+    };
+  }
+}
+
+function installApworldUpdate(opts = {}) {
+  try {
+    const args = ["install"];
+    if (opts.url) {
+      args.push("--url", String(opts.url));
+    }
+    if (opts.expectedVersion) {
+      args.push("--expected-version", String(opts.expectedVersion));
+    }
+    return runApworldUpdater(args, { timeoutMs: 300000 });
+  } catch (err) {
+    return {
+      ok: false,
+      message: String(err.message || err),
+      error: "install_exception",
+    };
+  }
+}
+
+async function promptApworldUpdateIfAvailable({ interactiveIfCurrent = false } = {}) {
+  const check = checkApworldUpdate();
+  if (!check || check.error === "network_or_prerelease" || check.error === "python_missing") {
+    // Soft-fail: never block Hub startup on network / missing Python.
+    if (interactiveIfCurrent && check && check.message) {
+      await dialog.showMessageBox(mainWindow || undefined, {
+        type: "info",
+        title: "Apworld update check",
+        message: check.message,
+        buttons: ["OK"],
+      });
+    }
+    return check;
+  }
+  if (!check.update_available) {
+    if (interactiveIfCurrent) {
+      await dialog.showMessageBox(mainWindow || undefined, {
+        type: "info",
+        title: "Apworld update",
+        message: check.message || "Up to date.",
+        buttons: ["OK"],
+      });
+    }
+    return check;
+  }
+
+  const { response } = await dialog.showMessageBox(mainWindow || undefined, {
+    type: "question",
+    title: "Apworld update available",
+    message: check.message || "A newer metroid_bread.apworld is available.",
+    detail: "Download and install from GitHub Releases?",
+    buttons: ["Yes", "Not now", "Open releases page"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+
+  if (response === 2) {
+    await shell.openExternal(check.releases_url || APWORLD_RELEASES_URL);
+    return check;
+  }
+  if (response !== 0) {
+    return check;
+  }
+
+  const installed = installApworldUpdate({
+    url: check.download_url,
+    expectedVersion: check.remote_version,
+  });
+  await dialog.showMessageBox(mainWindow || undefined, {
+    type: installed && installed.ok ? "info" : "error",
+    title: installed && installed.ok ? "Update installed" : "Update failed",
+    message: (installed && installed.message) || "Unknown result",
+    buttons: ["OK"],
+  });
+  return { check, installed };
+}
+
 /* ---------- App lifecycle / IPC ---------- */
 
 app.whenReady().then(() => {
@@ -1926,6 +2158,12 @@ app.whenReady().then(() => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+  // Async startup update check — non-blocking after window exists.
+  setTimeout(() => {
+    promptApworldUpdateIfAvailable({ interactiveIfCurrent: false }).catch((err) => {
+      console.warn("Apworld startup update check failed:", err);
+    });
+  }, 2500);
 });
 
 app.on("window-all-closed", () => {
@@ -1946,6 +2184,16 @@ ipcMain.handle("get-config", () => {
   return cfg;
 });
 ipcMain.handle("save-config", (_e, partial) => saveConfig(partial || {}));
+ipcMain.handle("open-logs-folder", () => openLogsFolder());
+ipcMain.handle("check-apworld-update", () => checkApworldUpdate());
+ipcMain.handle("install-apworld-update", (_e, opts) =>
+  installApworldUpdate(opts || {})
+);
+ipcMain.handle("prompt-apworld-update", (_e, opts) =>
+  promptApworldUpdateIfAvailable({
+    interactiveIfCurrent: Boolean(opts && opts.interactiveIfCurrent),
+  })
+);
 ipcMain.handle("start-client", (_e, opts) => startClient(opts || {}));
 ipcMain.handle("probe-room-info", (_e, server) => probeRoomInfo(server || ""));
 ipcMain.handle("stop-client", () => {

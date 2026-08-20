@@ -116,10 +116,12 @@ def _crop_ap_cluster(logo: Image.Image) -> Image.Image:
 
 
 def render_ap_cell(logo_path: Path, size: int = CELL_SIZE) -> Image.Image:
+    """Fit the full-color AP cluster logo into one atlas cell (preserve RGBA)."""
     cell = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     if logo_path.is_file():
         cluster = _crop_ap_cluster(Image.open(logo_path))
     else:
+        # Fallback doodle if the logo file is missing (still multi-color-ish teal).
         cluster = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         draw = ImageDraw.Draw(cluster)
         cx, cy, r = 32, 32, 10
@@ -136,15 +138,9 @@ def render_ap_cell(logo_path: Path, size: int = CELL_SIZE) -> Image.Image:
     lum = rgb.max(axis=2)
     visible = (alpha > 8) & (lum > 20)
     out = np.zeros_like(arr)
-    out[visible, 0] = AP_TEAL[0]
-    out[visible, 1] = AP_TEAL[1]
-    out[visible, 2] = AP_TEAL[2]
+    # Keep source colors (same approach as the green in-logic "?" cell).
+    out[visible] = arr[visible]
     out[visible, 3] = 255
-    if visible.any():
-        bright = visible & (lum > int(lum[visible].mean()))
-        out[bright, 0] = AP_LIGHT[0]
-        out[bright, 1] = AP_LIGHT[1]
-        out[bright, 2] = AP_LIGHT[2]
     cluster = Image.fromarray(out, "RGBA")
     pad = 18
     fitted = cluster.resize((size - 2 * pad, size - 2 * pad), Image.Resampling.LANCZOS)
@@ -319,14 +315,19 @@ def main() -> int:
     ASSETS.mkdir(parents=True, exist_ok=True)
     src = _find_odr_icons()
     print(f"[INFO] source atlas: {src}")
-    logo_path = (
-        ROOT.parent.parent
-        / "WebHostLib"
-        / "static"
-        / "static"
-        / "branding"
-        / "header-logo.png"
-    )
+    # Prefer the vendored full-color cluster logo in assets/; fall back to AP data/icon.png.
+    logo_path = ASSETS / "ap_logo_fullcolor.png"
+    if not logo_path.is_file():
+        logo_path = ROOT.parent.parent / "data" / "icon.png"
+    if not logo_path.is_file():
+        logo_path = (
+            ROOT.parent.parent
+            / "WebHostLib"
+            / "static"
+            / "static"
+            / "branding"
+            / "header-logo.png"
+        )
     in_logic_path = ASSETS / "ap_in_logic_question.png"
     print(f"[INFO] logo: {logo_path} exists={logo_path.is_file()}")
     print(f"[INFO] in-logic ?: {in_logic_path} exists={in_logic_path.is_file()}")

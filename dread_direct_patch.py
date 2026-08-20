@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Archipelago Metroid Dread — Direct Patcher (bypasses Randovania Export UI)
+Archipelago Metroid Bread — Direct Patcher (bypasses Randovania Export UI)
 
 ## How Randovania does it
 1. Load .rdvgame → LayoutDescription (presets + game_modifications)
@@ -908,7 +908,7 @@ def _patch_scenario_for_ap_warp(romfs: Path) -> None:
 def apply_ap_credits_branding(romfs: Path) -> None:
     """
     Post-process ODR credits.txt:
-      - Title: Metroid Dread → Metroid Bread
+      - Title: Metroid Bread → Metroid Bread
       - Insert "Archipelago Implementation" / Dummydude just before Major Item Locations
     Keeps the full Randomizer Credits block intact.
     """
@@ -1171,7 +1171,7 @@ def finalize_mod(
 
     # ODR writes stock remote-lua exlaunch; overlay custom OdrMap binders when available.
     # Must run AFTER ODR exefs install so VisitBounds is not overwritten by stock.
-    # See worlds/metroid_dread/docs/odrmap_exlaunch_binder.md.
+    # See worlds/metroid_bread/docs/odrmap_exlaunch_binder.md.
     install_custom_exlaunch(exefs, custom_exlaunch_deploy)
     log(
         "[OK] finalize_mod complete: ApWarp + TOC/pkg map script + "
@@ -1320,7 +1320,7 @@ def patch_from_spoiler(
 
 def main(argv: Optional[list[str]] = None) -> int:
     cfg = load_config()
-    parser = argparse.ArgumentParser(description="Patch Metroid Dread for Archipelago without Randovania Export")
+    parser = argparse.ArgumentParser(description="Patch Metroid Bread for Archipelago without Randovania Export")
     parser.add_argument("--spoiler", type=Path, help="Path to AP *_Spoiler.txt")
     parser.add_argument("--seed-folder", type=Path, help="AP output folder containing a spoiler")
     parser.add_argument("--player", default=cfg.get("player_name", "DreadPlayer"))

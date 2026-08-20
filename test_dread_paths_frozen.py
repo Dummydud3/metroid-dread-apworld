@@ -42,7 +42,7 @@ class FrozenApRootTests(unittest.TestCase):
             (frozen / "lib").mkdir(parents=True)
             (frozen / "lib" / "library.zip").write_bytes(b"PK\x03\x04")
             (frozen / "ArchipelagoLauncher.exe").write_bytes(b"MZ")
-            world = frozen / "custom_worlds" / "_metroid_dread_runtime"
+            world = frozen / "custom_worlds" / "_metroid_bread_runtime"
             src_core = WORLD / "ap_core"
             self.assertTrue((src_core / "CommonClient.py").is_file())
             shutil.copytree(src_core, world / "ap_core")
@@ -67,7 +67,7 @@ class FrozenApRootTests(unittest.TestCase):
         import pkgutil
         import types
 
-        name = "worlds.metroid_dread"
+        name = "worlds.metroid_bread"
         saved = {
             key: sys.modules.pop(key)
             for key in list(sys.modules)

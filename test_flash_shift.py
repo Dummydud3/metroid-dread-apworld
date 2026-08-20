@@ -6,7 +6,7 @@ import unittest
 
 class TestFlashShiftPlan(unittest.TestCase):
     def test_vanilla_plan(self):
-        from worlds.metroid_dread.flash_shift import plan_from_options
+        from worlds.metroid_bread.flash_shift import plan_from_options
 
         class O:
             vanilla_flash_shift_behaviour = type("T", (), {"value": 1})()
@@ -22,7 +22,7 @@ class TestFlashShiftPlan(unittest.TestCase):
         self.assertEqual(plan["included_ammo"], 2)
 
     def test_require_main_plan(self):
-        from worlds.metroid_dread.flash_shift import plan_from_options
+        from worlds.metroid_bread.flash_shift import plan_from_options
 
         class O:
             vanilla_flash_shift_behaviour = type("T", (), {"value": 0})()
@@ -38,7 +38,7 @@ class TestFlashShiftPlan(unittest.TestCase):
         self.assertEqual(plan["upgrade_count"], 4)
 
     def test_progressive_plan(self):
-        from worlds.metroid_dread.flash_shift import plan_from_options
+        from worlds.metroid_bread.flash_shift import plan_from_options
 
         class O:
             vanilla_flash_shift_behaviour = type("T", (), {"value": 0})()
@@ -53,7 +53,7 @@ class TestFlashShiftPlan(unittest.TestCase):
         self.assertEqual(plan["upgrade_count"], 3)
 
     def test_legacy_extras_are_progressive(self):
-        from worlds.metroid_dread.flash_shift import plan_from_extras
+        from worlds.metroid_bread.flash_shift import plan_from_extras
 
         plan = plan_from_extras({"flash_shift_upgrade_count": 7})
         self.assertFalse(plan["vanilla"])
@@ -63,7 +63,7 @@ class TestFlashShiftPlan(unittest.TestCase):
 
 class TestFlashShiftLogic(unittest.TestCase):
     def test_vanilla_ability_and_chains(self):
-        from worlds.metroid_dread.flash_shift import logical_ability_and_chains
+        from worlds.metroid_bread.flash_shift import logical_ability_and_chains
 
         plan = {
             "vanilla": True,
@@ -79,7 +79,7 @@ class TestFlashShiftLogic(unittest.TestCase):
         self.assertEqual(chains, 0)
 
     def test_require_main_upgrades_do_not_unlock(self):
-        from worlds.metroid_dread.flash_shift import logical_ability_and_chains
+        from worlds.metroid_bread.flash_shift import logical_ability_and_chains
 
         plan = {
             "vanilla": False,
@@ -97,7 +97,7 @@ class TestFlashShiftLogic(unittest.TestCase):
         self.assertEqual(chains, 4)  # included 2 + 2 upgrades
 
     def test_progressive_first_unlock(self):
-        from worlds.metroid_dread.flash_shift import logical_ability_and_chains
+        from worlds.metroid_bread.flash_shift import logical_ability_and_chains
 
         plan = {
             "vanilla": False,
@@ -115,8 +115,8 @@ class TestFlashShiftLogic(unittest.TestCase):
 
 class TestFlashShiftMapping(unittest.TestCase):
     def test_main_resources_vanilla(self):
-        from worlds.metroid_dread.flash_shift import main_resources
-        from worlds.metroid_dread.dread_item_mapping import get_dread_item_data
+        from worlds.metroid_bread.flash_shift import main_resources
+        from worlds.metroid_bread.dread_item_mapping import get_dread_item_data
 
         res = main_resources(2)
         self.assertEqual(res[0]["item_id"], "ITEM_GHOST_AURA")
@@ -129,9 +129,9 @@ class TestFlashShiftMapping(unittest.TestCase):
 
 class TestFlashShiftOptionsRegistered(unittest.TestCase):
     def test_option_names(self):
-        from worlds.metroid_dread.Options import MetroidDreadOptions
+        from worlds.metroid_bread.Options import MetroidBreadOptions
 
-        fields = getattr(MetroidDreadOptions, "__annotations__", {})
+        fields = getattr(MetroidBreadOptions, "__annotations__", {})
         self.assertIn("vanilla_flash_shift_behaviour", fields)
         self.assertIn("flash_shift_upgrade_count", fields)
         self.assertIn("flash_shift_upgrade_requires_main_item", fields)
@@ -140,7 +140,7 @@ class TestFlashShiftOptionsRegistered(unittest.TestCase):
 class TestFlashShiftClassification(unittest.TestCase):
     def test_upgrade_default_is_filler_like_missile(self):
         from BaseClasses import ItemClassification
-        from worlds.metroid_dread.Items import item_table
+        from worlds.metroid_bread.Items import item_table
 
         self.assertEqual(
             item_table["Flash Shift Upgrade"].classification,
@@ -156,7 +156,7 @@ class TestFlashShiftClassification(unittest.TestCase):
         )
 
     def test_vanilla_plan_adds_no_upgrades(self):
-        from worlds.metroid_dread.flash_shift import plan_from_options
+        from worlds.metroid_bread.flash_shift import plan_from_options
 
         class O:
             vanilla_flash_shift_behaviour = type("T", (), {"value": 1})()

@@ -188,7 +188,8 @@ function extractRoomInfo(payload) {
 }
 
 /**
- * Electron main uses Node 20 (no global WebSocket). Prefer global when present
+ * Electron main historically lacked a global WebSocket on older Node;
+ * prefer global when present, otherwise use the `ws` package.
  * (Node 22+ / browsers), else the `ws` package.
  */
 function resolveWebSocketImpl(explicit) {

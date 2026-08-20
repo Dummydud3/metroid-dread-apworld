@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 _ROOT = Path(__file__).resolve().parent
 # Prefer dread_paths so AP root (Options/CommonClient) wins over this world dir's Options.py.
-# Runtime extracts at custom_worlds/_metroid_dread_runtime must not shadow via parents[1].
+# Runtime extracts at custom_worlds/_metroid_bread_runtime must not shadow via parents[1].
 try:
     import dread_paths
 
@@ -66,7 +66,7 @@ SOLO_LOCATION_RE = re.compile(
 )
 PLAYER_HEADER_RE = re.compile(r"^Player \d+:\s*(.+)$")
 SOLO_SLOT_NAME = "__solo_dread__"
-# Spoiler header from MetroidDreadWorld.write_spoiler_header
+# Spoiler header from MetroidBreadWorld.write_spoiler_header
 STARTING_LOCATION_RE = re.compile(
     r"^Starting Location \((?P<player>[^)]+)\):\s*(?P<path>.+)$"
 )
@@ -74,9 +74,9 @@ DREAD_PATCH_EXTRAS_PREFIX = "DREAD_PATCH_EXTRAS_JSON:"
 DREAD_DNA_LOCS_PREFIX = "DREAD_DNA_LOCATIONS:"
 
 # Load AP → Randovania location mapping.
-# Under frozen installs, dread_paths registers WORLD_DIR as worlds.metroid_dread.
-from worlds.metroid_dread.rdvgame_export import AP_TO_RANDOVANIA_LOCATION_MAP
-from worlds.metroid_dread.starting_locations import (
+# Under frozen installs, dread_paths registers WORLD_DIR as worlds.metroid_bread.
+from worlds.metroid_bread.rdvgame_export import AP_TO_RANDOVANIA_LOCATION_MAP
+from worlds.metroid_bread.starting_locations import (
     DEFAULT_PATCHER_REF,
     get_by_path,
     patcher_ref_for_node,
@@ -96,7 +96,7 @@ def _iter_spoiler_header_lines(spoiler_path: Path):
 
 
 def _spoiler_header_player_names(spoiler_path: Path) -> List[str]:
-    """Player names from MetroidDreadWorld.write_spoiler_header machine lines."""
+    """Player names from MetroidBreadWorld.write_spoiler_header machine lines."""
     seen: set[str] = set()
     names: List[str] = []
     for line in _iter_spoiler_header_lines(spoiler_path):
@@ -133,7 +133,7 @@ def _path_to_patcher_ref(path: str, player: str) -> Dict[str, str]:
 
 
 def is_solo_dread_spoiler(spoiler_path: Path) -> bool:
-    """True when spoiler is a single-game Metroid Dread seed (no Player N: blocks)."""
+    """True when spoiler is a single-game Metroid Bread seed (no Player N: blocks)."""
     saw_player_header = False
     saw_solo_game = False
     with open(spoiler_path, encoding="utf-8", errors="replace") as f:
@@ -144,13 +144,13 @@ def is_solo_dread_spoiler(spoiler_path: Path) -> bool:
             if PLAYER_HEADER_RE.match(line):
                 saw_player_header = True
                 break
-            if line.startswith("Game:") and line.split(":", 1)[1].strip() == "Metroid Dread":
+            if line.startswith("Game:") and line.split(":", 1)[1].strip() == "Metroid Bread":
                 saw_solo_game = True
     return saw_solo_game and not saw_player_header
 
 
 def detect_dread_players(spoiler_path: Path) -> List[str]:
-    """Return player names whose game is Metroid Dread (spoiler header)."""
+    """Return player names whose game is Metroid Bread (spoiler header)."""
     if is_solo_dread_spoiler(spoiler_path):
         header_names = _spoiler_header_player_names(spoiler_path)
         if header_names:
@@ -171,7 +171,7 @@ def detect_dread_players(spoiler_path: Path) -> List[str]:
                 continue
             if current is not None and line.startswith("Game:"):
                 game = line.split(":", 1)[1].strip()
-                if game == "Metroid Dread":
+                if game == "Metroid Bread":
                     players.append(current)
                 current = None
     return players
@@ -180,7 +180,7 @@ def detect_dread_players(spoiler_path: Path) -> List[str]:
 def resolve_dread_player(spoiler_path: Path, requested: str) -> str:
     """
     Use requested name if it has placements; otherwise auto-pick the sole
-    Metroid Dread player from the spoiler header.
+    Metroid Bread player from the spoiler header.
     """
     if is_solo_dread_spoiler(spoiler_path):
         header_names = _spoiler_header_player_names(spoiler_path)
@@ -188,12 +188,12 @@ def resolve_dread_player(spoiler_path: Path, requested: str) -> str:
             actual = header_names[0]
             if requested and requested != actual:
                 print(
-                    f"[INFO] Solo Metroid Dread spoiler — player in header is "
+                    f"[INFO] Solo Metroid Bread spoiler — player in header is "
                     f"{actual!r} (requested {requested!r})"
                 )
             return actual
         name = (requested or "DreadPlayer").strip() or "DreadPlayer"
-        print(f"[INFO] Solo Metroid Dread spoiler — using player label {name!r}")
+        print(f"[INFO] Solo Metroid Bread spoiler — using player label {name!r}")
         return name
 
     dread_players = detect_dread_players(spoiler_path)
@@ -204,7 +204,7 @@ def resolve_dread_player(spoiler_path: Path, requested: str) -> str:
         if requested and requested != only:
             print(
                 f"[WARN] No placements for player '{requested}'. "
-                f"Auto-using Metroid Dread player '{only}' from spoiler."
+                f"Auto-using Metroid Bread player '{only}' from spoiler."
             )
         return only
     if requested in dread_players:
@@ -213,11 +213,11 @@ def resolve_dread_player(spoiler_path: Path, requested: str) -> str:
         listed = ", ".join(repr(p) for p in dread_players)
         raise ValueError(
             f"No item placements for player {requested!r}.\n"
-            f"Metroid Dread player(s) in this spoiler: {listed}\n"
+            f"Metroid Bread player(s) in this spoiler: {listed}\n"
             f"Pass --player with the exact name from your YAML."
         )
     raise ValueError(
-        f"No Metroid Dread player found in spoiler, and no placements for {requested!r}."
+        f"No Metroid Bread player found in spoiler, and no placements for {requested!r}."
     )
 
 
@@ -983,7 +983,7 @@ def _set_nested(root: dict, path: tuple[str, ...], value) -> None:
 
 
 def parse_dread_patch_extras(spoiler_path: Path, player_name: str) -> dict:
-    """Read machine-readable extras written by MetroidDreadWorld.write_spoiler*."""
+    """Read machine-readable extras written by MetroidBreadWorld.write_spoiler*."""
     collected: List[Tuple[str, dict, list]] = []
     try:
         for line in _iter_spoiler_header_lines(spoiler_path):
@@ -1163,8 +1163,43 @@ def apply_dread_patch_extras(patcher_data: dict, extras: dict, *, our_player: st
 
     door_patches = extras.get("door_patches") or []
     if door_patches:
-        patcher_data["door_patches"] = door_patches
-        print(f"[OK] Applied {len(door_patches)} door_patches from seed options")
+        from worlds.metroid_bread.door_rando_db import (
+            ODR_CANNOT_ADD_DOOR_TYPES,
+            is_odr_patchable_door_actor,
+            patchable_door_types,
+        )
+
+        allowed = patchable_door_types()
+        cleaned = []
+        dropped_actors = []
+        for entry in door_patches:
+            if not isinstance(entry, dict):
+                continue
+            door_type = entry.get("door_type")
+            if door_type in ODR_CANNOT_ADD_DOOR_TYPES:
+                raise ValueError(
+                    f"door_patches refuse non-addable door_type={door_type!r} "
+                    f"(never emit phantom_cloak / phase_shift)"
+                )
+            if door_type not in allowed:
+                raise ValueError(
+                    f"door_patches refuse unsupported door_type={door_type!r}; "
+                    f"allowed={sorted(allowed)}"
+                )
+            actor_ref = entry.get("actor") if isinstance(entry.get("actor"), dict) else {}
+            actor_name = actor_ref.get("actor") if actor_ref else None
+            # Defense-in-depth: never forward shutters / thermal / unknown defs.
+            if not is_odr_patchable_door_actor(str(actor_name or "")):
+                dropped_actors.append(str(actor_name or "?"))
+                continue
+            cleaned.append(entry)
+        patcher_data["door_patches"] = cleaned
+        if dropped_actors:
+            print(
+                f"[WARN] Dropped {len(dropped_actors)} non-patchable door actor(s): "
+                f"{dropped_actors[:8]}"
+            )
+        print(f"[OK] Applied {len(cleaned)} door_patches from seed options")
 
     elevators = extras.get("elevators") or []
     if elevators:

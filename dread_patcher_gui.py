@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Metroid Dread Archipelago Patcher GUI
+Metroid Bread Archipelago Patcher GUI
 
-A simple GUI tool to convert Archipelago spoiler files to patched Metroid Dread mods.
+A simple GUI tool to convert Archipelago spoiler files to patched Metroid Bread mods.
 This streamlines the entire process into a few clicks!
 """
 
@@ -22,7 +22,7 @@ from ap_to_patcher import create_patcher_json
 class DreadPatcherGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Metroid Dread AP Patcher")
+        self.root.title("Metroid Bread AP Patcher")
         self.root.geometry("800x600")
         self.root.resizable(True, True)
         
@@ -47,7 +47,7 @@ class DreadPatcherGUI:
         main_frame.rowconfigure(6, weight=1)
         
         # Title
-        title_label = ttk.Label(main_frame, text="Metroid Dread Archipelago Patcher", 
+        title_label = ttk.Label(main_frame, text="Metroid Bread Archipelago Patcher", 
                                 font=('Arial', 16, 'bold'))
         title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
         
@@ -107,7 +107,7 @@ class DreadPatcherGUI:
         self.status_label.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
         
         # Initial log message
-        self.log("Metroid Dread Archipelago Patcher Ready!")
+        self.log("Metroid Bread Archipelago Patcher Ready!")
         self.log("1. Select your Archipelago spoiler file")
         self.log("2. Enter your player name (must match your YAML)")
         self.log("3. Click 'Generate & Patch' to create the mod")
@@ -324,9 +324,9 @@ class DreadPatcherGUI:
             self.log("="*70)
             self.log("\nNext steps:")
             self.log("1. Launch Ryujinx")
-            self.log("2. Start Metroid Dread")
+            self.log("2. Start Metroid Bread")
             self.log("3. Start a new save file")
-            self.log("4. Run MetroidDreadClient.py to connect")
+            self.log("4. Run MetroidBreadClient.py to connect")
             self.log("")
             
             # Clean up temp file
@@ -335,7 +335,7 @@ class DreadPatcherGUI:
             
             self.root.after(0, lambda: self.set_status("✅ Patch Complete!", "green"))
             self.root.after(0, lambda: messagebox.showinfo("Success", 
-                "Patch applied successfully!\n\nYou can now launch Metroid Dread in Ryujinx."))
+                "Patch applied successfully!\n\nYou can now launch Metroid Bread in Ryujinx."))
             
         except Exception as e:
             error_msg = str(e)

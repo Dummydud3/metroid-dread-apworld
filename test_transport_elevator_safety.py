@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import unittest
 
-from worlds.metroid_dread import TransportRando
-from worlds.metroid_dread.dread_logic import DreadLogic
+from worlds.metroid_bread import TransportRando
+from worlds.metroid_bread.dread_logic import DreadLogic
 
 
 class _Opt:
