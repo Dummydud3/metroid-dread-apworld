@@ -73,6 +73,10 @@ STARTING_LOCATION_RE = re.compile(
 DREAD_PATCH_EXTRAS_PREFIX = "DREAD_PATCH_EXTRAS_JSON:"
 DREAD_DNA_LOCS_PREFIX = "DREAD_DNA_LOCATIONS:"
 
+
+def _carousel_tip_env_hint() -> str:
+    return "METROID_BREAD_CAROUSEL_TIP_PATCHES=0 to disable later"
+
 # Load AP → Randovania location mapping.
 # Under frozen installs, dread_paths registers WORLD_DIR as worlds.metroid_bread.
 from worlds.metroid_bread.rdvgame_export import AP_TO_RANDOVANIA_LOCATION_MAP
@@ -387,11 +391,150 @@ def _display_item_name(item_name: str) -> str:
     return item_name.replace("_", " ")
 
 
+# ODR writes spoiler_log into credits.txt via null-terminated UTF-16 (CStringRobust).
+# RDV emits printable ASCII + "\n" for multi-copy majors; it does not scrub input.
+# Bread must scrub AP player/item names: nulls truncate BTXT entries, and control /
+# non-ASCII / emoji have crashed Switch text draws for some players at credits.
+_CREDITS_MAX_LINE = 64
+_CREDITS_MAX_LINES = 16
+
+# Majors shown under "Major Item Locations" (RDV / sample_patcher_WORKING order).
+CREDITS_SPOILER_ITEMS: Tuple[str, ...] = (
+    "Wide Beam",
+    "Plasma Beam",
+    "Wave Beam",
+    "Progressive Beam",
+    "Charge Beam",
+    "Diffusion Beam",
+    "Progressive Charge Beam",
+    "Grapple Beam",
+    "Missile Launcher",
+    "Super Missile",
+    "Ice Missile",
+    "Progressive Missiles",
+    "Storm Missile",
+    "Phantom Cloak",
+    "Flash Shift",
+    "Flash Shift Upgrade",
+    "Pulse Radar",
+    "Varia Suit",
+    "Gravity Suit",
+    "Progressive Suit",
+    "Morph Ball",
+    "Bomb",
+    "Cross Bomb",
+    "Progressive Bombs",
+    "Power Bomb",
+    "Spider Magnet",
+    "Speed Booster",
+    "Speed Booster Upgrade",
+    "Spin Boost",
+    "Space Jump",
+    "Progressive Spin",
+    "Screw Attack",
+    "Metroid DNA",
+)
+_CREDITS_SPOILER_ITEM_SET = frozenset(CREDITS_SPOILER_ITEMS)
+
+
+def sanitize_credits_text(
+    value: object,
+    *,
+    max_line: int = _CREDITS_MAX_LINE,
+    max_lines: int = _CREDITS_MAX_LINES,
+    allow_newlines: bool = True,
+) -> str:
+    """
+    Scrub a string destined for Dread credits.txt / in-game localization.
+
+    Keeps printable ASCII (0x20–0x7E). Optionally keeps ``\\n`` (RDV joins
+    multi-location majors with newlines). Everything else → ``?``.
+    """
+    text = str(value if value is not None else "")
+    text = text.replace("\x00", "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if not allow_newlines:
+        text = text.replace("\n", " ")
+
+    lines_in = text.split("\n") if allow_newlines else [text]
+    cleaned_lines: List[str] = []
+    for raw_line in lines_in[: max(1, int(max_lines))]:
+        out_chars: List[str] = []
+        for ch in raw_line:
+            o = ord(ch)
+            if 0x20 <= o <= 0x7E:
+                out_chars.append(ch)
+            elif ch in "\t\v\f":
+                out_chars.append(" ")
+            else:
+                out_chars.append("?")
+        line = "".join(out_chars).strip()
+        limit = max(1, int(max_line))
+        if len(line) > limit:
+            line = line[: max(0, limit - 3)].rstrip() + "..."
+        if line:
+            cleaned_lines.append(line)
+
+    if not cleaned_lines:
+        return "?"
+    return "\n".join(cleaned_lines) if allow_newlines else cleaned_lines[0]
+
+
+def sanitize_spoiler_log(spoiler_log: object) -> Dict[str, str]:
+    """Sanitize ODR ``spoiler_log`` keys/values (item → location text)."""
+    if not isinstance(spoiler_log, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for raw_key, raw_val in spoiler_log.items():
+        key = sanitize_credits_text(raw_key, max_line=_CREDITS_MAX_LINE, max_lines=1)
+        val = sanitize_credits_text(raw_val)
+        if key and key != "?":
+            out[key] = val
+    return out
+
+
+def build_credits_spoiler_log(
+    placements: List[Tuple],
+    *,
+    our_player: Optional[str] = None,
+) -> Dict[str, str]:
+    """
+    Build ODR ``spoiler_log`` for credits from AP placements (RDV-style).
+
+    Only our-world majors that belong to this player. Multi-copy items join
+    locations with ``\\n``. Location format: ``Region - Area``.
+    """
+    del our_player  # placements already carry is_ours / item_player
+    buckets: Dict[str, List[str]] = {name: [] for name in CREDITS_SPOILER_ITEMS}
+    for region, area, _node, item, _item_player, is_ours in placements:
+        if not is_ours or item not in _CREDITS_SPOILER_ITEM_SET:
+            continue
+        loc = sanitize_credits_text(
+            f"{region} - {area}",
+            max_line=_CREDITS_MAX_LINE,
+            max_lines=1,
+        )
+        if loc and loc not in buckets[item]:
+            buckets[item].append(loc)
+
+    result: Dict[str, str] = {}
+    for item in CREDITS_SPOILER_ITEMS:
+        entries = buckets.get(item) or []
+        if not entries:
+            continue
+        key = sanitize_credits_text(item, max_line=_CREDITS_MAX_LINE, max_lines=1)
+        result[key] = sanitize_credits_text("\n".join(entries))
+    return result
+
+
 def _format_pickup_caption(item_name: str, player_name: str = None) -> str:
     """In-game pickup notification shown when collecting a world location."""
-    display = _display_item_name(item_name)
+    display = sanitize_credits_text(
+        _display_item_name(item_name), max_lines=1, allow_newlines=False
+    )
     if player_name:
-        return f"You just grabbed {player_name}'s {display}!"
+        who = sanitize_credits_text(player_name, max_lines=1, allow_newlines=False)
+        return f"You just grabbed {who}'s {display}!"
     return f"You just grabbed {display}!"
 
 
@@ -401,9 +544,12 @@ def _map_icon_item_label(
     player_name: str = None,
 ) -> str:
     """Short minimap reveal name (no 'You just grabbed')."""
-    display = _display_item_name(item_name)
+    display = sanitize_credits_text(
+        _display_item_name(item_name), max_lines=1, allow_newlines=False
+    )
     if is_foreign and player_name:
-        return f"{player_name}'s {display}"
+        who = sanitize_credits_text(player_name, max_lines=1, allow_newlines=False)
+        return f"{who}'s {display}"
     return display
 
 
@@ -444,7 +590,10 @@ def _pickup_resources_and_caption(
             "Energy Tank",
             "Energy Part",
         ):
-            caption = item_data.get("caption") or caption
+            raw_caption = item_data.get("caption") or caption
+            caption = sanitize_credits_text(
+                raw_caption, max_lines=1, allow_newlines=False
+            )
         resources = _sanitize_resources(normalize_resource_progression(item_data["resources"]))
         if flash_shift_plan and item_name in ("Flash Shift", "Flash Shift Upgrade"):
             try:
@@ -1444,12 +1593,25 @@ def build_company_title_screen(
     odr_version: Optional[str] = None,
     seed_id: str,
 ) -> str:
-    ver = (version or ap_world_version()).strip()
-    odr = (odr_version or open_dread_rando_version()).strip()
-    sid = (seed_id or "unknown").strip() or "unknown"
-    return (
-        f"Metroid Bread AP\n"
-        f"AP World v{ver} - open-dread-rando {odr}|{sid}"
+    # Same printable-ASCII scrub as credits — title BTXT shares CStringRobust.
+    ver = sanitize_credits_text(
+        (version or ap_world_version()).strip(),
+        max_lines=1,
+        allow_newlines=False,
+    )
+    odr = sanitize_credits_text(
+        (odr_version or open_dread_rando_version()).strip(),
+        max_lines=1,
+        allow_newlines=False,
+    )
+    sid = sanitize_credits_text(
+        (seed_id or "unknown").strip() or "unknown",
+        max_lines=1,
+        allow_newlines=False,
+    )
+    return sanitize_credits_text(
+        f"Metroid Bread AP\nAP World v{ver} - open-dread-rando {odr}|{sid}",
+        max_lines=2,
     )
 
 
@@ -1584,7 +1746,8 @@ def create_patcher_json(
         "elevators": template_patcher.get("elevators", []),
         "hints": [],  # filled from spoiler below
         "text_patches": template_patcher.get("text_patches", {}),
-        "spoiler_log": template_patcher.get("spoiler_log", {}),  # Dict, not array
+        # Built from this seed below (never ship sample_patcher leftovers).
+        "spoiler_log": {},
         # Deep-copy so seed cosmetics cannot mutate the shared template dict.
         "cosmetic_patches": copy.deepcopy(template_patcher.get("cosmetic_patches", {})),
         "energy_per_tank": template_patcher.get("energy_per_tank", 100),
@@ -1626,6 +1789,13 @@ def create_patcher_json(
 
     patcher_data["hints"] = build_adam_hints(placements, our_player=our_player_name)
     print(f"[OK] Generated {len(patcher_data['hints'])} Adam Nav Station hints")
+
+    # Credits "Major Item Locations" (ODR patch_credits). Always seed-built +
+    # sanitized — never copy sample_patcher spoiler_log (wrong locations / dirty
+    # chars). Empty is OK: branding falls back when Major Item Locations is absent.
+    spoiler_log = build_credits_spoiler_log(placements, our_player=our_player_name)
+    patcher_data["spoiler_log"] = spoiler_log
+    print(f"[OK] Credits spoiler_log: {len(spoiler_log)} major item entries")
 
     apply_dread_patch_extras(patcher_data, extras, our_player=our_player_name)
 
@@ -1766,6 +1936,25 @@ def create_patcher_json(
     no_icon = len(keys_preview.get("skipped") or [])
     if no_icon:
         print(f"     - {no_icon} pickups keep their vanilla map icon (no ItemCustom slot)")
+
+    # AP context-4 tip carousel experiment (TIP_000–TIP_004). Default ON.
+    # Disable: METROID_BREAD_CAROUSEL_TIP_PATCHES=0 then re-patch.
+    from dread_carousel_tip_patches import (
+        build_carousel_tip_text_patches,
+        carousel_tip_text_patches_enabled,
+    )
+
+    if carousel_tip_text_patches_enabled():
+        tip_patches = build_carousel_tip_text_patches()
+        patcher_data["text_patches"] = merge_text_patches(
+            patcher_data.get("text_patches"), tip_patches
+        )
+        print(
+            f"[OK] Carousel tip text_patches: {len(tip_patches)} keys "
+            f"(TIP_000–TIP_004 AP POOL4 markers; {_carousel_tip_env_hint()})"
+        )
+    else:
+        print("[INFO] Carousel tip text_patches skipped (disabled)")
 
     # Title screen: replace RDV sample leftovers with AP branding + real seed id.
     title = apply_company_title_screen(patcher_data, spoiler_path=spoiler_path)

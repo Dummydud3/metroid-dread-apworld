@@ -84,7 +84,7 @@ ITEM_SHORT_TO_AP: Dict[str, Optional[str]] = {
     "Charge": "Charge Beam",
     "Diffusion": "Diffusion Beam",
     "Grapple": "Grapple Beam",
-    "MissileLauncher": None,  # always available in Dread
+    "MissileLauncher": None,  # always available in Dread (ammo gates fire)
     "Supers": "Super Missile",
     "Ice": "Ice Missile",
     "Storm": "Storm Missile",
@@ -106,7 +106,7 @@ ITEM_SHORT_TO_AP: Dict[str, Optional[str]] = {
     "Screw": "Screw Attack",
     "ETank": "Energy Tank",
     "EFragment": "Energy Part",
-    "MissileAmmo": None,  # capacity; base missiles always usable
+    "MissileAmmo": "__missile_ammo__",  # capacity from starting_missiles + tanks
     "PBAmmo": "__pb_ammo__",
     "Slide": None,  # default ability
     "Metroidnization": None,
@@ -136,7 +136,7 @@ ITEM_SHORT_TO_AP: Dict[str, Optional[str]] = {
     "SpinBoost": "Spin Boost",
     "SpaceJump": "Space Jump",
     "ScrewAttack": "Screw Attack",
-    "Missile": None,
+    "Missile": "__missile_ammo__",
     "PowerBombAmmo": "__pb_ammo__",
     "Energy": "__energy__",
     "WaterNoBreath": None,
@@ -239,8 +239,33 @@ class DreadLogic:
             owned.add("Flash Shift Upgrade")
         owned.add(f"__flash_upgrade_{int(chains)}__")
 
-        # Synthetic capacity tokens — base missiles always available in Dread
-        owned.add("__missiles__")
+        # Synthetic capacity tokens — missiles from starting ammo + tanks.
+        start_missiles = 15
+        try:
+            start_missiles = int(self.world.options.starting_missiles.value)
+        except Exception:
+            start_missiles = 15
+        mt_per = 2
+        try:
+            mt_per = int(self.world.options.missile_tank_ammo.value)
+        except Exception:
+            mt_per = 2
+        mp_per = 10
+        try:
+            mp_per = int(self.world.options.missile_plus_tank_ammo.value)
+        except Exception:
+            mp_per = 10
+        missiles = (
+            start_missiles
+            + int(counts.get("Missile Tank", 0) or 0) * mt_per
+            + int(counts.get("Missile+ Tank", 0) or 0) * mp_per
+        )
+        # Optional launcher pickup grants capacity (same as dread_item_mapping).
+        if int(counts.get("Missile Launcher", 0) or 0) > 0:
+            missiles += 15
+        owned.add(f"__missile_ammo_{int(missiles)}__")
+        if missiles > 0:
+            owned.add("__missiles__")
         # Main Power Bomb includes starting PB ammo; tanks add per-tank yield.
         start_pb = 0
         try:
@@ -411,6 +436,18 @@ class DreadLogic:
                 return True
             if ap == "__pb_ammo__":
                 return "__pb_ammo__" in inventory or "Power Bomb" in inventory
+            if ap == "__missile_ammo__":
+                best = 0
+                for token in inventory:
+                    if token.startswith("__missile_ammo_") and token.endswith("__"):
+                        try:
+                            best = max(best, int(token[len("__missile_ammo_"):-2]))
+                        except ValueError:
+                            pass
+                # Legacy presence token from hand-built inventories / older tests.
+                if best == 0 and "__missiles__" in inventory:
+                    best = 1
+                return best >= amount
             if ap == "__energy__":
                 best = 99
                 for token in inventory:

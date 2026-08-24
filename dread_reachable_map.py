@@ -31,6 +31,53 @@ def region_to_scenario() -> Dict[str, str]:
     return dict(load_map_data().get("region_to_scenario") or {})
 
 
+def scenario_to_region() -> Dict[str, str]:
+    """Inverse of region_to_scenario (one region per scenario id)."""
+    return {scenario: region for region, scenario in region_to_scenario().items()}
+
+
+def area_at_position(
+    scenario: str,
+    x: float,
+    y: float,
+) -> Optional[str]:
+    """
+    Resolve world (x, y) to a logic-database area name for *scenario*.
+
+    Uses AABB bounds from reachable_map_cells.json (same names as
+    ``DreadLogic.reachable_areas`` / minimap paint). When AABBs overlap,
+    prefers the smallest containing box.
+    """
+    scen = (scenario or "").strip()
+    if not scen:
+        return None
+    scenarios = load_map_data().get("scenarios") or {}
+    areas = (scenarios.get(scen) or {}).get("areas") or {}
+    best_name: Optional[str] = None
+    best_area = float("inf")
+    for name, meta in areas.items():
+        bounds = (meta or {}).get("bounds")
+        if not bounds or len(bounds) < 4:
+            continue
+        x1, y1, x2, y2 = (
+            float(bounds[0]),
+            float(bounds[1]),
+            float(bounds[2]),
+            float(bounds[3]),
+        )
+        if x1 > x2:
+            x1, x2 = x2, x1
+        if y1 > y2:
+            y1, y2 = y2, y1
+        if x < x1 or x > x2 or y < y1 or y > y2:
+            continue
+        area = (x2 - x1) * (y2 - y1)
+        if area < best_area:
+            best_area = area
+            best_name = str(name)
+    return best_name
+
+
 def format_apply_reachable_lua(areas: Iterable[RegionArea]) -> str:
     """
     Build RL.ApplyReachableMap(...) call grouping areas by scenario.

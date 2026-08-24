@@ -501,7 +501,11 @@ if not RandomizerPowerup._APFlashUpgradeHooked then
     local _APIncreaseItemAmount = RandomizerPowerup.IncreaseItemAmount
     function RandomizerPowerup.IncreaseItemAmount(item_id, quantity, capacity)
         if item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and quantity and quantity > 0 then
-            if not RandomizerPowerup.HasItem("ITEM_GHOST_AURA") and not ap_flash_shift_requires_main() then
+            -- Progressive first unlock: ability only (0 chains). Flag covers the case
+            -- where OnPickedUp already set Ghost Aura before IncreaseItemAmount runs.
+            if RandomizerPowerup._APFlashFirstUnlock then
+                quantity = 0
+            elseif not RandomizerPowerup.HasItem("ITEM_GHOST_AURA") and not ap_flash_shift_requires_main() then
                 RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
                 Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
                 quantity = 0
@@ -520,9 +524,10 @@ setmetatable(RandomizerFlashShiftUpgrade, {__index = RandomizerPowerup})
 function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
     progression = progression or {{{item_id = "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", quantity = 1}}}
     local first = not RandomizerPowerup.HasItem("ITEM_GHOST_AURA")
+    RandomizerPowerup._APFlashFirstUnlock = false
     if first and not ap_flash_shift_requires_main() then
-        RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
-        Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
+        -- Strip chains before granting Ghost so a nested IncreaseItemAmount cannot
+        -- stack included_ammo / upgrade qty onto the unlock pickup (was: 3 flashes).
         for _, resource_list in ipairs(progression) do
             for _, resource in ipairs(resource_list) do
                 if resource.item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" then
@@ -530,8 +535,12 @@ function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
                 end
             end
         end
+        RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
+        RandomizerPowerup._APFlashFirstUnlock = true
+        Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
     end
     RandomizerPowerup.OnPickedUp(actor, progression)
+    RandomizerPowerup._APFlashFirstUnlock = false
 end
 
 function RandomizerFlashShift.OnPickedUp(actor, progression)

@@ -1028,7 +1028,7 @@ def hub_env_from_connect(
     if connect.get("auto_connect"):
         env["DREAD_HUB_AUTO_CONNECT"] = "1"
     # Prefer managed portable CPython for Hub-spawned MetroidBreadClient.
-    # On Linux, prefer the local venv once it exists (client packages land there).
+    # Prefer the local venv once it exists (client packages land there on Linux/Windows).
     managed_py = managed_python_cmd()
     if managed_py:
         env["DREAD_HUB_PYTHON"] = managed_py[0]
@@ -1037,9 +1037,9 @@ def hub_env_from_connect(
         hub_path = Path(hub_dir) if hub_dir else find_hub_dir() or Path.cwd()
         world = find_world_dir_for_hub(hub_path)
         try:
-            from ensure_client_deps import uses_linux_venv, venv_python_path
+            from ensure_client_deps import uses_local_venv, venv_python_path
 
-            if uses_linux_venv():
+            if uses_local_venv():
                 vpy = venv_python_path(world)
                 if vpy.is_file():
                     env["DREAD_HUB_PYTHON"] = str(vpy)
@@ -1368,9 +1368,9 @@ def ensure_system_client_python_deps(world_dir: Optional[Path] = None) -> str:
 
     Archipelago Launcher / Text Client use a bundled interpreter that already
     has deps; Hub spawns host Python with SKIP_REQUIREMENTS_UPDATE=1, so those
-    packages must be installed separately. On Linux, ensure_client_deps uses a
-    local ``_metroid_bread_venv`` (never systemwide / ``pip install --user``);
-    ODR may land in the venv or remain visible via ``--system-site-packages``.
+    packages must be installed separately. On Linux/Windows, ensure_client_deps uses a
+    local venv (never Store Python ``--user`` site-packages — those hit MAX_PATH for
+    open-dread-rando). Linux may still see a host ODR via ``--system-site-packages``.
     Raises RuntimeError with a clear user-facing message on failure.
     """
     world = Path(world_dir) if world_dir else world_package_dir()

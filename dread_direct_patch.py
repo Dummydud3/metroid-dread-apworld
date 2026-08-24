@@ -37,6 +37,19 @@ ApWarp hotkeys (location-independent warps)
   Any prior -- AP_HK_AUTOSAVE / ProgressKeeper bootstrap is stripped on every patch
   (that path was wiping inventory on load).
 
+Loading tips on Continue / New Game
+-----------------------------------
+  finalize_mod() installs dread_scripts/ap_loading_tips.lua (TOC + system.pkg) and
+  patches system/scripts/init.lc to DoFile + ApLoadingTips.Install(). With OdrTip
+  subsdk9, Install wraps LoadGame / OnLoadScenarioRequest / StartPrologue /
+  LoadProfile to call Game.SetForcedTooltip only (no ShowLoadingScreen thrash).
+  SetLoadingMode trampoline re-applies LOADING+0x68.
+
+  Experiment (default ON): ap_to_patcher + finalize_mod also rewrite BTXT for the
+  AP context-4 carousel (TIP_000–TIP_004) via ODR text_patches / live romfs
+  when OdrTip forces context class 4. Titles become "AP POOL4 0"…"AP POOL4 4".
+  Disable with METROID_BREAD_CAROUSEL_TIP_PATCHES=0 then re-patch (or re-run finalize).
+
 Reachable minimap (AP logic → bright map)
 -----------------------------------------
   finalize_mod() installs bounds-only reachable_map_cells.lua the ODR way:
@@ -58,7 +71,8 @@ Reachable minimap (AP logic → bright map)
   5. HUD matches pause map (same visit bits)
   6. /map_smoke and /map_smoke_bounds for bright smoke tests
   7. /map_icon_smoke [actor] for ForceEntityIconVisible (map icon pop-out)
-  8. Collect item → map inspector shows "{Item} (Collected)"; die/reload restores labels
+  8. /map_unlock_region [scenario] probes AreaBox world-map unlock (OdrMap.UnlockWorldRegion)
+  9. Collect item → map inspector shows "{Item} (Collected)"; die/reload restores labels
 
 Usage
 -----
@@ -407,21 +421,58 @@ def _format_odr_validation_error(err: str, *, head: int = 1800, tail: int = 500)
 
 
 def validate_patcher_json(patcher_data: dict) -> None:
-    """Fail fast with a clear error if open-dread-rando would reject the JSON."""
+    """Fail fast with a clear error if open-dread-rando would reject the JSON.
+
+    Validates against ``files/schema.json`` only — do **not** import
+    ``open_dread_rando.dread_patcher`` here. That module pulls cosmetic →
+    misc_patches; a broken/partial pip install then fails with
+    ``ModuleNotFoundError: misc_patches`` even though the JSON is fine.
+    """
+    schema = None
     try:
-        from open_dread_rando.dread_patcher import validate
-    except ImportError:
-        # Validate in the ODR python via subprocess later; soft-skip here
-        log("[WARN] open_dread_rando not importable in this Python; schema check deferred")
+        import open_dread_rando
+
+        schema_path = (
+            Path(open_dread_rando.__file__).resolve().parent / "files" / "schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    except ModuleNotFoundError as exc:
+        name = str(exc)
+        if "open_dread_rando" in name or "misc_patches" in name:
+            raise PatchError(_broken_odr_install_message(exc)) from exc
+        log(f"[WARN] open_dread_rando not importable ({exc}); schema check deferred")
         return
+    except Exception as exc:
+        log(f"[WARN] could not load ODR schema.json ({exc}); schema check deferred")
+        return
+
     try:
-        validate(patcher_data)
+        from open_dread_rando.validator_with_default import (
+            DefaultValidatingDraft7Validator,
+        )
+
+        DefaultValidatingDraft7Validator(schema).validate(patcher_data)
         log("[OK] patcher.json passes open-dread-rando schema")
+    except ModuleNotFoundError as exc:
+        raise PatchError(_broken_odr_install_message(exc)) from exc
     except Exception as e:
         raise PatchError(
             "patcher.json failed open-dread-rando validation:\n"
             f"{_format_odr_validation_error(str(e))}"
         ) from e
+
+
+def _broken_odr_install_message(exc: BaseException) -> str:
+    return (
+        "Broken or incomplete open-dread-rando install "
+        f"({exc}).\n"
+        "Hub Connect now installs ODR into a short local venv on Windows "
+        f"(%LOCALAPPDATA%\\MetroidBread\\venv) to avoid MAX_PATH failures.\n"
+        "Retry Connect, or manually:\n"
+        '  "%LOCALAPPDATA%\\MetroidBread\\venv\\Scripts\\python.exe" -m pip install '
+        '--force-reinstall "open-dread-rando>=2.19"\n'
+        "Do not pip install into Microsoft Store Python (path too long)."
+    )
 
 
 def verify_elevator_brflds(romfs: Path, patcher_json: Path) -> None:
@@ -623,6 +674,15 @@ def install_reachable_map_script(romfs: Path, src_lua: Path) -> None:
         log(f"[OK] removed oversized debug JSON {stale_json.name}")
 
 
+def install_map_unlock_region_script(romfs: Path) -> None:
+    """Register AreaBox unlock smoke for /map_unlock_region (DoFile, not bootstrap)."""
+    src = dread_paths.dread_scripts_dir() / "ap_map_unlock_region.lua"
+    if not src.is_file():
+        log(f"[WARN] missing {src} — /map_unlock_region DoFile will fail")
+        return
+    _register_system_script_asset(romfs, "ap_map_unlock_region", src.read_bytes())
+
+
 def install_ap_map_icon_atlas(romfs: Path) -> None:
     """Overwrite ODR's minimap icons.bctex with the AP-stamped atlas.
 
@@ -674,6 +734,18 @@ Game.DoFile("system/scripts/ap_warp.lua")
 if ApWarp and ApWarp.Install then
     ApWarp.Install()
 end
+""".lstrip()
+
+AP_LOADING_TIPS_MARKER = "-- AP_LOADING_TIPS"
+AP_LOADING_TIPS_BOOTSTRAP = """
+-- AP_LOADING_TIPS
+-- Early init hook: wrap ShowLoadingScreen so Continue / New Game get ForcedTooltip.
+pcall(function()
+  Game.DoFile("system/scripts/ap_loading_tips.lua")
+  if ApLoadingTips and ApLoadingTips.Install then
+    ApLoadingTips.Install()
+  end
+end)
 """.lstrip()
 
 _HK_AUTOSAVE_BLOCK_RE = re.compile(
@@ -905,12 +977,128 @@ def _patch_scenario_for_ap_warp(romfs: Path) -> None:
     log(f"[OK] patched scenario.lc with ApWarp.Install at EOF ({len(data)} bytes)")
 
 
+def _read_init_lc(romfs: Path) -> tuple[bytes, object]:
+    """Return (init.lc bytes, parsed Pkg). Raises PatchError if missing."""
+    from mercury_engine_data_structures.formats.pkg import Pkg
+    from mercury_engine_data_structures.game_check import Game
+
+    asset_lc = "system/scripts/init.lc"
+    toc_path = romfs / "system" / "files.toc"
+    pkg_path = romfs / "packs" / "system" / "system.pkg"
+    loose_lc = romfs / "system" / "scripts" / "init.lc"
+    loose_lua = romfs / "system" / "scripts" / "init.lua"
+
+    if not toc_path.is_file() or not pkg_path.is_file():
+        raise PatchError(
+            f"missing TOC/pkg under {romfs} — cannot patch {asset_lc}"
+        )
+
+    with pkg_path.open("rb") as f:
+        pkg = Pkg.parse_stream(f, target_game=Game.DREAD)
+
+    existing = pkg.get_asset(asset_lc)
+    if existing is None and loose_lc.is_file():
+        existing = loose_lc.read_bytes()
+    elif existing is None and loose_lua.is_file():
+        existing = loose_lua.read_bytes()
+    if existing is None:
+        raise PatchError(f"{asset_lc} not found in system.pkg after ODR")
+    return existing, pkg
+
+
+def _write_init_lc(romfs: Path, data: bytes, pkg) -> None:
+    """Write init.lc to loose romfs + system.pkg + TOC."""
+    from mercury_engine_data_structures.formats.toc import Toc
+    from mercury_engine_data_structures.game_check import Game
+
+    asset_lc = "system/scripts/init.lc"
+    toc_path = romfs / "system" / "files.toc"
+    pkg_path = romfs / "packs" / "system" / "system.pkg"
+    scripts_dir = romfs / "system" / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    (scripts_dir / "init.lc").write_bytes(data)
+    (scripts_dir / "init.lua").write_bytes(data)
+
+    if pkg.get_asset(asset_lc) is not None:
+        pkg.replace_asset(asset_lc, data)
+    else:
+        pkg.add_asset(asset_lc, data)
+    with pkg_path.open("wb") as f:
+        pkg.build_stream(f)
+
+    toc = Toc.parse(toc_path.read_bytes(), target_game=Game.DREAD)
+    toc.add_file(asset_lc, len(data))
+    toc.add_file(Toc.system_files_name(), len(toc.build()))
+    toc_path.write_bytes(toc.build())
+
+
+def install_ap_loading_tips_scripts(romfs: Path) -> None:
+    """Install ForcedTooltip tip injector + wire DoFile/Install into init.lc (+ scenario backup)."""
+    src = dread_paths.dread_scripts_dir() / "ap_loading_tips.lua"
+    if not src.is_file():
+        raise PatchError(f"missing ApLoadingTips script: {src}")
+    _register_system_script_asset(romfs, "ap_loading_tips", src.read_bytes())
+    _patch_init_for_ap_loading_tips(romfs)
+    _patch_scenario_for_ap_loading_tips(romfs)
+
+
+def _patch_init_for_ap_loading_tips(romfs: Path) -> None:
+    """
+    Append ApLoadingTips bootstrap at EOF of init.lc (idempotent).
+
+    Must run early (init), not scenario.lc alone — Continue/New Game show the loading
+    screen before Scenario bootstrap would run. scenario.lc also gets a backup Install.
+    """
+    existing, pkg = _read_init_lc(romfs)
+    text = existing.decode("utf-8", errors="replace")
+    if AP_LOADING_TIPS_MARKER in text:
+        # Truncate from marker (more reliable than nested-pcall regex).
+        idx = text.find(AP_LOADING_TIPS_MARKER)
+        text = text[:idx].rstrip() + "\n"
+        log("[OK] removed prior ApLoadingTips bootstrap from init.lc (will re-append)")
+
+    text = text.rstrip() + "\n\n" + AP_LOADING_TIPS_BOOTSTRAP
+    data = text.encode("utf-8")
+    _write_init_lc(romfs, data, pkg)
+    log(f"[OK] patched init.lc with ApLoadingTips.Install at EOF ({len(data)} bytes)")
+
+
+def _patch_scenario_for_ap_loading_tips(romfs: Path) -> None:
+    """Backup Install at EOF of scenario.lc (idempotent; safe if already installed)."""
+    existing, pkg = _read_scenario_lc(romfs)
+    text = existing.decode("utf-8", errors="replace")
+    marker = "-- AP_LOADING_TIPS_SCENARIO"
+    bootstrap = (
+        f"{marker}\n"
+        "pcall(function()\n"
+        '  if not ApLoadingTips then\n'
+        '    Game.DoFile("system/scripts/ap_loading_tips.lua")\n'
+        "  end\n"
+        "  if ApLoadingTips and ApLoadingTips.Install then\n"
+        "    ApLoadingTips.Install()\n"
+        "  end\n"
+        "end)\n"
+    )
+    if marker in text:
+        idx = text.find(marker)
+        text = text[:idx].rstrip() + "\n"
+        log("[OK] removed prior ApLoadingTips scenario bootstrap (will re-append)")
+    text = text.rstrip() + "\n\n" + bootstrap
+    data = text.encode("utf-8")
+    _write_scenario_lc(romfs, data, pkg)
+    log(f"[OK] patched scenario.lc with ApLoadingTips.Install backup ({len(data)} bytes)")
+
+
 def apply_ap_credits_branding(romfs: Path) -> None:
     """
     Post-process ODR credits.txt:
       - Title: Metroid Bread → Metroid Bread
       - Insert "Archipelago Implementation" / Dummydude just before Major Item Locations
     Keeps the full Randomizer Credits block intact.
+
+    Inserted strings are scrubbed with ap_to_patcher.sanitize_credits_text (printable
+    ASCII only) so branding cannot introduce illegal glyphs into BTXT. CREDIT_R_*
+    rows are re-scrubbed on rewrite (skips whitespace-only spacers).
     """
     credits_path = romfs / "system" / "localization" / "credits.txt"
     if not credits_path.is_file():
@@ -924,11 +1112,18 @@ def apply_ap_credits_branding(romfs: Path) -> None:
         log(f"[WARN] cannot edit credits.txt (mercury missing): {exc}")
         return
 
+    try:
+        from ap_to_patcher import sanitize_credits_text
+    except ImportError:
+        def sanitize_credits_text(value, **_kwargs):  # type: ignore[misc]
+            return str(value or "")
+
     title_key = "CREDIT_0_000_TITLE"
     ap_subtitle_key = "CREDIT_AP_000_SUBTITLE"
     ap_name_key = "CREDIT_AP_001"
-    ap_subtitle = "Archipelago Implementation"
-    ap_name = "Dummydude"
+    bread_title = sanitize_credits_text("Metroid Bread", max_lines=1)
+    ap_subtitle = sanitize_credits_text("Archipelago Implementation", max_lines=1)
+    ap_name = sanitize_credits_text("Dummydude", max_lines=1)
     major_title = "Major Item Locations"
 
     txt = Txt.parse(credits_path.read_bytes(), target_game=Game.DREAD)
@@ -938,8 +1133,8 @@ def apply_ap_credits_branding(romfs: Path) -> None:
     changed_title = False
     for i, (key, value) in enumerate(ordered):
         if key == title_key or (i == 0 and value == "Metroid Dread"):
-            if value != "Metroid Bread":
-                ordered[i] = (key if key == title_key else title_key, "Metroid Bread")
+            if value != bread_title:
+                ordered[i] = (key if key == title_key else title_key, bread_title)
                 changed_title = True
             break
 
@@ -952,8 +1147,18 @@ def apply_ap_credits_branding(romfs: Path) -> None:
             if value == major_title and key.endswith("_TITLE"):
                 insert_at = i
                 break
+        # Fallback when spoiler_log was empty (ODR skips Major Item Locations):
+        # insert after Randomizer Credits block, before remaining CREDIT_0_* rows.
         if insert_at is None:
-            log("[WARN] Major Item Locations not found in credits.txt — AP block not inserted")
+            for i, (key, _value) in enumerate(ordered):
+                if key.startswith("CREDIT_0_") and i > 0:
+                    insert_at = i
+                    break
+        # Last resort: after title (index 0), before whatever follows.
+        if insert_at is None and ordered:
+            insert_at = 1 if len(ordered) > 1 else len(ordered)
+        if insert_at is None:
+            log("[WARN] No credits insert point found — AP block not inserted")
         else:
             ordered[insert_at:insert_at] = [
                 (ap_subtitle_key, ap_subtitle),
@@ -961,9 +1166,22 @@ def apply_ap_credits_branding(romfs: Path) -> None:
             ]
             inserted = True
 
-    if not changed_title and not inserted and already:
+    # Scrub any CREDIT_R_* values that still carry illegal glyphs (old patcher
+    # JSON / future ODR paths). Preserve whitespace-only spacer rows.
+    scrubbed = 0
+    for i, (key, value) in enumerate(ordered):
+        if not key.startswith("CREDIT_R_"):
+            continue
+        if not isinstance(value, str) or not value.strip():
+            continue
+        clean = sanitize_credits_text(value)
+        if clean != value:
+            ordered[i] = (key, clean)
+            scrubbed += 1
+
+    if not changed_title and not inserted and already and not scrubbed:
         # Still rewrite if title was wrong somehow but AP block exists
-        if any(k == title_key and v == "Metroid Bread" for k, v in ordered):
+        if any(k == title_key and v == bread_title for k, v in ordered):
             log("[OK] credits.txt already has AP branding")
             return
 
@@ -971,11 +1189,13 @@ def apply_ap_credits_branding(romfs: Path) -> None:
     credits_path.write_bytes(txt.build())
     bits = []
     if changed_title:
-        bits.append("title→Metroid Bread")
+        bits.append(f"title→{bread_title}")
     if inserted:
         bits.append(f"+{ap_subtitle}/{ap_name}")
     if already and not inserted:
         bits.append("AP block kept")
+    if scrubbed:
+        bits.append(f"scrubbed {scrubbed} CREDIT_R rows")
     log(f"[OK] credits.txt branded ({', '.join(bits) or 'rewritten'}) -> {credits_path}")
 
 
@@ -1122,11 +1342,39 @@ def finalize_mod(
     # Title + AP implementer credit (keeps ODR Randomizer Credits intact).
     apply_ap_credits_branding(romfs)
 
+    # AP context-4 tip carousel BTXT (TIP_000–TIP_004). Belt-and-suspenders with
+    # ap_to_patcher text_patches; also lets a finalize-only pass refresh a live mod.
+    try:
+        from dread_carousel_tip_patches import (
+            apply_carousel_tip_text_patches_to_romfs,
+            carousel_tip_text_patches_enabled,
+        )
+
+        if carousel_tip_text_patches_enabled():
+            tip_writes = apply_carousel_tip_text_patches_to_romfs(romfs)
+            if tip_writes:
+                log(
+                    f"[OK] Carousel tip text_patches applied to romfs "
+                    f"({tip_writes} key writes; TIP_000–TIP_004 AP POOL4)"
+                )
+            else:
+                log(
+                    "[WARN] Carousel tip text_patches enabled but no TIP_* keys "
+                    "updated under romfs localization (missing mercury or keys?)"
+                )
+        else:
+            log("[INFO] Carousel tip text_patches skipped (disabled)")
+    except Exception as exc:
+        log(f"[WARN] Carousel tip text_patches failed: {exc}")
+
     # Remove leftover ProgressKeeper bootstrap (was wiping items on load).
     strip_hk_autosave_from_scenario(romfs)
 
     # Location-independent warp hotkeys (last checkpoint / last save).
     install_ap_warp_scripts(romfs)
+
+    # ForcedTooltip on Continue / New Game loading screens (init.lc, early).
+    install_ap_loading_tips_scripts(romfs)
 
     # Death-only ExtraInfoPanel: park counter on ODR DNA-slot coords (no Ryujinx getters).
     fix_death_counter_hud_position(romfs)
@@ -1136,6 +1384,7 @@ def finalize_mod(
     # Order: after ODR romfs write, before custom exefs overlay.
     map_src_lua = ROOT / "data" / "reachable_map_cells.lua"
     install_reachable_map_script(romfs, map_src_lua)
+    install_map_unlock_region_script(romfs)
 
     # Archipelago logo + green in-logic ? cells in the minimap atlas
     # (ODR ships progressive/DNA cells; we overwrite that same romfs path
@@ -1174,7 +1423,7 @@ def finalize_mod(
     # See worlds/metroid_bread/docs/odrmap_exlaunch_binder.md.
     install_custom_exlaunch(exefs, custom_exlaunch_deploy)
     log(
-        "[OK] finalize_mod complete: ApWarp + TOC/pkg map script + "
+        "[OK] finalize_mod complete: ApWarp + ApLoadingTips + TOC/pkg map script + "
         "AP map-icon atlas + custom OdrMap exefs (enable_remote_lua kept on)"
     )
 
@@ -1264,13 +1513,24 @@ def patch_from_spoiler(
         f"({keys_data.get('custom_icon_count', 0)} MAP_ICON_ItemCustom* keys)"
     )
 
-    # Validate with the same interpreter that will run ODR
+    # Validate against schema.json only (avoid importing dread_patcher → misc_patches).
     val = subprocess.run(
         py
         + [
             "-c",
-            "import json,sys; from open_dread_rando.dread_patcher import validate; "
-            "validate(json.load(open(sys.argv[1],encoding='utf-8'))); print('SCHEMA_OK')",
+            (
+                "import json,sys;"
+                "from pathlib import Path;"
+                "import open_dread_rando;"
+                "from open_dread_rando.validator_with_default import "
+                "DefaultValidatingDraft7Validator;"
+                "schema=json.load(open("
+                "Path(open_dread_rando.__file__).resolve().parent/'files'/'schema.json',"
+                "encoding='utf-8'));"
+                "DefaultValidatingDraft7Validator(schema).validate("
+                "json.load(open(sys.argv[1],encoding='utf-8')));"
+                "print('SCHEMA_OK')"
+            ),
             str(out_json),
         ],
         capture_output=True,
@@ -1278,6 +1538,8 @@ def patch_from_spoiler(
     )
     if val.returncode != 0 or "SCHEMA_OK" not in (val.stdout or ""):
         err = (val.stderr or val.stdout or "").strip()
+        if "misc_patches" in err or "ModuleNotFoundError" in err:
+            raise PatchError(_broken_odr_install_message(err or "import failed"))
         raise PatchError(
             "patcher.json failed open-dread-rando validation:\n"
             f"{_format_odr_validation_error(err)}"

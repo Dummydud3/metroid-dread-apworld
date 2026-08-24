@@ -366,3 +366,15 @@ RL.MapRegionToScenario = {
   ["Hanubia"] = "s080_shipyard",
   ["Itorash"] = "s090_skybase",
 }
+-- World-map region unlock AABB = BMMAP gridDef inset by cell_size 100 (common.bmssv AreaBox).
+RL.ScenarioAreaBox = {
+  ["s010_cave"] = {-27700.0,-9900.0,33700.0,11000.0},
+  ["s020_magma"] = {-20300.0,-8300.0,19500.0,9600.0},
+  ["s030_baselab"] = {-26500.0,-10000.0,27100.0,8000.0},
+  ["s040_aqua"] = {-8800.0,-12900.0,13900.0,13100.0},
+  ["s050_forest"] = {-15300.0,-6400.0,20000.0,8100.0},
+  ["s060_quarantine"] = {-16000.0,-2400.0,9500.0,3700.0},
+  ["s070_basesanc"] = {-26500.0,-7800.0,13500.0,7400.0},
+  ["s080_shipyard"] = {-19200.0,-8600.0,18400.0,8900.0},
+  ["s090_skybase"] = {-5800.0,-4700.0,6700.0,3600.0},
+}

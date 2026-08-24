@@ -2,9 +2,12 @@
 """
 Ensure Metroid Bread Hub client Python packages are installed.
 
-On Linux, packages are installed into a local virtualenv under the world
-directory (``_metroid_bread_venv``) — never systemwide / ``pip install --user``.
-Windows keeps the previous behavior (install into the selected system Python).
+On Linux and Windows, packages are installed into a local virtualenv — never
+into Microsoft Store Python ``--user`` site-packages (those paths exceed
+Windows MAX_PATH once open-dread-rando's deep romfs textures are unpacked).
+
+- Linux: ``<world>/_metroid_bread_venv``
+- Windows: ``%LOCALAPPDATA%\\MetroidBread\\venv`` (short path on purpose)
 """
 
 from __future__ import annotations
@@ -42,6 +45,9 @@ EXIT_PYTHON_MISSING = 2
 EXIT_PIP_FAILED = 3
 
 VENV_DIRNAME = "_metroid_bread_venv"
+# Windows: keep the venv root short — Store Python user-site + ODR textures
+# hit MAX_PATH (260) and fail with Errno 2 on doorshield*.bctex etc.
+WIN_VENV_REL = Path("MetroidBread") / "venv"
 
 VERSION_OK_CODE = (
     "import sys; raise SystemExit("
@@ -62,6 +68,7 @@ PYTHON_MISSING_MESSAGE = (
     "  2. Or with the new Python install manager:  py install 3.12\n"
     "  3. Confirm with:  py -0\n"
     "  4. Restart the Hub and Connect again.\n\n"
+    "Avoid the Microsoft Store Python when possible (long paths break open-dread-rando).\n"
     "Linux (Arch/etc.): install a 3.11–3.13 python package, then re-run the launcher.\n"
     "Client deps install into a local venv (never systemwide)."
 )
@@ -75,16 +82,30 @@ def requirements_file(world: Optional[Path] = None) -> Path:
     return (world or world_dir()) / "requirements-client.txt"
 
 
+def uses_local_venv() -> bool:
+    """Install client deps into a short local venv (Linux + Windows)."""
+    return sys.platform.startswith("linux") or sys.platform == "win32"
+
+
 def uses_linux_venv() -> bool:
-    return sys.platform.startswith("linux")
+    """Alias for callers — local venv is used on Linux and Windows."""
+    return uses_local_venv()
 
 
 def venv_dir(world: Optional[Path] = None) -> Path:
+    if sys.platform == "win32":
+        local = (os.environ.get("LOCALAPPDATA") or "").strip()
+        if local:
+            return Path(local) / WIN_VENV_REL
+        return Path.home() / "AppData" / "Local" / WIN_VENV_REL
     return (world or world_dir()) / VENV_DIRNAME
 
 
 def venv_python_path(world: Optional[Path] = None) -> Path:
-    return venv_dir(world) / "bin" / "python"
+    root = venv_dir(world)
+    if sys.platform == "win32":
+        return root / "Scripts" / "python.exe"
+    return root / "bin" / "python"
 
 
 def python_missing_message() -> str:
@@ -230,10 +251,10 @@ def find_client_python(world: Optional[Path] = None) -> Optional[List[str]]:
     """
     Interpreter used for Hub client deps / launch.
 
-    On Linux, prefer an existing local venv (deps live there). Otherwise prefer
-    managed portable CPython / DREAD_HUB_PYTHON, then host discovery.
+    Prefer an existing local venv (deps live there on Linux/Windows). Otherwise
+    prefer managed portable CPython / DREAD_HUB_PYTHON, then host discovery.
     """
-    if uses_linux_venv():
+    if uses_local_venv():
         vpy = venv_python_path(world)
         if vpy.is_file() and _probe([str(vpy)], VERSION_OK_CODE):
             return [str(vpy)]
@@ -243,17 +264,18 @@ def find_client_python(world: Optional[Path] = None) -> Optional[List[str]]:
     return find_base_python()
 
 
-def ensure_linux_venv(
+def ensure_local_venv(
     base_cmd: Sequence[str],
     *,
     world: Optional[Path] = None,
     log: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Optional[List[str]], str]:
     """
-    Create or reuse ``_metroid_bread_venv`` next to the world package.
+    Create or reuse the Hub client venv.
 
-    Uses ``--system-site-packages`` so a host open-dread-rando install remains
-    importable; new client packages still land only in the venv.
+    Linux: ``<world>/_metroid_bread_venv`` with ``--system-site-packages``.
+    Windows: ``%LOCALAPPDATA%\\MetroidBread\\venv`` without system site-packages
+    (avoids Microsoft Store user-site MAX_PATH failures for open-dread-rando).
     """
     def _log(msg: str) -> None:
         if log:
@@ -267,14 +289,18 @@ def ensure_linux_venv(
         _log(f"Using venv Python: {vpy}")
         return [str(vpy)], ""
 
+    venv_cmd = list(base_cmd) + ["-m", "venv"]
+    if sys.platform.startswith("linux"):
+        venv_cmd.append("--system-site-packages")
+    venv_cmd.append(str(vdir))
+
     _log(
         f"Creating local venv at {vdir} "
         f"(from {format_cmd(base_cmd)}; deps will not be installed systemwide)..."
     )
     try:
         proc = run_hidden(
-            list(base_cmd)
-            + ["-m", "venv", "--system-site-packages", str(vdir)],
+            venv_cmd,
             capture_output=True,
             text=True,
             timeout=180,
@@ -284,7 +310,8 @@ def ensure_linux_venv(
         detail = (
             f"Failed to create venv with {format_cmd(base_cmd)} -m venv:\n{exc}\n\n"
             "On Arch Linux, ensure the python package is installed "
-            "(provides python -m venv)."
+            "(provides python -m venv).\n"
+            "On Windows, install Python 3.11/3.12 from python.org (not the Store)."
         )
         return None, detail
 
@@ -293,7 +320,7 @@ def ensure_linux_venv(
         detail = (
             f"Failed to create venv at {vdir} with {format_cmd(base_cmd)}.\n"
             "On Arch Linux: pacman -S python  (stdlib venv module).\n"
-            "Then re-run the launcher.\n"
+            "On Windows: use python.org CPython, then re-run the launcher.\n"
         )
         if combined:
             detail += f"\nvenv output:\n{combined[-4000:]}"
@@ -301,6 +328,16 @@ def ensure_linux_venv(
 
     _log(f"Using venv Python: {vpy}")
     return [str(vpy)], ""
+
+
+def ensure_linux_venv(
+    base_cmd: Sequence[str],
+    *,
+    world: Optional[Path] = None,
+    log: Optional[Callable[[str], None]] = None,
+) -> Tuple[Optional[List[str]], str]:
+    """Alias — local venv is used on Linux and Windows."""
+    return ensure_local_venv(base_cmd, world=world, log=log)
 
 
 def resolve_install_python(
@@ -312,9 +349,9 @@ def resolve_install_python(
     """
     Pick the interpreter that should receive pip installs / run the client.
 
-    Linux → always a local venv. Windows/macOS → passed or discovered host Python.
+    Linux/Windows → always a local venv. macOS → passed or discovered host Python.
     """
-    if uses_linux_venv():
+    if uses_local_venv():
         if python_cmd and _is_venv_python_cmd(python_cmd, world):
             if _probe(list(python_cmd), VERSION_OK_CODE):
                 if log:
@@ -330,7 +367,7 @@ def resolve_install_python(
             if not discovered:
                 return None, python_missing_message(), EXIT_PYTHON_MISSING
             base = discovered
-        vcmd, err = ensure_linux_venv(base, world=world, log=log)
+        vcmd, err = ensure_local_venv(base, world=world, log=log)
         if not vcmd:
             return None, err or python_missing_message(), EXIT_PIP_FAILED
         return vcmd, "", EXIT_OK
@@ -342,13 +379,23 @@ def resolve_install_python(
 
 
 def missing_imports(python_cmd: Sequence[str]) -> List[str]:
-    """Return import names that fail under python_cmd."""
+    """Return import names that fail under python_cmd.
+
+    ``open_dread_rando`` is also treated as missing when the package imports but
+    core submodules (``misc_patches``) are absent — a common broken/partial
+    pip install that still passes ``find_spec('open_dread_rando')``.
+    """
     names = [name for name, _ in CLIENT_IMPORTS]
     # One subprocess: print comma-separated missing modules.
     code = (
         "import importlib.util\n"
         f"names = {names!r}\n"
         "miss = [n for n in names if importlib.util.find_spec(n) is None]\n"
+        "if 'open_dread_rando' not in miss:\n"
+        "    try:\n"
+        "        import open_dread_rando.misc_patches  # noqa: F401\n"
+        "    except Exception:\n"
+        "        miss.append('open_dread_rando')\n"
         "print(','.join(miss))\n"
     )
     try:
@@ -385,6 +432,20 @@ def _looks_like_pip_missing(detail: str) -> bool:
     )
 
 
+def _looks_like_windows_max_path(detail: str) -> bool:
+    """Store Python user-site + ODR deep romfs paths exceed Win32 MAX_PATH (260)."""
+    blob = (detail or "").lower()
+    if "open_dread_rando" not in blob and "doorshield" not in blob:
+        return False
+    return (
+        "errno 2" in blob
+        or "winerror 3" in blob
+        or "no such file or directory" in blob
+        or "pythonsoftwarefoundation" in blob
+        or "cannot find the path specified" in blob
+    )
+
+
 def pip_install_hint_lines(python_cmd: Sequence[str]) -> List[str]:
     """OS-specific steps to get pip when ``python -m pip`` is unavailable."""
     py = format_cmd(python_cmd)
@@ -400,6 +461,7 @@ def pip_install_hint_lines(python_cmd: Sequence[str]) -> List[str]:
                 "Windows (if ensurepip fails):",
                 "  • Re-run the Python installer → Modify → enable pip",
                 "  • Or install from https://www.python.org/downloads/ (Add to PATH)",
+                "  • Prefer python.org CPython over Microsoft Store Python",
                 "  • Or:  py install 3.12   then   py -3.12 -m ensurepip --upgrade",
             ]
         )
@@ -414,7 +476,7 @@ def pip_install_hint_lines(python_cmd: Sequence[str]) -> List[str]:
                 "  sudo dnf install python3-pip",
             ]
         )
-        if uses_linux_venv():
+        if uses_local_venv():
             lines.extend(
                 [
                     "",
@@ -452,11 +514,28 @@ def pip_failure_message(
         "",
         f"Interpreter: {py}",
     ]
-    if uses_linux_venv():
+    if uses_local_venv():
         parts.extend(
             [
                 f"Expected local venv: {venv_dir(world)}",
                 "Packages are installed into this venv only (not systemwide).",
+            ]
+        )
+    if _looks_like_windows_max_path(detail):
+        parts.extend(
+            [
+                "",
+                "This looks like a Windows MAX_PATH failure (path ≥ 260 chars).",
+                "Microsoft Store Python installs open-dread-rando into a path that is",
+                "already too long for its deep texture files (doorshield*.bctex).",
+                "",
+                "Fix (pick one):",
+                f"  1. Restart Hub Connect — deps now install into: {venv_dir(world)}",
+                "  2. Or install python.org Python 3.12 (not Store), then Connect again",
+                "  3. Or enable Win32 long paths (Group Policy / registry) and retry",
+                "",
+                "Do NOT:  py -3.11 -m pip install --user open-dread-rando",
+                "into Store Python — that recreates this error.",
             ]
         )
     parts.extend(
@@ -467,7 +546,7 @@ def pip_failure_message(
         ]
     )
     parts.extend(pip_install_hint_lines(python_cmd))
-    if not _looks_like_pip_missing(detail):
+    if not _looks_like_pip_missing(detail) and not _looks_like_windows_max_path(detail):
         parts.extend(
             [
                 "",
@@ -529,12 +608,60 @@ def ensure_pip(
     return False, detail
 
 
+def _force_reinstall_open_dread_rando(
+    python_cmd: Sequence[str],
+    *,
+    log: Optional[Callable[[str], None]] = None,
+) -> Tuple[bool, str]:
+    """Force-reinstall ODR — needed when the package is present but incomplete."""
+    def _log(msg: str) -> None:
+        if log:
+            log(msg)
+        else:
+            print(msg, flush=True)
+
+    req = next(r for name, r in CLIENT_IMPORTS if name == "open_dread_rando")
+    if not pip_available(python_cmd):
+        ok_pip, pip_detail = ensure_pip(python_cmd, log=log)
+        if not ok_pip:
+            return False, pip_detail or "No module named pip"
+
+    cmd = list(python_cmd) + ["-m", "pip", "install", "--force-reinstall", req]
+    _log(f"Force-reinstalling broken open-dread-rando ({req})...")
+    try:
+        proc = run_hidden(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+    combined = f"{proc.stdout or ''}\n{proc.stderr or ''}".strip()
+    if proc.returncode != 0:
+        return False, combined or f"pip exited {proc.returncode}"
+    return True, combined
+
+
 def _install_packages(
     python_cmd: Sequence[str],
     world: Optional[Path] = None,
     *,
     log: Optional[Callable[[str], None]] = None,
+    force_reinstall: Optional[Sequence[str]] = None,
 ) -> Tuple[bool, str]:
+    force_reinstall = list(force_reinstall or ())
+    if "open_dread_rando" in force_reinstall:
+        ok, detail = _force_reinstall_open_dread_rando(python_cmd, log=log)
+        if not ok:
+            return False, pip_failure_message(
+                python_cmd,
+                req_path=requirements_file(world),
+                detail=detail,
+                world=world,
+            )
+
     req = requirements_file(world)
     if not pip_available(python_cmd):
         ok_pip, pip_detail = ensure_pip(python_cmd, log=log)
@@ -546,7 +673,7 @@ def _install_packages(
                 world=world,
             )
 
-    # Never pass --user; target interpreter should already be a venv on Linux.
+    # Never pass --user; target interpreter should already be a venv on Linux/Windows.
     if req.is_file():
         cmd = list(python_cmd) + ["-m", "pip", "install", "-r", str(req)]
     else:
@@ -596,7 +723,7 @@ def ensure_client_deps(
     """
     Ensure client packages exist in the target interpreter.
 
-    On Linux the target is always ``<world>/_metroid_bread_venv``.
+    On Linux/Windows the target is always a local venv (short path on Windows).
 
     Returns (ok, message, exit_code).
     """
@@ -619,12 +746,17 @@ def ensure_client_deps(
         _log(f"Python client packages OK ({format_cmd(cmd)}).")
         return True, f"Python client packages OK ({format_cmd(cmd)}).", EXIT_OK
 
-    where = "into local venv" if uses_linux_venv() else "for Hub client"
+    where = "into local venv" if uses_local_venv() else "for Hub client"
     _log(
         f"Installing missing Python packages {where} ({format_cmd(cmd)}): "
         + ", ".join(missing)
     )
-    ok, detail = _install_packages(cmd, world=world, log=_log)
+    ok, detail = _install_packages(
+        cmd,
+        world=world,
+        log=_log,
+        force_reinstall=["open_dread_rando"] if "open_dread_rando" in missing else None,
+    )
     if not ok:
         return False, detail, EXIT_PIP_FAILED
 

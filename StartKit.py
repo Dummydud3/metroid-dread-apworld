@@ -58,9 +58,8 @@ ODR_STARTING_ITEMS: Dict[str, Dict[str, int]] = {
     "Space Jump": {"ITEM_SPACE_JUMP": 1},
     # Main Flash Shift (vanilla / require-main). Chain qty adjusted in odr_starting_items.
     "Flash Shift": {"ITEM_GHOST_AURA": 1, "ITEM_UPGRADE_FLASH_SHIFT_CHAIN": 2},
-    # Progressive / upgrade-only start: Ghost Aura is granted here because the
-    # RandomizerFlashShiftUpgrade hook does not run for pre-granted items.
-    "Flash Shift Upgrade": {"ITEM_GHOST_AURA": 1, "ITEM_UPGRADE_FLASH_SHIFT_CHAIN": 1},
+    # Progressive start: Ghost Aura only here; chain count from odr_starting_items.
+    "Flash Shift Upgrade": {"ITEM_GHOST_AURA": 1},
 }
 
 _SINGLE_CANDIDATES = (
