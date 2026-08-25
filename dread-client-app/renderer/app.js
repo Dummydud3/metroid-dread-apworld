@@ -342,8 +342,14 @@
 
   /* ---------- Logging ---------- */
 
-  function scrollLog(el) {
-    el.scrollTop = el.scrollHeight;
+  function isLogPinnedToBottom(el, slackPx = 64) {
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= slackPx;
+  }
+
+  function scrollLogIfPinned(el, wasPinned) {
+    if (wasPinned) {
+      el.scrollTop = el.scrollHeight;
+    }
   }
 
   function applyDebugLogsPreference(enabled) {
@@ -363,9 +369,10 @@
     const cleaned = String(text || "").replace(ANSI_RE, "");
     if (!cleaned) return;
     const isDebug = level === "debug";
+    const pin = isLogPinnedToBottom(el);
     if (el.tagName === "PRE") {
       el.textContent += cleaned;
-      scrollLog(el);
+      scrollLogIfPinned(el, pin);
       return;
     }
     const parts = cleaned.split(/\r?\n/);
@@ -377,15 +384,17 @@
       line.textContent = part;
       el.appendChild(line);
     }
-    scrollLog(el);
+    scrollLogIfPinned(el, pin);
   }
 
   function appendCommandEcho(text) {
+    const el = $("log");
+    const pin = isLogPinnedToBottom(el);
     const line = document.createElement("div");
     line.className = "log-line log-cmd";
     line.textContent = `> ${text}`;
-    $("log").appendChild(line);
-    scrollLog($("log"));
+    el.appendChild(line);
+    scrollLogIfPinned(el, pin);
   }
 
   function handleClientLog(payload) {
@@ -402,6 +411,8 @@
   }
 
   function appendPrintJson(parts) {
+    const el = $("log");
+    const pin = isLogPinnedToBottom(el);
     const line = document.createElement("div");
     line.className = "log-line log-chat";
     const list = Array.isArray(parts) ? parts : [];
@@ -414,8 +425,8 @@
       }
       line.appendChild(span);
     }
-    $("log").appendChild(line);
-    scrollLog($("log"));
+    el.appendChild(line);
+    scrollLogIfPinned(el, pin);
   }
 
   function setConnectStatus(msg, isError) {

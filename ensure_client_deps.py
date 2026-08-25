@@ -193,11 +193,13 @@ def _is_venv_python_cmd(python_cmd: Sequence[str], world: Optional[Path] = None)
 
 
 def _base_python_candidates() -> List[List[str]]:
+    # Prefer 3.12+ first on Windows: Microsoft Store 3.11 cannot create a normal
+    # venv (redirects Scripts\\python.exe into Packages\\...), which breaks Hub.
     if sys.platform == "win32":
         return [
-            ["py", "-3.11"],
             ["py", "-3.12"],
             ["py", "-3.13"],
+            ["py", "-3.11"],
             ["python"],
         ]
     return [
@@ -207,6 +209,37 @@ def _base_python_candidates() -> List[List[str]]:
         ["python3"],
         ["python"],
     ]
+
+
+def _resolved_python_executable(python_cmd: Sequence[str]) -> Optional[str]:
+    """Return ``sys.executable`` for python_cmd, or None on failure."""
+    try:
+        proc = run_hidden(
+            list(python_cmd) + ["-c", "import sys; print(sys.executable)"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    line = (proc.stdout or "").strip().splitlines()
+    return line[-1].strip() if line else None
+
+
+def _is_microsoft_store_python(python_cmd: Sequence[str]) -> bool:
+    """True for Microsoft Store / WindowsApps CPython (bad for venv + ODR paths)."""
+    exe = _resolved_python_executable(python_cmd)
+    if not exe:
+        return False
+    low = exe.lower().replace("/", "\\")
+    return (
+        "\\windowsapps\\" in low
+        or "pythonsoftwarefoundation" in low
+        or "\\packages\\pythonsoftwarefoundation" in low
+    )
 
 
 def _managed_python_cmd() -> Optional[List[str]]:
@@ -232,18 +265,27 @@ def _managed_python_cmd() -> Optional[List[str]]:
     return None
 
 
-def find_base_python() -> Optional[List[str]]:
-    """Locate a system / host Python 3.11–3.13 (prefer managed, then open-dread-rando)."""
+def find_base_python(*, allow_store: bool = False) -> Optional[List[str]]:
+    """Locate a system / host Python 3.11–3.13 (prefer managed, then non-Store)."""
     managed = _managed_python_cmd()
     if managed:
         return managed
+
+    def _usable(cmd: List[str], code: str) -> bool:
+        if not allow_store and sys.platform == "win32" and _is_microsoft_store_python(cmd):
+            return False
+        return _probe(cmd, code)
+
     has_odr = "import open_dread_rando"
     for cmd in _base_python_candidates():
-        if _probe(cmd, has_odr):
+        if _usable(cmd, has_odr):
             return cmd
     for cmd in _base_python_candidates():
-        if _probe(cmd, VERSION_OK_CODE):
+        if _usable(cmd, VERSION_OK_CODE):
             return cmd
+    # Last resort: Store Python (venv creation will still likely fail).
+    if not allow_store and sys.platform == "win32":
+        return find_base_python(allow_store=True)
     return None
 
 
@@ -288,6 +330,34 @@ def ensure_local_venv(
     if vpy.is_file() and _probe([str(vpy)], VERSION_OK_CODE):
         _log(f"Using venv Python: {vpy}")
         return [str(vpy)], ""
+
+    # Windows Store Python cannot host a real venv (redirected Scripts path).
+    if sys.platform == "win32" and _is_microsoft_store_python(base_cmd):
+        alt = find_base_python(allow_store=False)
+        if alt and not _is_microsoft_store_python(alt):
+            _log(
+                f"Skipping Microsoft Store Python ({format_cmd(base_cmd)}); "
+                f"using {format_cmd(alt)} for venv instead."
+            )
+            base_cmd = alt
+        else:
+            return None, (
+                "Microsoft Store Python cannot create the Hub venv "
+                "(Scripts\\python.exe is redirected into Packages\\...).\n"
+                "Install Python 3.12 from https://www.python.org/downloads/ "
+                '(check "Add python.exe to PATH"), then restart Hub Connect.\n'
+                f"Detected: {format_cmd(base_cmd)}"
+            )
+
+    # Clear a broken / redirected half-created venv from a prior Store attempt.
+    if vdir.exists() and not (vpy.is_file() and _probe([str(vpy)], VERSION_OK_CODE)):
+        try:
+            import shutil
+
+            shutil.rmtree(vdir, ignore_errors=True)
+            _log(f"Removed incomplete venv at {vdir}")
+        except Exception:
+            pass
 
     venv_cmd = list(base_cmd) + ["-m", "venv"]
     if sys.platform.startswith("linux"):
@@ -357,13 +427,14 @@ def resolve_install_python(
                 if log:
                     log(f"Using venv Python: {format_cmd(python_cmd)}")
                 return list(python_cmd), "", EXIT_OK
-        base = list(python_cmd) if python_cmd else find_base_python()
+        base = list(python_cmd) if python_cmd else find_base_python(allow_store=False)
         if not base:
             return None, python_missing_message(), EXIT_PYTHON_MISSING
-        if not _probe(base, VERSION_OK_CODE):
-            # Hub may pass a python that has ODR but odd version; still try
-            # version-ok base discovery when the passed interpreter is wrong.
-            discovered = find_base_python()
+        if not _probe(base, VERSION_OK_CODE) or (
+            sys.platform == "win32" and _is_microsoft_store_python(base)
+        ):
+            # Hub may pass Store Python / odd version; prefer python.org for venv.
+            discovered = find_base_python(allow_store=False)
             if not discovered:
                 return None, python_missing_message(), EXIT_PYTHON_MISSING
             base = discovered
