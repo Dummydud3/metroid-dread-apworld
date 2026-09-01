@@ -10,5 +10,7 @@ platformdirs>=4.5.0
 jellyfish>=1.2.1
 typing_extensions>=4.15.0
 schema>=0.7.8
+# CommonClient → ModuleUpdate needs pkg_resources; without it Hub hangs on "press enter".
+setuptools>=75,<81
 # Patcher engine (Randovania ODR). >=2.19 for DNA HUD / Samus-menu upgrade rows.
 open-dread-rando>=2.19

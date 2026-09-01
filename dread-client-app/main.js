@@ -105,53 +105,73 @@ function bundledApCore(worldDir) {
 }
 
 /**
+ * Prefer install root from Hub env (source or frozen), then climb/infer/frozen.
+ */
+function resolveInstallCandidate(worldDir, { prefer = "" } = {}) {
+  const envInstall = (process.env.DREAD_HUB_INSTALL_ROOT || "").trim();
+  if (envInstall && fs.existsSync(envInstall)) {
+    return path.resolve(envInstall);
+  }
+  if (prefer && fs.existsSync(prefer)) {
+    return path.resolve(prefer);
+  }
+  const climbed = climbForCommonClient(worldDir);
+  if (climbed) return climbed;
+  const inferred = inferApRootFromWorldConfig(worldDir);
+  if (inferred) return inferred;
+  const frozen = climbForFrozenInstall(worldDir);
+  if (frozen) return frozen;
+  return "";
+}
+
+/**
  * Resolve import root (CommonClient.py) + install root (Players/output/host.yaml).
- * Frozen ProgramData installs use world/ap_core for imports.
+ *
+ * Prefer world/ap_core for imports when present — MetroidBreadClient is built
+ * against that API. A nearby full AP tree (e.g. D:\\Archipelago) is install-only
+ * so an older CommonClient cannot break Connect (missing handle_url_arg, etc.).
  */
 function resolveApRoots(worldDir) {
+  const core = bundledApCore(worldDir);
   const envRoot = (
     process.env.DREAD_HUB_AP_ROOT ||
     process.env.ARCHIPELAGO_ROOT ||
     ""
   ).trim();
+
   if (envRoot && hasCommonClient(envRoot)) {
     const resolved = path.resolve(envRoot);
     if (path.basename(resolved).toLowerCase() === AP_CORE_DIRNAME) {
-      const frozen =
-        (process.env.DREAD_HUB_INSTALL_ROOT || "").trim() ||
-        climbForFrozenInstall(worldDir);
-      return {
-        importRoot: resolved,
-        installRoot: frozen ? path.resolve(frozen) : resolved,
-      };
+      const install = resolveInstallCandidate(worldDir) || resolved;
+      return { importRoot: resolved, installRoot: install };
+    }
+    // Explicit non-ap_core AP root: still prefer bundled ap_core for imports
+    // when Hub ships it (matches client); keep env root as install.
+    if (core) {
+      return { importRoot: core, installRoot: resolved };
     }
     return { importRoot: resolved, installRoot: resolved };
   }
 
-  const climbed = climbForCommonClient(worldDir);
-  if (climbed) {
-    return { importRoot: climbed, installRoot: climbed };
-  }
-  const inferred = inferApRootFromWorldConfig(worldDir);
-  if (inferred) {
-    return { importRoot: inferred, installRoot: inferred };
-  }
-
-  const core = bundledApCore(worldDir);
-  const frozen =
-    (process.env.DREAD_HUB_INSTALL_ROOT || "").trim() ||
-    climbForFrozenInstall(worldDir);
+  const install = resolveInstallCandidate(worldDir);
   if (core) {
     return {
       importRoot: core,
-      installRoot: frozen ? path.resolve(frozen) : core,
+      installRoot: install || core,
     };
+  }
+  if (install && hasCommonClient(install)) {
+    return { importRoot: install, installRoot: install };
   }
 
   // Conventional checkout: worlds/metroid_bread → repo root (may lack CommonClient
   // when Hub runs from custom_worlds/_metroid_bread_runtime next to a frozen install).
   const legacy = path.resolve(worldDir, "..", "..");
-  return { importRoot: legacy, installRoot: frozen ? path.resolve(frozen) : legacy };
+  const frozen = climbForFrozenInstall(worldDir);
+  return {
+    importRoot: legacy,
+    installRoot: install || (frozen ? path.resolve(frozen) : legacy),
+  };
 }
 
 const { importRoot: AP_ROOT, installRoot: INSTALL_ROOT } = resolveApRoots(WORLD_DIR);

@@ -96,35 +96,31 @@ def resolve_frozen_install_root(world_dir: Optional[Path] = None) -> Optional[Pa
     return None
 
 
-def resolve_ap_roots(world_dir: Optional[Path] = None) -> Tuple[Path, Path]:
+def resolve_hub_install_root(world_dir: Optional[Path] = None) -> Optional[Path]:
     """
-    Resolve (import_root, install_root).
-
-    *import_root* — directory on PYTHONPATH with CommonClient.py + Options.py
-      (real source tree, or world ``ap_core/`` for frozen-only users).
-    *install_root* — Archipelago install for Players/, output/, host.yaml, logs
-      (same as import_root for source; frozen ProgramData when using ap_core).
+    Hub install root from env (source *or* frozen), then frozen climb, then source climb.
     """
     base = (world_dir or Path(__file__).resolve().parent).resolve()
-
-    for key in ("DREAD_HUB_AP_ROOT", "ARCHIPELAGO_ROOT"):
+    for key in ("DREAD_HUB_INSTALL_ROOT", "DREAD_HUB_FROZEN_ROOT"):
         raw = (os.environ.get(key) or "").strip()
         if not raw:
             continue
         candidate = Path(raw).expanduser()
-        if _is_source_ap_root(candidate):
-            root = candidate.resolve()
-            # Env may point at bundled ap_core — keep frozen ProgramData as install.
-            if root.name.lower() == AP_CORE_DIRNAME:
-                frozen = resolve_frozen_install_root(base)
-                return root, (frozen or root)
-            return root, root
-
+        try:
+            if candidate.is_dir():
+                return candidate.resolve()
+        except OSError:
+            continue
+    frozen = resolve_frozen_install_root(base)
+    if frozen is not None:
+        return frozen
     for parent in (base, *base.parents):
         if _is_source_ap_root(parent) and parent.name.lower() != AP_CORE_DIRNAME:
-            return parent.resolve(), parent.resolve()
+            return parent.resolve()
+    return None
 
-    # Infer from saved Hub / patcher config paths (often point at a source checkout).
+
+def _infer_source_ap_from_configs(base: Path) -> Optional[Path]:
     for cfg_name in ("dread_client_ui_config.json", "dread_direct_patch_config.json"):
         cfg_path = base / cfg_name
         if not cfg_path.is_file():
@@ -135,24 +131,68 @@ def resolve_ap_roots(world_dir: Optional[Path] = None) -> Tuple[Path, Path]:
             continue
         if not isinstance(cfg, dict):
             continue
-        for key in ("games_folder", "yaml_path", "base_rom_path", "output_path"):
+        for key in ("game_folder", "yaml_path", "base_rom_path", "output_path"):
             raw = cfg.get(key)
             if not raw:
                 continue
             cur = Path(os.path.expandvars(str(raw))).expanduser()
             for parent in (cur, *cur.parents):
                 if _is_source_ap_root(parent) and parent.name.lower() != AP_CORE_DIRNAME:
-                    return parent.resolve(), parent.resolve()
+                    return parent.resolve()
+    return None
 
-    # Frozen ProgramData (+ runtime extract): use bundled ap_core for imports.
-    # Prefer this over Utils.local_path() — during tests / mixed installs Utils may
-    # still point at an unrelated source checkout on sys.path.
-    frozen = resolve_frozen_install_root(base)
+
+def resolve_ap_roots(world_dir: Optional[Path] = None) -> Tuple[Path, Path]:
+    """
+    Resolve (import_root, install_root).
+
+    *import_root* — directory on PYTHONPATH with CommonClient.py + Options.py
+      (prefer world ``ap_core/`` so Hub clients match MetroidBreadClient's API).
+    *install_root* — Archipelago install for Players/, output/, host.yaml, logs
+      (nearby source tree or frozen ProgramData).
+    """
+    base = (world_dir or Path(__file__).resolve().parent).resolve()
     core = bundled_ap_core(base)
-    if core is not None and frozen is not None:
-        return core, frozen
+
+    for key in ("DREAD_HUB_AP_ROOT", "ARCHIPELAGO_ROOT"):
+        raw = (os.environ.get(key) or "").strip()
+        if not raw:
+            continue
+        candidate = Path(raw).expanduser()
+        if _is_source_ap_root(candidate):
+            root = candidate.resolve()
+            # Env may point at bundled ap_core — keep Hub install (source or frozen).
+            if root.name.lower() == AP_CORE_DIRNAME:
+                install = resolve_hub_install_root(base) or root
+                return root, install
+            # Explicit full AP tree: still prefer matching ap_core for imports.
+            if core is not None:
+                return core, root
+            return root, root
+
+    # Prefer bundled ap_core whenever present (Hub runtime + matching client API).
     if core is not None:
-        return core, core
+        install = resolve_hub_install_root(base)
+        if install is None:
+            for parent in (base, *base.parents):
+                if _is_source_ap_root(parent) and parent.name.lower() != AP_CORE_DIRNAME:
+                    install = parent.resolve()
+                    break
+        if install is None:
+            install = _infer_source_ap_from_configs(base)
+        return core, (install or core)
+
+    for parent in (base, *base.parents):
+        if _is_source_ap_root(parent) and parent.name.lower() != AP_CORE_DIRNAME:
+            return parent.resolve(), parent.resolve()
+
+    inferred = _infer_source_ap_from_configs(base)
+    if inferred is not None:
+        return inferred, inferred
+
+    frozen = resolve_frozen_install_root(base)
+    if frozen is not None:
+        return frozen, frozen
 
     try:
         from Utils import local_path
@@ -169,6 +209,7 @@ def resolve_ap_roots(world_dir: Optional[Path] = None) -> Tuple[Path, Path]:
     except IndexError:
         legacy = base
     return legacy, legacy
+
 
 
 def resolve_ap_root(world_dir: Optional[Path] = None) -> Path:

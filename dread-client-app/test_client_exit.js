@@ -25,6 +25,26 @@ const missingWs = explainClientExit(
 assert.ok(missingWs.includes("websockets"), missingWs);
 assert.ok(/requirements-client\.txt/i.test(missingWs), missingWs);
 
+// World-scan noise (bsdiff4) must not mask pkg_resources hang.
+const pkgHang = explainClientExit(
+  null,
+  "ModuleNotFoundError: No module named 'bsdiff4'\npkg_resources not found, press enter to install it\n"
+);
+assert.ok(/pkg_resources/i.test(pkgHang), pkgHang);
+assert.ok(!/bsdiff4/i.test(pkgHang), pkgHang);
+
+const reqHang = explainClientExit(
+  null,
+  "Requirement bsdiff4>=1.2.2 is not satisfied, press enter to install it\n"
+);
+assert.ok(/ModuleUpdate/i.test(reqHang), reqHang);
+
+const urlArg = explainClientExit(
+  1,
+  "ImportError: cannot import name 'handle_url_arg' from 'CommonClient'\n"
+);
+assert.ok(/handle_url_arg/i.test(urlArg), urlArg);
+
 // Generic: surface stderr tail.
 const generic = explainClientExit(1, "line1\nTraceback...\nImportError: boom");
 assert.ok(generic.includes("ImportError: boom"), generic);

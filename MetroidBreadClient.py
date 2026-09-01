@@ -33,6 +33,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 # Runtime extracts live at custom_worlds/_metroid_bread_runtime (parents[1] is NOT AP root).
 _WORLD_DIR = Path(__file__).resolve().parent
 
+# Hub spawn has no stdin. Force ModuleUpdate skip before CommonClient imports it
+# (some external AP installs ignore SKIP or still prompt for pkg_resources).
+if "--electron" in sys.argv or "--nogui" in sys.argv:
+    os.environ["SKIP_REQUIREMENTS_UPDATE"] = "1"
+os.environ.setdefault("SKIP_REQUIREMENTS_UPDATE", "1")
+
 # Script dir is on sys.path when launched as a file; prefer shared resolver.
 if str(_WORLD_DIR) not in sys.path:
     sys.path.insert(0, str(_WORLD_DIR))
@@ -76,14 +82,62 @@ except Exception:
         except Exception:
             pass
 
+# Ensure pkg_resources before CommonClient → ModuleUpdate (avoids "press enter" hang).
+try:
+    import pkg_resources  # noqa: F401
+except ImportError:
+    import subprocess as _subprocess
+
+    try:
+        _subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "setuptools>=75,<81"],
+            stdout=sys.stderr,
+        )
+        import pkg_resources  # noqa: F401
+    except Exception as _pkg_exc:
+        print(
+            f"[MetroidBreadClient] setuptools/pkg_resources missing and auto-install failed: {_pkg_exc}",
+            file=sys.stderr,
+        )
+
+# Hub uses a minimal venv — never run full AP requirements.txt (bsdiff4, etc.).
+# Some source installs' ModuleUpdate ignore SKIP_REQUIREMENTS_UPDATE; force-skip before
+# CommonClient imports and calls ModuleUpdate.update().
+try:
+    import ModuleUpdate as _ModuleUpdate
+
+    _ModuleUpdate.update_ran = True
+    if hasattr(_ModuleUpdate, "_skip_update"):
+        _ModuleUpdate._skip_update = True
+
+    def _hub_mu_confirm(msg: str) -> None:
+        print(f"\n{msg} (skipped; Hub non-interactive)", file=sys.stderr)
+
+    def _hub_mu_update(yes: bool = False, force: bool = False) -> None:
+        return None
+
+    _ModuleUpdate.confirm = _hub_mu_confirm  # type: ignore[assignment]
+    _ModuleUpdate.update = _hub_mu_update  # type: ignore[assignment]
+except Exception as _mu_exc:
+    print(
+        f"[MetroidBreadClient] could not pre-skip ModuleUpdate: {_mu_exc}",
+        file=sys.stderr,
+    )
+
 from CommonClient import (
     ClientCommandProcessor,
     CommonContext,
     get_base_parser,
     gui_enabled,
-    handle_url_arg,
     server_loop,
 )
+
+try:
+    from CommonClient import handle_url_arg
+except ImportError:
+    # Older Archipelago CommonClient (pre-url helper) — keep Connect working.
+    def handle_url_arg(args, parser=None):  # type: ignore[misc]
+        return args
 from MultiServer import mark_raw
 from NetUtils import ClientStatus, JSONtoTextParser, NetworkItem, SlotType, status_colors
 import Utils

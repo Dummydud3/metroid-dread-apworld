@@ -59,9 +59,18 @@ def check_pip():
 
 
 def confirm(msg: str):
+    # Hub / --electron / --nogui: no stdin — never block on "press enter".
+    noninteractive = (
+        not sys.stdin.isatty()
+        or os.environ.get("SKIP_REQUIREMENTS_UPDATE", "").lower() in ("1", "true", "yes")
+        or any(a in ("--electron", "--nogui") for a in sys.argv)
+    )
+    if noninteractive:
+        print(f"\n{msg} (auto-yes; non-interactive)")
+        return
     try:
         input(f"\n{msg}")
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):
         print("\nAborting")
         sys.exit(1)
 

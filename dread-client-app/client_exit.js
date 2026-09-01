@@ -35,10 +35,43 @@ function explainClientExit(code, stderrBuf) {
   if (/partially initialized module 'Options'/i.test(blob)) {
     return "Options.py import clash — Archipelago root / PYTHONPATH is wrong.";
   }
-  const mod = blob.match(/ModuleNotFoundError: No module named '([^']+)'/i);
-  if (mod) {
+  // ModuleUpdate interactive hang under Hub (no stdin) — not a random world import.
+  if (/pkg_resources not found/i.test(blob)) {
     return (
-      `Missing Python module: ${mod[1]}\n` +
+      "Client blocked on missing pkg_resources (setuptools).\n" +
+      "Hub should auto-install setuptools into the MetroidBread venv on Connect.\n" +
+      "Update the Hub/apworld, then Connect again (or: pip install \"setuptools>=75,<81\")."
+    );
+  }
+  if (/Requirement .+ is not satisfied,\s*press enter/i.test(blob)) {
+    return (
+      "Client blocked on Archipelago ModuleUpdate (full requirements.txt check).\n" +
+      "Hub should skip that under --electron; update the Hub/apworld and Connect again.\n" +
+      "Do not install every AP world dependency into the MetroidBread venv."
+    );
+  }
+  if (/cannot import name 'handle_url_arg'/i.test(blob)) {
+    return (
+      "Archipelago CommonClient is too old (missing handle_url_arg).\n" +
+      "Hub should import from bundled ap_core — update the Hub/apworld and Connect again."
+    );
+  }
+
+  // Prefer client-critical missing modules; ignore AP world-scan noise (bsdiff4, etc.).
+  const worldScanNoise = new Set([
+    "bsdiff4",
+    "zilliandomizer",
+    "pyevermizer",
+    "maseya",
+    "ORAS",
+  ]);
+  const allMods = [
+    ...blob.matchAll(/ModuleNotFoundError: No module named '([^']+)'/gi),
+  ].map((m) => m[1]);
+  const critical = allMods.find((name) => !worldScanNoise.has(name));
+  if (critical) {
+    return (
+      `Missing Python module: ${critical}\n` +
       "Hub normally auto-installs client packages (websockets, etc.) on Connect.\n" +
       "Try Connect again, or run:\n" +
       "  py -3.12 -m pip install -r requirements-client.txt\n" +

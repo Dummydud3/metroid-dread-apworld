@@ -37,6 +37,8 @@ CLIENT_IMPORTS: Tuple[Tuple[str, str], ...] = (
     ("jellyfish", "jellyfish>=1.2.1"),
     ("typing_extensions", "typing_extensions>=4.15.0"),
     ("schema", "schema>=0.7.8"),
+    # ModuleUpdate.install_pkg_resources — missing → interactive "press enter" hang under Hub.
+    ("pkg_resources", "setuptools>=75,<81"),
     ("open_dread_rando", "open-dread-rando>=2.19"),
 )
 
