@@ -218,8 +218,15 @@ function attachSocketHandlers(ws, { onMessage, onError, onClose }) {
   // `ws` package: EventEmitter (.on). Browsers / undici: onmessage properties.
   if (typeof ws.on === "function") {
     ws.on("message", (data) => onMessage({ data: payloadToText(data) }));
-    ws.on("error", () => onError());
-    ws.on("close", () => onClose());
+    ws.on("error", (err) =>
+      onError({ message: err && err.message ? err.message : String(err || "error") })
+    );
+    ws.on("close", (code, reason) =>
+      onClose({
+        code,
+        reason: reason != null ? payloadToText(reason) : "",
+      })
+    );
     return;
   }
   ws.onmessage = onMessage;
@@ -241,12 +248,13 @@ function probeRoomInfo(server, opts = {}) {
       ok: false,
       error:
         "WebSocket is not available (install the Hub `ws` dependency or use Node 22+).",
+      attempts: [],
     });
   }
 
   const candidates = buildWsCandidates(server);
   if (!candidates.length) {
-    return Promise.resolve({ ok: false, error: "Server address is empty." });
+    return Promise.resolve({ ok: false, error: "Server address is empty.", attempts: [] });
   }
 
   const tryOne = (url) =>
@@ -265,13 +273,17 @@ function probeRoomInfo(server, opts = {}) {
         resolve(result);
       };
       const timer = setTimeout(() => {
-        finish({ ok: false, error: `Timed out waiting for RoomInfo from ${url}` });
+        finish({ ok: false, url, error: `Timed out waiting for RoomInfo from ${url}` });
       }, timeoutMs);
 
       try {
         ws = new WS(url);
       } catch (err) {
-        finish({ ok: false, error: String(err && err.message ? err.message : err) });
+        finish({
+          ok: false,
+          url,
+          error: String(err && err.message ? err.message : err),
+        });
         return;
       }
 
@@ -286,22 +298,48 @@ function probeRoomInfo(server, opts = {}) {
             url,
           });
         },
-        onError: () => {
-          finish({ ok: false, error: `WebSocket error connecting to ${url}` });
+        onError: (ev) => {
+          const detail =
+            (ev && ev.message) ||
+            (ev && ev.error && ev.error.message) ||
+            (ev && ev.type) ||
+            "error";
+          finish({ ok: false, url, error: `WebSocket error connecting to ${url}: ${detail}` });
         },
-        onClose: () => {
-          finish({ ok: false, error: `Connection closed before RoomInfo from ${url}` });
+        onClose: (ev) => {
+          const code = ev && ev.code != null ? ev.code : "?";
+          const reason = (ev && ev.reason) || "";
+          finish({
+            ok: false,
+            url,
+            error: `Connection closed before RoomInfo from ${url} (code=${code}${
+              reason ? ` reason=${reason}` : ""
+            })`,
+          });
         },
       });
     });
 
   return (async () => {
-    let last = { ok: false, error: "No WebSocket candidates." };
+    const attempts = [];
+    let last = { ok: false, error: "No WebSocket candidates.", attempts };
     for (const url of candidates) {
       last = await tryOne(url);
-      if (last.ok) return last;
+      attempts.push({
+        url: last.url || url,
+        ok: Boolean(last.ok),
+        error: last.ok ? "" : last.error || "failed",
+      });
+      if (last.ok) {
+        last.attempts = attempts;
+        return last;
+      }
     }
-    return last;
+    return {
+      ok: false,
+      error: (last && last.error) || "All WebSocket candidates failed.",
+      attempts,
+    };
   })();
 }
 

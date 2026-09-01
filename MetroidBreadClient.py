@@ -20,6 +20,7 @@ import re
 import struct
 import sys
 import time
+import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from enum import IntEnum
@@ -280,8 +281,8 @@ def setup_dread_diagnostic_logging(
         electron_ui=electron_ui,
         reason="start",
     )
-    # Path is always in the diagnostic file; Hub Log only with Debug logs on.
-    log_debug("Writing diagnostic log to: %s", log_path)
+    # Path always in the diagnostic file; also surface on Hub Log (normal).
+    log_info("Writing diagnostic log to: %s", log_path)
     return log_path
 
 # Hex colors matching NetUtils.JSONtoTextParser / kvui conventions.
@@ -2121,6 +2122,9 @@ class MetroidBreadContext(CommonContext):
         self._dread_connect_task: Optional[asyncio.Task] = None
         self.layout_uuid = ""
         self.version = ""
+        # RomFS-baked AP seed digits (Init.sApSeedId); compared to RoomInfo.seed_name.
+        self.game_ap_seed_id: str = ""
+        self._seed_mismatch_triggered: bool = False
 
         # Mercury-style sync state (from game push packets)
         self.inventory_index: Optional[int] = None
@@ -2820,14 +2824,21 @@ class MetroidBreadContext(CommonContext):
             return {}
 
     def _tracker_boss_status(self) -> List[dict]:
-        """Hub tracker rows: each boss in-logic (reachable) + beaten (checked)."""
+        """Hub tracker rows: each boss in-logic (reachable) + beaten (in-game).
+
+        Beaten must NOT use Archipelago ``checked_locations``. In multiworld,
+        another slot's Collect marks locations that held their items as checked
+        on the server — including our boss arena pickups — without this player
+        ever fighting the boss. Only trust live probes and locations the Dread
+        game itself reported via collected-indices / local LocationChecks.
+        """
         try:
             from worlds.metroid_bread import bosses
         except Exception:
             return []
 
-        checked = set(self._tracker_checked_location_ids() or [])
-        checked |= set(getattr(self, "game_reported_locations", set()) or set())
+        # Local in-game collection only (never union with AP checked_locations).
+        local_collected = set(getattr(self, "game_reported_locations", set()) or set())
         loc_ids = self._boss_check_location_ids()
 
         in_logic: Set[str] = set()
@@ -2860,7 +2871,7 @@ class MetroidBreadContext(CommonContext):
         for boss in bosses.ALL_BOSSES:
             if boss.node in reachable:
                 in_logic.add(boss.key)
-            # Beaten: AP pickup checked, or Raven Beak via game-beaten flag.
+            # Beaten: in-game evidence only, or Raven Beak via game-beaten flag.
             if boss.key == bosses.RAVEN_BEAK_KEY:
                 if self._game_beaten_flag or self.finished_game:
                     beaten.add(boss.key)
@@ -2870,14 +2881,16 @@ class MetroidBreadContext(CommonContext):
                 beaten.add(boss.key)
                 continue
             loc_id = loc_ids.get(boss.key)
-            if loc_id is not None and int(loc_id) in checked:
+            if loc_id is not None and int(loc_id) in local_collected:
                 beaten.add(boss.key)
                 continue
-            # Event-only fallback: a *same-region* checked pickup that is only
-            # reachable after this event (never shared-arena / cross-region).
+            # Event-only fallback: a *same-region* game-reported pickup that is
+            # only reachable after this event (never shared-arena / cross-region).
             if boss.event_item and logic is not None:
                 try:
-                    if self._boss_event_inferred_beaten(logic, counts, boss, checked):
+                    if self._boss_event_inferred_beaten(
+                        logic, counts, boss, local_collected
+                    ):
                         beaten.add(boss.key)
                 except Exception:
                     pass
@@ -2916,11 +2929,13 @@ class MetroidBreadContext(CommonContext):
             return False
         return scenario in (getattr(self, "_visited_scenarios", set()) or set())
 
-    def _boss_event_inferred_beaten(self, logic, counts: Dict[str, int], boss, checked: Set[int]) -> bool:
+    def _boss_event_inferred_beaten(self, logic, counts: Dict[str, int], boss, local_collected: Set[int]) -> bool:
         """True when evidence shows this event-only boss was cleared.
 
-        Only counts checked pickups in the **same region** that become reachable
-        solely after adding this boss's event (collect_events=False compare).
+        Only counts *game-reported* pickups in the **same region** that become
+        reachable solely after adding this boss's event (collect_events=False
+        compare). Server ``checked_locations`` are ignored so another slot's
+        Collect cannot fake this kill.
 
         Intentionally does **not** use:
         - Same-area pickups (Gravity Suit Tower tanks ≠ Twin Robots kill)
@@ -2948,7 +2963,7 @@ class MetroidBreadContext(CommonContext):
             data = location_table.get(name)
             if data is None or data.id is None:
                 continue
-            if int(data.id) in checked:
+            if int(data.id) in local_collected:
                 return True
         return False
 
@@ -3163,8 +3178,8 @@ class MetroidBreadContext(CommonContext):
             # variants-signature check makes this a cheap no-op when nothing
             # actually changed) instead of only when areas expand — otherwise
             # those in-logic transitions are silently dropped.
-            self._schedule_map_icon_labels_push(force=bool(force))
             if not force and sig == self._reachable_areas_sig:
+                self._schedule_map_icon_labels_push(force=bool(force))
                 return
             self._reachable_areas_sig = sig
             lua = reachable_map.format_apply_reachable_lua(areas)
@@ -3173,6 +3188,9 @@ class MetroidBreadContext(CommonContext):
                 len(areas),
             )
             await self.run_lua_code(lua, wait_response=False)
+            # Stagger labels after a real paint (load/connect/inventory): let the
+            # VisitBounds ProcessCommand reply + socket Send finish first.
+            self._schedule_map_icon_labels_push(force=bool(force), extra_delay_s=1.25)
         except Exception as exc:
             logger.warning("push_reachable_map: %s", exc)
 
@@ -3193,6 +3211,8 @@ class MetroidBreadContext(CommonContext):
             except Exception:
                 pass
             await self.push_reachable_map(force=True)
+            # Drain paint EXEC / socket Send before label storm (post-load abort).
+            await asyncio.sleep(1.25)
             await self.push_map_icon_labels(force=True)
         except asyncio.CancelledError:
             return
@@ -3371,12 +3391,22 @@ class MetroidBreadContext(CommonContext):
         """Alias: variants map (base → variant key)."""
         return self._rebuild_map_icon_variants()
 
-    def _schedule_map_icon_labels_push(self, force: bool = False) -> None:
-        """Debounce variant retarget push (fire-and-forget; never blocks item grants)."""
+    def _schedule_map_icon_labels_push(
+        self, force: bool = False, *, extra_delay_s: float = 0.0
+    ) -> None:
+        """Debounce variant retarget push (fire-and-forget; never blocks item grants).
+
+        extra_delay_s: added after the usual settle+debounce — use after a real
+        VisitBounds paint so ProcessCommand reply + socket Send can drain before
+        the label EXEC storm (Ryujinx LockMutex InvalidHandle after load).
+        """
         if not self.map_icon_labels_enabled or not self.game_connected:
             return
         pending_force = bool(force) or bool(getattr(self, "_map_icon_labels_force_pending", False))
         self._map_icon_labels_force_pending = pending_force
+        # Keep the largest pending stagger if multiple schedules coalesce.
+        prev_extra = float(getattr(self, "_map_icon_labels_extra_delay_s", 0.0) or 0.0)
+        self._map_icon_labels_extra_delay_s = max(prev_extra, float(extra_delay_s or 0.0))
         prev = self._map_icon_labels_task
         if prev is not None and not prev.done():
             prev.cancel()
@@ -3390,7 +3420,9 @@ class MetroidBreadContext(CommonContext):
                     if self._game_mode == "INGAME" and not self._in_transition():
                         break
                     await asyncio.sleep(0.25)
-                await asyncio.sleep(self._map_icon_labels_debounce_s)
+                extra = float(getattr(self, "_map_icon_labels_extra_delay_s", 0.0) or 0.0)
+                self._map_icon_labels_extra_delay_s = 0.0
+                await asyncio.sleep(self._map_icon_labels_debounce_s + extra)
                 use_force = bool(getattr(self, "_map_icon_labels_force_pending", False))
                 self._map_icon_labels_force_pending = False
                 await self.push_map_icon_labels(force=use_force)
@@ -3682,6 +3714,7 @@ class MetroidBreadContext(CommonContext):
             "in_transition": self._in_transition(),
             "version": self.version or "",
             "layout_uuid": self.layout_uuid or "",
+            "game_ap_seed_id": self.game_ap_seed_id or "",
             # Counts for main UI pills (keep key names for compatibility).
             "items_received": len(received),
             "checked_locations": len(checked),
@@ -3732,11 +3765,18 @@ class MetroidBreadContext(CommonContext):
             await asyncio.sleep(1.0)
 
     async def _electron_abort_connect(
-        self, error: str, detail: str, *, event_type: str = "ap_error"
+        self, error: str, detail: str, *, event_type: str = "ap_error", **extra
     ) -> None:
         """Surface a Hub error and tear down without deadlocking server_loop."""
-        logger.error(detail)
-        self.emit_ui(event_type, error=error, detail=detail, **self.ui_status_payload())
+        logger.error("%s — %s", error, detail)
+        log_info("AP connect abort: %s | %s", error, detail.replace("\n", " | "))
+        self.emit_ui(
+            event_type,
+            **self.ui_status_payload(),
+            error=error,
+            detail=detail,
+            **extra,
+        )
         self.emit_ui_status()
         # Must NOT await self.disconnect() here — disconnect waits on server_task,
         # and we are often called from inside server_loop (deadlock → UI stuck).
@@ -3750,7 +3790,82 @@ class MetroidBreadContext(CommonContext):
             except Exception:
                 pass
 
+    def handle_connection_loss(self, msg: str) -> None:
+        """
+        CommonClient calls this from except blocks in server_loop.
+        Without a Kivy UI the default path only logs + opens a message box —
+        Hub never gets a structured failure. Surface every refuse/timeout/OS
+        error with the exception type/message (and abort if we never joined).
+        """
+        exc_info = sys.exc_info()
+        exc = exc_info[1]
+        exc_name = type(exc).__name__ if exc is not None else ""
+        exc_text = str(exc) if exc is not None else ""
+        tb_text = ""
+        if exc_info[0] is not None:
+            tb_text = "".join(traceback.format_exception(*exc_info)).strip()
+
+        detail_parts = [msg]
+        if exc_name:
+            detail_parts.append(f"{exc_name}: {exc_text}" if exc_text else exc_name)
+        if tb_text:
+            # Keep Hub lines readable; full traceback still goes to the file via logger.
+            detail_parts.append(tb_text.splitlines()[-1])
+
+        detail = "\n".join(detail_parts)
+        logger.exception(msg, exc_info=exc_info, extra={"compact_gui": True})
+        log_info(
+            "AP connection loss: %s%s",
+            msg,
+            f" ({exc_name}: {exc_text})" if exc_name else "",
+        )
+        if tb_text:
+            log_info("AP connection traceback:\n%s", tb_text)
+
+        never_joined = self.slot is None
+        if self.electron_ui:
+            event_type = "ap_error" if never_joined else "ap_disconnect"
+            self.emit_ui(
+                event_type,
+                error=msg,
+                detail=detail,
+                exception=f"{exc_name}: {exc_text}" if exc_name else "",
+                **self.ui_status_payload(),
+            )
+            self.emit_ui_status()
+            if never_joined:
+                self.disconnected_intentionally = True
+                self.cancel_autoreconnect()
+                self.exit_event.set()
+                sock = getattr(getattr(self, "server", None), "socket", None)
+                if sock is not None and not getattr(sock, "closed", True):
+                    asyncio.create_task(sock.close())
+                return
+            return
+
+        self._messagebox_connection_loss = self.gui_error(msg, exc)
+
+    def gui_error(self, title: str, text) -> None:
+        """Also tee GUI/connection errors into Hub-visible logs."""
+        body = text if isinstance(text, str) else (repr(text) if text is not None else "")
+        log_info("AP gui_error: %s — %s", title, body)
+        if self.electron_ui and self.slot is None:
+            self.emit_ui(
+                "ap_error",
+                error=str(title),
+                detail=body,
+                **self.ui_status_payload(),
+            )
+            return None
+        return super().gui_error(title, text)
+
     async def server_auth(self, password_requested: bool = False):
+        log_info(
+            "AP server_auth: password_requested=%s has_password=%s slot=%r",
+            password_requested,
+            bool(self.password),
+            self.auth or self.username,
+        )
         if password_requested and not self.password:
             # Hub/Electron has no stdin password prompt — surface a UI error instead of hanging.
             # Also covers InvalidPassword: CommonClient clears password then re-calls server_auth.
@@ -3764,11 +3879,79 @@ class MetroidBreadContext(CommonContext):
                 return
             await super().server_auth(password_requested)
         await self.get_username()
+        log_info(
+            "AP sending Connect packet: name=%r game=%r version=%s tags=%s",
+            self.auth,
+            self.game,
+            getattr(Utils, "version_tuple", None),
+            list(self.tags) if self.tags is not None else [],
+        )
         await self.send_connect()
 
     def on_package(self, cmd: str, args: dict):
+        if cmd == "ConnectionRefused":
+            errors = list(args.get("errors") or [])
+            log_info("AP ConnectionRefused errors=%s full=%s", errors, args)
+            # InvalidSlot / InvalidGame / InvalidPassword are handled by CommonClient
+            # hooks (event_invalid_* / server_auth). Catch the raise-paths here so Hub
+            # always gets a structured error before server_loop's generic handler.
+            if self.electron_ui:
+                if "IncompatibleVersion" in errors:
+                    asyncio.create_task(
+                        self._electron_abort_connect(
+                            "Incompatible version",
+                            "Server reported this client version as incompatible. "
+                            f"Errors: {errors}. Update Archipelago / metroid_bread.",
+                            errors=errors,
+                        )
+                    )
+                elif "InvalidItemsHandling" in errors:
+                    asyncio.create_task(
+                        self._electron_abort_connect(
+                            "Invalid items handling",
+                            "Server rejected this client's item-handling flags. "
+                            f"Errors: {errors}.",
+                            errors=errors,
+                        )
+                    )
+                elif errors and not any(
+                    e in errors
+                    for e in ("InvalidSlot", "InvalidGame", "InvalidPassword")
+                ):
+                    asyncio.create_task(
+                        self._electron_abort_connect(
+                            "Connection refused",
+                            f"Server refused the connection. Errors: {errors}",
+                            errors=errors,
+                        )
+                    )
+                elif not errors:
+                    asyncio.create_task(
+                        self._electron_abort_connect(
+                            "Connection refused",
+                            "Server refused the connection with no error list.",
+                            errors=errors,
+                        )
+                    )
         if cmd == "Connected":
             self._refresh_item_id_to_name()
+            game_name = ""
+            try:
+                slot_n = int(args.get("slot") or 0)
+                info = (self.slot_info or {}).get(slot_n)
+                if info is not None:
+                    game_name = getattr(info, "game", None) or (
+                        info[1] if isinstance(info, (tuple, list)) and len(info) > 1 else ""
+                    )
+            except Exception:
+                game_name = ""
+            log_info(
+                "AP Connected: slot=%s team=%s seed=%r game=%r",
+                args.get("slot"),
+                args.get("team"),
+                self.seed_name,
+                game_name or self.game,
+            )
             slot_data = args.get("slot_data") or {}
             self._slot_data = dict(slot_data) if isinstance(slot_data, dict) else {}
             extras = self._slot_data.get("patch_extras")
@@ -3832,6 +4015,11 @@ class MetroidBreadContext(CommonContext):
             # Server checked_locations → collected map labels (after keys load / scout).
             self._schedule_map_icon_labels_push(force=True)
             self._schedule_all_bosses_itorash_gate()
+            # AP seed now known — compare against patched RomFS if Dread is linked.
+            asyncio.create_task(
+                self._check_seed_mismatch(reason="ap_connected"),
+                name="SeedMismatchApConnected",
+            )
         elif cmd == "ReceivedItems":
             # Game sync is driven by items_received + ReceivedPickups index.
             self.emit_ui_status()
@@ -3846,11 +4034,22 @@ class MetroidBreadContext(CommonContext):
         elif cmd == "RoomInfo":
             if args.get("seed_name"):
                 self.seed_name = args.get("seed_name")
+            log_info(
+                "AP RoomInfo: seed=%r password=%s version=%s games=%s",
+                args.get("seed_name"),
+                bool(args.get("password")),
+                args.get("version"),
+                list((args.get("games") or []))[:12],
+            )
             # seed_name is already included via ui_status_payload() — don't pass it twice.
             self.emit_ui(
                 "room_info",
                 password_required=bool(args.get("password")),
                 **self.ui_status_payload(),
+            )
+            asyncio.create_task(
+                self._check_seed_mismatch(reason="room_info"),
+                name="SeedMismatchRoomInfo",
             )
         elif cmd == "DataPackage":
             self._refresh_item_id_to_name()
@@ -4033,6 +4232,7 @@ class MetroidBreadContext(CommonContext):
             "  • Paste the room connection from the Archipelago host page "
             "(archipelago://… or host:port), not a random lobby"
         )
+        log_info("AP InvalidSlot: auth=%r server=%r", self.auth, self.server_address)
         # Avoid raising — that crashes the server loop mid-handshake and confuses the UI.
         if self.electron_ui:
             self.disconnected_intentionally = True
@@ -4052,6 +4252,12 @@ class MetroidBreadContext(CommonContext):
         msg = (
             "Invalid Game — this slot is not Metroid Bread "
             "(or the room was generated without this AP world)."
+        )
+        log_info(
+            "AP InvalidGame: auth=%r game=%r server=%r",
+            self.auth,
+            self.game,
+            self.server_address,
         )
         if self.electron_ui:
             self.disconnected_intentionally = True
@@ -4804,6 +5010,93 @@ class MetroidBreadContext(CommonContext):
             return False
         return True
 
+    async def _refresh_game_ap_seed_id(self) -> str:
+        """Read Init.sApSeedId from the patched game (empty on pre-guard mods)."""
+        if self._socket is None:
+            return self.game_ap_seed_id or ""
+        lua = (
+            "return tostring((RL and RL.GetApSeedId and RL.GetApSeedId()) "
+            "or ((Init and Init.sApSeedId) or ''))"
+        )
+        try:
+            resp = await self.run_lua_code(lua, wait_response=True, timeout=5.0)
+        except Exception as exc:
+            logger.debug("AP seed id read failed: %s", exc)
+            return self.game_ap_seed_id or ""
+        raw = ""
+        if resp:
+            raw = resp.decode("utf-8", errors="replace").strip()
+        if raw.lower() in ("nil", "none", "null"):
+            raw = ""
+        self.game_ap_seed_id = raw
+        return raw
+
+    async def _check_seed_mismatch(self, *, reason: str = "") -> bool:
+        """
+        Compare Archipelago RoomInfo.seed_name to RomFS Init.sApSeedId.
+
+        On mismatch: Hub log + ODR-style fatal popup + return to main menu.
+        Returns True when a mismatch was handled. Soft-skips when either side
+        is unknown (old mods without Init.sApSeedId, or AP not connected yet).
+        """
+        if self._seed_mismatch_triggered:
+            return False
+        if not self.game_connected or self._socket is None:
+            return False
+        ap_seed = getattr(self, "seed_name", None) or ""
+        if not str(ap_seed).strip():
+            return False
+
+        game_seed = self.game_ap_seed_id
+        if not game_seed:
+            game_seed = await self._refresh_game_ap_seed_id()
+
+        try:
+            from ap_to_patcher import normalize_ap_seed_id, seeds_match
+        except Exception:
+            def normalize_ap_seed_id(value: Optional[str]) -> str:
+                return (value or "").strip()
+
+            def seeds_match(client_seed: Optional[str], game_seed: Optional[str]) -> bool:
+                a = normalize_ap_seed_id(client_seed)
+                b = normalize_ap_seed_id(game_seed)
+                if not a or not b:
+                    return True
+                return a == b
+
+        if seeds_match(ap_seed, game_seed):
+            logger.debug(
+                "AP seed check ok (%s): ap=%r game=%r",
+                reason or "?",
+                normalize_ap_seed_id(ap_seed),
+                normalize_ap_seed_id(game_seed),
+            )
+            return False
+
+        self._seed_mismatch_triggered = True
+        ap_n = normalize_ap_seed_id(ap_seed)
+        game_n = normalize_ap_seed_id(game_seed)
+        msg = (
+            f"Seed mismatch! Archipelago seed {ap_n!r} does not match patched game "
+            f"{game_n!r}. Please make sure to patch the game to the right folder."
+        )
+        logger.error("%s (trigger=%s)", msg, reason or "?")
+        self.emit_ui(
+            "seed_mismatch",
+            error=msg,
+            ap_seed=ap_n,
+            game_seed=game_n,
+            **self.ui_status_payload(),
+        )
+        try:
+            await self.run_lua_code(
+                "if RL and RL.SeedMismatchBootToMenu then RL.SeedMismatchBootToMenu() end",
+                wait_response=False,
+            )
+        except Exception as exc:
+            logger.error("Failed to trigger seed-mismatch popup: %s", exc)
+        return True
+
     async def _wait_for_stable_game_mode(self, timeout: float = 45.0) -> str:
         """
         Poll Game.GetCurrentGameModeID until MAINMENU or INGAME.
@@ -4948,6 +5241,9 @@ class MetroidBreadContext(CommonContext):
 
                 await self.bootstrap()
 
+                # Read RomFS-baked AP seed after bootstrap defines RL.GetApSeedId.
+                await self._refresh_game_ap_seed_id()
+
                 # Drain EXEC reply before starting the background read loop.
                 await self.run_lua_code(
                     'Game.AddSF(2.0, "RL.UpdateRDVClient", "")', wait_response=True
@@ -5065,6 +5361,7 @@ class MetroidBreadContext(CommonContext):
             self._schedule_all_bosses_itorash_gate()
             self.emit_ui("game_connected", **self.ui_status_payload())
             self.emit_ui_status()
+            await self._check_seed_mismatch(reason="dread_connected")
             return True
         except Exception as e:
             logger.error("Post-connect settle failed: %s", e)
@@ -5140,6 +5437,8 @@ class MetroidBreadContext(CommonContext):
         self._game_mode = "UNKNOWN"
         self._transition_until = 0.0
         self.current_scenario = None
+        self.game_ap_seed_id = ""
+        self._seed_mismatch_triggered = False
 
         if self.death_poll_task:
             self.death_poll_task.cancel()
@@ -5422,6 +5721,8 @@ class MetroidBreadContext(CommonContext):
             self.game_reported_locations.clear()
             self._game_beaten_boss_keys.clear()
             self._game_story_keys.clear()
+            # Allow a fresh mismatch popup if they load another save after returning.
+            self._seed_mismatch_triggered = False
             logger.debug("Returned to main menu; reset sync state")
         elif classified == "TRANSITION":
             # Between title and in-game (or other non-world modes).
@@ -5452,6 +5753,10 @@ class MetroidBreadContext(CommonContext):
                         f"enter/load world {scenario!r} "
                         f"(prev_scenario={prev_scenario!r} prev_mode={prev_mode})"
                     ),
+                )
+                asyncio.create_task(
+                    self._check_seed_mismatch(reason="enter_ingame"),
+                    name="SeedMismatchEnterIngame",
                 )
             # RL.UpdateRDVClient / scenario load: re-push reachability so the new
             # area's map paints without waiting for another inventory tick.

@@ -196,8 +196,20 @@
               </div>
             </label>
 
+            <div class="platform-toggle" role="group" aria-label="Mod output layout">
+              <button type="button" id="btn-compat-ryujinx" class="platform-btn active" data-compat="ryujinx">
+                Ryujinx
+              </button>
+              <button type="button" id="btn-compat-atmosphere" class="platform-btn" data-compat="atmosphere">
+                Atmosphere
+              </button>
+            </div>
+            <p class="hint" id="compat-hint">
+              Writes under DreadRandovania/ for the Ryujinx mod folder.
+            </p>
+
             <label>
-              Ryujinx output folder
+              <span id="output-path-label">Ryujinx output folder</span>
               <div class="path-row">
                 <input id="output-path" type="text" spellcheck="false" />
                 <button type="button" id="btn-browse-output" class="ghost">Browse</button>
@@ -308,41 +320,43 @@
               <button id="btn-back-patch" type="button" class="ghost">Re-patch</button>
             </div>
           </section>
-
-          <section class="panel log-panel">
-            <div class="log-head">
-              <h2>Log</h2>
-              <div class="log-head-actions">
-                <label class="check inline log-debug-toggle" title="Show Remote Lua / OdrMap / client diagnostic spam">
-                  <input id="debug-logs" type="checkbox" />
-                  <span>Debug logs</span>
-                </label>
-                <button id="btn-open-logs" class="ghost" type="button" title="Open the Archipelago logs folder">
-                  Open logs folder
-                </button>
-                <button
-                  id="btn-check-updates"
-                  class="ghost"
-                  type="button"
-                  title="Check GitHub Releases for a newer metroid_bread.apworld"
-                >
-                  Check for updates
-                </button>
-                <button id="btn-clear-log" class="ghost" type="button">Clear</button>
-              </div>
-            </div>
-            <div id="log" class="log" aria-live="polite"></div>
-            <form id="cmd-form" class="cmd-form">
-              <input
-                id="cmd"
-                type="text"
-                placeholder="!hint Charge Beam  ·  /connect_dread  ·  chat"
-                autocomplete="off"
-              />
-              <button type="submit" class="primary">Send</button>
-            </form>
-          </section>
         </div>
+
+        <!-- Always on Client view so connect failures aren't trapped on a hidden
+             stage. Collapsed on connect/patch; open after connect (Play). -->
+        <details class="panel log-panel" id="main-log-wrap">
+          <summary class="log-head">
+            <h2>Log <span class="muted-inline" id="main-log-hint">(click to expand)</span></h2>
+            <div class="log-head-actions" id="main-log-actions">
+              <label class="check inline log-debug-toggle" title="Show Remote Lua / OdrMap / client diagnostic spam">
+                <input id="debug-logs" type="checkbox" />
+                <span>Debug logs</span>
+              </label>
+              <button id="btn-open-logs" class="ghost" type="button" title="Open the Archipelago logs folder">
+                Open logs folder
+              </button>
+              <button
+                id="btn-check-updates"
+                class="ghost"
+                type="button"
+                title="Check GitHub Releases for a newer metroid_bread.apworld"
+              >
+                Check for updates
+              </button>
+              <button id="btn-clear-log" class="ghost" type="button">Clear</button>
+            </div>
+          </summary>
+          <div id="log" class="log" aria-live="polite"></div>
+          <form id="cmd-form" class="cmd-form">
+            <input
+              id="cmd"
+              type="text"
+              placeholder="!hint Charge Beam  ·  /connect_dread  ·  chat"
+              autocomplete="off"
+            />
+            <button type="submit" class="primary">Send</button>
+          </form>
+        </details>
       </section>
     </div>
 

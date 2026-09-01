@@ -234,6 +234,10 @@
     yamlLoadedDread: null,
     // Hub Log: false = hide @@APLOG@@debug@@ / .log-debug lines (default).
     debugLogs: false,
+    // Patch output layout: ryujinx | atmosphere
+    modCompatibility: "ryujinx",
+    ryujinxOutputPath: "",
+    atmosphereOutputPath: "",
   };
 
   const ANSI_RE = /\u001b\[[0-9;]*m/g;
@@ -314,11 +318,31 @@
     $("btn-menu").setAttribute("aria-expanded", "false");
   }
 
+  function setMainLogExpanded(expanded) {
+    const wrap = $("main-log-wrap");
+    const hint = $("main-log-hint");
+    if (!wrap) return;
+    wrap.open = !!expanded;
+    if (hint) {
+      hint.textContent = expanded ? "(click to collapse)" : "(click to expand)";
+    }
+  }
+
   function setStage(stage) {
     state.stage = stage;
     $("stage-connect").hidden = stage !== "connect";
     $("stage-patch").hidden = stage !== "patch";
     $("stage-client").hidden = stage !== "client";
+    // Patch stage already has its own collapsed log — hide the shared Connect log.
+    const mainLog = $("main-log-wrap");
+    if (mainLog) {
+      mainLog.hidden = stage === "patch";
+    }
+    // Connect/patch: keep Log minimized so the form stays primary.
+    // Post-connect Play stage: open the log by default.
+    if (stage !== "patch") {
+      setMainLogExpanded(stage === "client");
+    }
     hub.saveConfig({ hub_stage: stage }).catch(() => {});
   }
 
@@ -364,11 +388,12 @@
     }
   }
 
-  function appendPlainLine(text, target, level) {
+  function appendPlainLine(text, target, level, opts) {
     const el = target || $("log");
     const cleaned = String(text || "").replace(ANSI_RE, "");
     if (!cleaned) return;
     const isDebug = level === "debug";
+    const persist = !(opts && opts.persist === false);
     const pin = isLogPinnedToBottom(el);
     if (el.tagName === "PRE") {
       el.textContent += cleaned;
@@ -385,6 +410,11 @@
       el.appendChild(line);
     }
     scrollLogIfPinned(el, pin);
+    // Persist renderer-originated main Log lines (RoomInfo / connect UI).
+    // Lines from main-process client-log are already teed to the hub file.
+    if (persist && (!target || target === $("log")) && hub.appendHubLog) {
+      hub.appendHubLog(cleaned.endsWith("\n") ? cleaned : `${cleaned}\n`).catch(() => {});
+    }
   }
 
   function appendCommandEcho(text) {
@@ -405,7 +435,8 @@
     }
     const text = payload.text || "";
     const level = payload.level === "debug" ? "debug" : "normal";
-    appendPlainLine(text, null, level);
+    // Main process already tees these into metroid_bread_hub.log.
+    appendPlainLine(text, null, level, { persist: false });
     // Volume modal still ingests AP_VOL even when Debug logs is off.
     ingestVolumeLog(text);
   }
@@ -962,8 +993,15 @@
       return;
     }
     if (st.type === "ap_error" || st.type === "password_required") {
+      // Show the log when connect fails — panel is minimized on the connect screen.
+      setMainLogExpanded(true);
       appendPlainLine(`[app] ${st.error || "Archipelago error"}`);
       if (st.detail) appendPlainLine(String(st.detail));
+      if (st.exception) appendPlainLine(`[app] Exception: ${st.exception}`);
+      if (st.errors) {
+        const list = Array.isArray(st.errors) ? st.errors.join(", ") : String(st.errors);
+        appendPlainLine(`[app] Server errors: ${list}`);
+      }
       if (state.connecting || state.running || st.type === "password_required") {
         // Kill the Python process so the next Connect is not a silent no-op.
         hub.stopClient().catch(() => {});
@@ -985,6 +1023,13 @@
       }
       return;
     }
+    if (st.type === "ap_disconnect") {
+      // Mid-session drop — log loudly but leave autoreconnect / process alone.
+      appendPlainLine(`[app] Archipelago disconnected: ${st.error || "connection lost"}`);
+      if (st.detail) appendPlainLine(String(st.detail));
+      if (st.exception) appendPlainLine(`[app] Exception: ${st.exception}`);
+      return;
+    }
     if (st.type === "patch_files_progress") {
       setConnectStatus(st.detail || "Downloading seed data from server…");
       appendPlainLine(`[app] ${st.detail || "Downloading seed data…"}`);
@@ -1003,6 +1048,14 @@
         state.serverSpoilerWaiter.resolve({ error: st.error || "failed" });
         state.serverSpoilerWaiter = null;
       }
+      return;
+    }
+    if (st.type === "seed_mismatch") {
+      const detail =
+        st.error ||
+        "Seed mismatch! Please make sure to patch the game to the right folder.";
+      appendPlainLine(`[app] ${detail}`);
+      setConnectStatus(detail, true);
       return;
     }
     if (st.type === "room_info" && st.seed_name) {
@@ -1047,13 +1100,17 @@
       $("btn-connect").disabled = false;
       // Client crash/exit used to leave the label stuck on "Connecting…".
       if (wasConnecting) {
-        setConnectStatus(
+        setMainLogExpanded(true);
+        const msg =
           st.exit_error ||
-            (st.exit_code
-              ? `Client exited (code ${st.exit_code}). Check the log.`
-              : "Disconnected before Archipelago connected."),
-          true
-        );
+          (st.exit_code
+            ? `Client exited (code ${st.exit_code}). Check the log.`
+            : "Disconnected before Archipelago connected.");
+        setConnectStatus(msg, true);
+        appendPlainLine(`[app] ${msg}`);
+        if (st.exit_code != null) {
+          appendPlainLine(`[app] Client exit code=${st.exit_code}`);
+        }
       }
     }
   }
@@ -1182,21 +1239,33 @@
   async function gateOnRoomInfo(server, password) {
     // RoomInfo.password is the only reliable pre-Connect signal (WebHost API has none).
     setConnectStatus("Checking room…");
+    appendPlainLine(`[app] RoomInfo probe starting for ${server}`);
     let room;
     try {
       room = await hub.probeRoomInfo(server);
     } catch (err) {
       // Probe failed — fall through to normal Connect (Python client still handles auth).
-      appendPlainLine(`[app] RoomInfo probe failed (${err}); continuing to Connect.`);
+      appendPlainLine(`[app] RoomInfo probe threw: ${err && err.stack ? err.stack : err}`);
+      appendPlainLine("[app] Continuing to Connect — Python client will report the real failure.");
       return { action: "connect", password: normalizeUriPassword(password) };
     }
     if (!room || !room.ok) {
-      appendPlainLine(
-        `[app] RoomInfo probe unavailable (${(room && room.error) || "unknown"}); continuing to Connect.`
-      );
+      const err = (room && room.error) || "unknown";
+      appendPlainLine(`[app] RoomInfo probe failed: ${err}`);
+      if (room && Array.isArray(room.attempts) && room.attempts.length) {
+        for (const attempt of room.attempts) {
+          appendPlainLine(
+            `[app]   tried ${attempt.url || "?"}: ${attempt.error || "failed"}`
+          );
+        }
+      }
+      appendPlainLine("[app] Continuing to Connect — Python client will report the real failure.");
       return { action: "connect", password: normalizeUriPassword(password) };
     }
-    if (room.seed_name) state.seedName = room.seed_name;
+    if (room.seed_name) {
+      state.seedName = room.seed_name;
+      appendPlainLine(`[app] RoomInfo seed: ${room.seed_name}`);
+    }
     if (room.password) {
       appendPlainLine(`[app] RoomInfo: password required (${room.url || "ok"}).`);
     } else {
@@ -1207,6 +1276,7 @@
       : { action: "connect", password: normalizeUriPassword(password) };
     if (decision.action === "need_password") {
       setConnectStatus("This room requires a password.", true);
+      setMainLogExpanded(true);
     }
     return decision;
   }
@@ -1215,6 +1285,7 @@
     if (state.connecting) return;
     // Prior attempt may still own the Python process (password error, timeout, etc.).
     if (state.running) {
+      appendPlainLine("[app] Stopping previous client before Connect…");
       await hub.stopClient();
       state.running = false;
       state.apConnected = false;
@@ -1225,11 +1296,19 @@
     const slot = $("slot").value.trim();
     if (!server || !slot) {
       setConnectStatus("Server and slot name are required.", true);
+      appendPlainLine("[app] Connect aborted: server and slot name are required.");
+      setMainLogExpanded(true);
       return;
     }
 
     // Normalize URI "None"/empty before any Connect decision.
     $("password").value = normalizeUriPassword($("password").value);
+    const hasPassword = Boolean(normalizeUriPassword($("password").value));
+    appendPlainLine(
+      `[app] Connect requested — server=${server} slot=${slot} password=${
+        hasPassword ? "set" : "none"
+      }`
+    );
 
     state.connecting = true;
     state.patched = false;
@@ -1251,6 +1330,7 @@
     // Arm waiter before the Python client starts so we never miss patch_files_ready.
     const earlyWait = waitForServerSpoiler(50000);
     setConnectStatus("Connecting…");
+    appendPlainLine("[app] Spawning Metroid Bread Python client…");
 
     if (state.unsubLog) state.unsubLog();
     if (state.unsubStatus) state.unsubStatus();
@@ -1270,12 +1350,15 @@
     state._earlyServerSpoilerPromise = earlyWait;
 
     if (!result.ok) {
-      setConnectStatus(result.error || "Failed to start client", true);
+      setMainLogExpanded(true);
+      const err = result.error || "Failed to start client";
+      setConnectStatus(err, true);
+      appendPlainLine(`[app] Failed to start client: ${err}`);
       state.connecting = false;
       state.running = false;
       state._earlyServerSpoilerPromise = null;
       if (state.serverSpoilerWaiter) {
-        state.serverSpoilerWaiter.resolve({ error: result.error || "Failed to start client" });
+        state.serverSpoilerWaiter.resolve({ error: err });
         state.serverSpoilerWaiter = null;
       }
       $("btn-connect").disabled = false;
@@ -1283,6 +1366,7 @@
     }
     if (result.roomId) state.roomId = result.roomId;
     state.running = true;
+    appendPlainLine("[app] Python client running — waiting for Archipelago handshake…");
 
     // Safety timeout if AP never confirms — clear stuck Connecting and free Connect.
     const connectGeneration = (state._connectGeneration =
@@ -1290,11 +1374,12 @@
     setTimeout(() => {
       if (state._connectGeneration !== connectGeneration) return;
       if (state.connecting && !state.apConnected) {
-        setConnectStatus(
+        setMainLogExpanded(true);
+        const timeoutMsg =
           "Timed out waiting for Archipelago. Confirm Server is host:port (not Game IP), " +
-            "slot/password match Text Client, then Connect again. Check the log above for spawn/import errors.",
-          true
-        );
+          "slot/password match Text Client, then Connect again. Check the log above for spawn/import errors.";
+        setConnectStatus(timeoutMsg, true);
+        appendPlainLine(`[app] ${timeoutMsg}`);
         state.connecting = false;
         state.running = false;
         $("btn-connect").disabled = false;
@@ -1338,14 +1423,84 @@
     });
   }
 
+  function normalizeModCompatibility(value) {
+    const raw = String(value || "ryujinx").trim().toLowerCase();
+    if (["atmosphere", "atmos", "cfw", "switch", "hardware"].includes(raw)) {
+      return "atmosphere";
+    }
+    return "ryujinx";
+  }
+
+  function applyModCompatibilityUi(compat, { persist = false } = {}) {
+    const next = normalizeModCompatibility(compat);
+    state.modCompatibility = next;
+    const ryuBtn = $("btn-compat-ryujinx");
+    const atmBtn = $("btn-compat-atmosphere");
+    if (ryuBtn) ryuBtn.classList.toggle("active", next === "ryujinx");
+    if (atmBtn) atmBtn.classList.toggle("active", next === "atmosphere");
+    const label = $("output-path-label");
+    const hint = $("compat-hint");
+    if (next === "atmosphere") {
+      if (label) label.textContent = "Atmosphere CFW root (e.g. SD:/atmosphere)";
+      if (hint) {
+        hint.textContent =
+          "Writes contents/010093801237c000/{romfs,exefs} + exefs_patches/DreadRandovania/*.ips under this folder. Custom OdrMap/OdrTip subsdk9 is required for map reachability.";
+      }
+    } else {
+      if (label) label.textContent = "Ryujinx output folder";
+      if (hint) {
+        hint.textContent =
+          "Writes under DreadRandovania/ for the Ryujinx mod folder (usually …/mods/contents/010093801237c000).";
+      }
+    }
+    if (persist) {
+      const outputPath = ($("output-path") && $("output-path").value.trim()) || "";
+      const partial = {
+        mod_compatibility: next,
+        output_path: outputPath,
+        ryujinx_output_path: state.ryujinxOutputPath || "",
+        atmosphere_output_path: state.atmosphereOutputPath || "",
+      };
+      if (next === "atmosphere") {
+        partial.atmosphere_output_path = outputPath || state.atmosphereOutputPath || "";
+        state.atmosphereOutputPath = partial.atmosphere_output_path;
+      } else {
+        partial.ryujinx_output_path = outputPath || state.ryujinxOutputPath || "";
+        state.ryujinxOutputPath = partial.ryujinx_output_path;
+      }
+      hub.saveConfig(partial).catch(() => {});
+    }
+  }
+
+  async function switchModCompatibility(compat) {
+    const next = normalizeModCompatibility(compat);
+    const prev = normalizeModCompatibility(state.modCompatibility);
+    const currentOut = ($("output-path") && $("output-path").value.trim()) || "";
+    if (prev === "atmosphere") {
+      state.atmosphereOutputPath = currentOut || state.atmosphereOutputPath || "";
+    } else {
+      state.ryujinxOutputPath = currentOut || state.ryujinxOutputPath || "";
+    }
+    const restored =
+      next === "atmosphere"
+        ? state.atmosphereOutputPath || ""
+        : state.ryujinxOutputPath || "";
+    if ($("output-path")) $("output-path").value = restored;
+    applyModCompatibilityUi(next, { persist: true });
+  }
+
   async function runPatch() {
     if (!$("base-rom").value.trim()) {
       appendPlainLine("Source path is required.", $("patch-log"));
       $("patch-log-wrap").open = true;
       return;
     }
+    const outputLabel =
+      state.modCompatibility === "atmosphere"
+        ? "Atmosphere CFW root"
+        : "Ryujinx output folder";
     if (!$("output-path").value.trim()) {
-      appendPlainLine("Ryujinx output folder is required.", $("patch-log"));
+      appendPlainLine(`${outputLabel} is required.`, $("patch-log"));
       $("patch-log-wrap").open = true;
       return;
     }
@@ -1361,13 +1516,22 @@
     setProgress(2, null, "Starting…");
     $("patch-log").textContent = "";
 
+    const modCompatibility = normalizeModCompatibility(state.modCompatibility);
+    const outputPath = $("output-path").value.trim();
+    if (modCompatibility === "atmosphere") {
+      state.atmosphereOutputPath = outputPath;
+    } else {
+      state.ryujinxOutputPath = outputPath;
+    }
+
     const result = await hub.runPatch({
       spoilerPath: state.spoilerPath,
       baseRomPath: $("base-rom").value.trim(),
-      outputPath: $("output-path").value.trim(),
+      outputPath,
       playerName: state.playerName || $("slot").value.trim(),
       freesink: $("freesink").checked,
       cleanOutput: false,
+      modCompatibility,
     });
 
     $("btn-patch").disabled = false;
@@ -1565,8 +1729,24 @@
     if (p) $("base-rom").value = p;
   });
   $("btn-browse-output").addEventListener("click", async () => {
-    const p = await hub.pickFolder("Select Ryujinx mod output folder");
-    if (p) $("output-path").value = p;
+    const atm = state.modCompatibility === "atmosphere";
+    const p = await hub.pickFolder(
+      atm
+        ? "Select Atmosphere CFW root (usually the atmosphere folder on your SD)"
+        : "Select Ryujinx mod output folder"
+    );
+    if (p) {
+      $("output-path").value = p;
+      if (atm) state.atmosphereOutputPath = p;
+      else state.ryujinxOutputPath = p;
+      applyModCompatibilityUi(state.modCompatibility, { persist: true });
+    }
+  });
+  $("btn-compat-ryujinx").addEventListener("click", () => {
+    switchModCompatibility("ryujinx");
+  });
+  $("btn-compat-atmosphere").addEventListener("click", () => {
+    switchModCompatibility("atmosphere");
   });
   $("btn-patch").addEventListener("click", () => runPatch());
   $("btn-cancel-patch").addEventListener("click", async () => {
@@ -1676,6 +1856,22 @@
   $("btn-clear-log").addEventListener("click", () => {
     $("log").textContent = "";
   });
+  // Keep summary actions from toggling the <details>; sync hint on manual open/close.
+  const mainLogActions = $("main-log-actions");
+  if (mainLogActions) {
+    mainLogActions.addEventListener("click", (e) => e.stopPropagation());
+  }
+  const mainLogWrap = $("main-log-wrap");
+  if (mainLogWrap) {
+    mainLogWrap.addEventListener("toggle", () => {
+      const hint = $("main-log-hint");
+      if (hint) {
+        hint.textContent = mainLogWrap.open
+          ? "(click to collapse)"
+          : "(click to expand)";
+      }
+    });
+  }
   $("debug-logs").addEventListener("change", () => {
     applyDebugLogsPreference($("debug-logs").checked);
     hub.saveConfig({ debug_logs: state.debugLogs }).catch(() => {});
@@ -1686,6 +1882,10 @@
       appendPlainLine(
         `[app] Could not open logs folder: ${(result && result.error) || "unknown"}`
       );
+      return;
+    }
+    if (result.path) {
+      appendPlainLine(`[app] Opened logs folder: ${result.path}`);
     }
   });
   $("btn-check-updates").addEventListener("click", async () => {
@@ -1716,7 +1916,14 @@
     $("password").value = normalizeUriPassword(cfg.password || "");
     $("dread-ip").value = cfg.dread_ip || "127.0.0.1";
     $("base-rom").value = cfg.base_rom_path || "";
+    state.modCompatibility = normalizeModCompatibility(cfg.mod_compatibility);
+    state.ryujinxOutputPath =
+      cfg.ryujinx_output_path ||
+      (state.modCompatibility === "ryujinx" ? cfg.output_path || "" : "") ||
+      "";
+    state.atmosphereOutputPath = cfg.atmosphere_output_path || "";
     $("output-path").value = cfg.output_path || "";
+    applyModCompatibilityUi(state.modCompatibility);
     $("freesink").checked = cfg.freesink !== false;
     $("ryujinx-path").value = cfg.ryujinx_path || "";
     $("dread-rom").value = cfg.dread_rom_path || "";

@@ -757,6 +757,91 @@ def create_pickup_entry(
         "map_icon": map_icon,
     }
 
+
+# ODR schema.json requires pickups.minItems == 146 (full Randovania Dread set).
+ODR_PICKUPS_MIN_ITEMS = 146
+
+
+def _all_dread_pickup_indices() -> list[int]:
+    """Every actor + boss/EMMI special index we know how to patch."""
+    idxs = {int(k) for k in PICKUP_ACTORS}
+    idxs.update(int(k) for k in SPECIAL_PICKUPS)
+    return sorted(idxs)
+
+
+def create_nothing_pad_entry(pickup_index: int) -> Optional[dict]:
+    """
+    Patch a missing pool slot as Randovania Nothing (ITEM_NONE).
+
+    Used when AP excluded the location or Boss & EMMI Pickups is off — otherwise
+    those actors/bosses would still grant vanilla items. Actor pads use ODR's
+    built-in ItemNothing icon (no unique ItemCustom / map-label slot).
+    """
+    special = SPECIAL_PICKUPS.get(str(pickup_index))
+    if special:
+        return create_special_pickup_entry(
+            special,
+            "Nothing",
+            is_foreign=True,
+            player_name=None,
+        )
+
+    actor_data = PICKUP_ACTORS.get(str(pickup_index))
+    if not actor_data:
+        return None
+
+    map_actor_name = actor_data.get("map_icon_actor") or actor_data["actor"]
+    return {
+        "pickup_type": "actor",
+        "caption": "Nothing acquired.",
+        "resources": [[{"item_id": "ITEM_NONE", "quantity": 0}]],
+        "pickup_actor": {
+            "scenario": actor_data["scenario"],
+            "actor": actor_data["actor"],
+        },
+        "model": ["itemsphere"],
+        "map_icon": {
+            "icon_id": "ItemNothing",
+            "original_actor": {
+                "scenario": actor_data["scenario"],
+                "actor": map_actor_name,
+            },
+        },
+    }
+
+
+def pad_pickups_with_nothing(
+    patcher_data: dict,
+    *,
+    seen_indices: set[int],
+    min_items: int = ODR_PICKUPS_MIN_ITEMS,
+) -> int:
+    """
+    Append Nothing for every unused dread pickup index.
+
+    Returns how many entries were added. After padding, ``pickups`` should be
+    the full actor+special set (>= ODR minItems).
+    """
+    pickups = patcher_data.setdefault("pickups", [])
+    added = 0
+    for idx in _all_dread_pickup_indices():
+        if idx in seen_indices:
+            continue
+        entry = create_nothing_pad_entry(idx)
+        if not entry:
+            print(f"[WARNING] Cannot pad pickup index {idx} with Nothing (no actor/special)")
+            continue
+        pickups.append(entry)
+        seen_indices.add(idx)
+        added += 1
+    if len(pickups) < min_items:
+        print(
+            f"[WARN] pickups={len(pickups)} still below ODR minItems={min_items} "
+            "after Nothing padding — schema validation may fail"
+        )
+    return added
+
+
 def enable_death_counter(patcher_data: dict) -> None:
     """Turn on ODR's in-game HUD death counter (cosmetic_patches.lua.custom_init)."""
     cosmetic = patcher_data.setdefault("cosmetic_patches", {})
@@ -998,7 +1083,13 @@ def sanitize_root_for_odr(
     if allowed is None:
         drop = [k for k in list(patcher_data) if k in _ROOT_OPTIONAL_KEYS]
     else:
-        drop = [k for k in list(patcher_data) if k not in allowed]
+        # Keep AP-private underscore keys until we persist them for finalize;
+        # callers must pop them before dumping patcher.json for ODR.
+        drop = [
+            k
+            for k in list(patcher_data)
+            if k not in allowed and not str(k).startswith("_")
+        ]
     for key in drop:
         patcher_data.pop(key, None)
         removed.append(key)
@@ -1626,6 +1717,10 @@ def apply_company_title_screen(
 
     Also refreshes difficulty-selector descriptors when present so they do not
     keep the stale sample-seed word hash.
+
+    Stores the resolved display seed on patcher_data['_ap_seed_id'] for finalize
+    (Init.sApSeedId / ap_seed.json). That key is AP-only and must be stripped
+    before ODR schema validation.
     """
     sid = resolve_title_seed_id(
         spoiler_path=spoiler_path,
@@ -1638,7 +1733,27 @@ def apply_company_title_screen(
         text["GUI_COMPANY_TITLE_SCREEN"] = title
         for key in _DIFSELECTOR_LABEL_KEYS:
             text[key] = sid
+    if sid and sid != "unknown":
+        patcher_data["_ap_seed_id"] = sid
     return title
+
+
+def normalize_ap_seed_id(value: Optional[str]) -> str:
+    """Canonical seed id for client↔game compare (title / RoomInfo / Init.sApSeedId)."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    display = format_display_seed_id(raw)
+    return display or raw
+
+
+def seeds_match(client_seed: Optional[str], game_seed: Optional[str]) -> bool:
+    """True when either side is unknown, or both normalize to the same id."""
+    a = normalize_ap_seed_id(client_seed)
+    b = normalize_ap_seed_id(game_seed)
+    if not a or not b:
+        return True
+    return a == b
 
 
 def _read_layout_uuid(path: Path) -> Optional[str]:
@@ -1774,7 +1889,8 @@ def create_patcher_json(
             "mass_delete_actors", {"to_remove": [], "to_keep": []}
         ),
         "layout_uuid": resolved_layout_uuid,
-        "mod_compatibility": "ryujinx",  # Required for Ryujinx emulator
+        # Default Ryujinx; dread_direct_patch.ensure_remote_lua overrides for Atmosphere.
+        "mod_compatibility": "ryujinx",
         "mod_category": "romfs"  # Required for proper mod loading
     }
 
@@ -1886,6 +2002,14 @@ def create_patcher_json(
                     item, is_foreign=is_foreign
                 )
 
+    # Short AP pools (Boss & EMMI off, excludes, …) must still clear every vanilla
+    # actor/boss slot — pad missing indices with RDV Nothing (ITEM_NONE). Also
+    # satisfies ODR pickups.minItems (146).
+    pool_before_pad = len(patcher_data["pickups"])
+    nothing_padded = pad_pickups_with_nothing(
+        patcher_data, seen_indices=seen_indices
+    )
+
     special_count = sum(
         1 for p in patcher_data["pickups"] if p.get("pickup_type") != "actor"
     )
@@ -1901,13 +2025,13 @@ def create_patcher_json(
     print(f"     - {foreign_count} foreign items (display names; AP client grants)")
     print(f"     - {special_count} boss/EMMI death pickups (lua callbacks)")
     print(f"     - {actor_custom} actor pickups with unique MAP_ICON_ItemCustom* (Phase 2)")
+    if nothing_padded:
+        print(
+            f"     - padded {nothing_padded} missing slots with Nothing "
+            f"(pool was {pool_before_pad}; ODR minItems={ODR_PICKUPS_MIN_ITEMS})"
+        )
     if skipped_dupes:
         print(f"     - skipped {skipped_dupes} duplicate spoiler lines")
-    if special_count < len(SPECIAL_PICKUPS):
-        print(
-            f"[WARN] Expected {len(SPECIAL_PICKUPS)} special pickups; "
-            "some boss/EMMI checks may still grant vanilla items."
-        )
 
     # Bake [IN/OUT OF LOGIC] × Unknown/revealed BTXT keys (ODR text_patches).
     from dread_map_icon_labels import (

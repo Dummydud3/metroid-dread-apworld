@@ -410,6 +410,11 @@ def format_dna_receive_lua(message: str, received_pickups: int, inventory_index:
 
     Uses RandomizerPowerup.GrantNextArtifact (ODR CheckArtifacts / HUD / Itorash
     gate) instead of a fixed ITEM_RANDO_ARTIFACT_N progression table.
+
+    Only advances ReceivedPickups when GrantNextArtifact is present and the
+    pcall succeeds (nil grant = already complete, still advance). Missing
+    GrantNextArtifact must not eat the sync slot — that was the remote DNA
+    HUD bug on ODR-based patches that never installed the fallback script.
     """
     safe_message = message.replace("\\", "\\\\").replace('"', '\\"')
     return (
@@ -420,16 +425,27 @@ def format_dna_receive_lua(message: str, received_pickups: int, inventory_index:
         "if RL and RL.ReceivedPickups and RL.InventoryIndex "
         "and idx == RL.ReceivedPickups() and inv == RL.InventoryIndex() "
         "and not RL.PendingPickup then "
+        "  local granted = nil; "
         "  local ok, err = pcall(function() "
-        "    local granted = RandomizerPowerup.GrantNextArtifact(); "
-        "    if granted == nil then Game.LogWarn(0, 'AP DNA: all artifacts already collected') end "
+        "    if not RandomizerPowerup "
+        "or type(RandomizerPowerup.GrantNextArtifact) ~= 'function' then "
+        "      error('GrantNextArtifact missing (re-patch AP overrides)') "
+        "    end "
+        "    granted = RandomizerPowerup.GrantNextArtifact() "
         "  end); "
-        "  if not ok then Game.LogWarn(0, 'AP DNA grant failed: '..tostring(err)) end; "
-        '  Scenario.WriteToPlayerBlackboard("ReceivedPickups","f",idx + 1); '
-        "  if RL.SendReceivedPickups then RL.SendReceivedPickups(tostring(idx + 1)) end; "
-        "  if Scenario and Scenario.IsUserInteractionEnabled and Scenario.QueueAsyncPopup "
+        "  if not ok then "
+        "    Game.LogWarn(0, 'AP DNA grant failed: '..tostring(err)); "
+        "    if RL.SendApLog then RL.SendApLog('AP_DNA_FAIL: '..tostring(err)) end "
+        "  else "
+        "    if granted == nil then "
+        "      Game.LogWarn(0, 'AP DNA: all artifacts already collected') "
+        "    end; "
+        '    Scenario.WriteToPlayerBlackboard("ReceivedPickups","f",idx + 1); '
+        "    if RL.SendReceivedPickups then RL.SendReceivedPickups(tostring(idx + 1)) end; "
+        "    if Scenario and Scenario.IsUserInteractionEnabled and Scenario.QueueAsyncPopup "
         "and Scenario.IsUserInteractionEnabled(true) then "
-        "    pcall(function() Scenario.QueueAsyncPopup(msg, 7.0) end) "
+        "      pcall(function() Scenario.QueueAsyncPopup(msg, 7.0) end) "
+        "    end "
         "  end "
         "elseif RL and RL.GetReceivedPickupsAndSend then "
         '  Game.AddSF(0.05, "RL.GetReceivedPickupsAndSend", "b", false); '
@@ -1370,6 +1386,34 @@ function RL.SendApLog(message)
         Game.LogWarn(0, message)
     end
 end
+function RL.GetApSeedId()
+    if Init ~= nil and Init.sApSeedId ~= nil then
+        return tostring(Init.sApSeedId)
+    end
+    return ""
+end
+-- Hub-triggered wrong-patch guard (ODR-style fatal popup → main menu).
+function RL.SeedMismatchBootToMenu()
+    if RL._SeedMismatchArmed then
+        return
+    end
+    RL._SeedMismatchArmed = true
+    RL.SendApLog("AP_SEED: mismatch — showing fatal popup and returning to title")
+    if Scenario ~= nil and Scenario.ShowFatalErrorMessage ~= nil then
+        Scenario.ShowFatalErrorMessage({
+            "{c2}Seed mismatch!{c0}|Please make sure to patch the game to the right folder.",
+            "Returning to title screen.",
+        })
+        return
+    end
+    if Scenario ~= nil and Scenario.FadeOutAndGoToMainMenu ~= nil then
+        Scenario.FadeOutAndGoToMainMenu(0.3)
+        return
+    end
+    if Game ~= nil and Game.GoToMainMenu ~= nil then
+        Game.GoToMainMenu()
+    end
+end
 function RL.GetEffectiveHealth()
     local playerSection = Game.GetPlayerBlackboardSectionName()
     local bb_health = Blackboard.GetProp(playerSection, "ITEM_CURRENT_LIFE")
@@ -1928,26 +1972,19 @@ function RL.ReapplyLastMapIconLabels()
     end
     return "empty"
 end
--- Preferred map-label path: redirect display key → patch-time variant key via
--- OdrMap.SetIconInspectorLabel (GetLocalized trampoline). No LoadBank/EnsureBank.
--- IMPORTANT: SetIconInspectorLabel only registers the redirect table inside
--- OdrText; it does nothing visually unless the native GetLocalized hook is
--- actually installed (OdrText.HasLabelRedirect == true). That hook is kept
--- disabled for hover-crash safety (see text_hooks.cpp), so redirect-only
--- pushes are currently a silent no-op — always fall through to
--- OdrText.SetLocalized(base, text) in that case. If a future build re-enables
--- a proven-safe native hook, HasLabelRedirect flips true and this
--- automatically prefers the lighter redirect path again.
+-- Preferred map-label path: SetLocalized(base, text). Redirect only when
+-- OdrText.LabelRedirectInGetLocalized is true (HasLabelRedirect can false-positive).
 function RL.ApplyMapIconVariants(variants)
     if type(variants) ~= "table" then
         return "bad-arg"
     end
-    -- Merge (chunked pushes must all survive ReapplyLastMapIconLabels).
     for k, v in pairs(variants) do
         RL.LastMapIconVariants[k] = v
     end
     local has_redirect_fn = (OdrMap and OdrMap.SetIconInspectorLabel) and true or false
-    local native_redirect_live = (OdrText and OdrText.HasLabelRedirect) and true or false
+    local native_redirect_live = (
+        OdrText and OdrText.LabelRedirectInGetLocalized
+    ) and true or false
     local use_redirect = has_redirect_fn and native_redirect_live
     local use_setloc = (OdrText and OdrText.SetLocalized) and true or false
     if not has_redirect_fn and not use_setloc then
@@ -2010,8 +2047,6 @@ function RL.ApplyMapIconVariants(variants)
             .. " sample=" .. tostring(sample or "-")
         )
     end
-    -- Icon widgets cache label text at map-build time; force a re-read (same
-    -- fix as VisitBoundsSafe paint — see ODRMAP.md). No LoadBank/EnsureBank.
     if ok_n > 0 then
         pcall(function()
             if minimap and minimap.SetProfileDataDirty then
@@ -2019,11 +2054,7 @@ function RL.ApplyMapIconVariants(variants)
             end
         end)
     end
-    -- Retry SetLocalized soft-fails (bank-not-ready) without forcing LoadBank.
-    -- No hard retry-COUNT cap: the language bank may take a long time (or a
-    -- menu/scenario transition) to become ready, and giving up would leave
-    -- labels stuck on their patch-time default forever. Cap the backoff
-    -- INTERVAL instead so this politely retries forever.
+    -- Soft-fail retry (bank-not-ready): backoff forever, no hard try cap.
     if fail_n > 0 and (not use_redirect) then
         RL.MapIconLabelsRetryLeft = prior_tries + 1
         local delay = 2.0
@@ -2037,14 +2068,7 @@ function RL.ApplyMapIconVariants(variants)
     end
     return tostring(ok_n)
 end
--- Phase 3: swap the icon GRAPHIC (not just its label) on collect / AP hint.
---
--- OdrMap.SetIconSprite writes uSpriteRow/uSpriteCol straight into the parsed
--- minimap.bmmdef def, the same "mutate loaded data, install no hook" shape as
--- OdrText.SetLocalized. No language bank involved, so this path never touches
--- EnsureBank/LoadBank and cannot hit the hover-crash the GetLocalized redirect
--- did. ODR gives every AP pickup its own ItemCustom{{n}} def, so one write
--- repoints exactly one location's icon.
+-- Phase 3: swap icon GRAPHIC via OdrMap.SetIconSprite (no language bank).
 function RL.ApplyMapIconSprites(sprites)
     if type(sprites) ~= "table" then
         return "bad-arg"

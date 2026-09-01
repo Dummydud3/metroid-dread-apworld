@@ -46,3 +46,11 @@ dread-client-app/.vite/
 .vscode/
 *.swp
 Thumbs.db
+
+# ExeFS build backups — keep live subsdk9 + main.npdm only (~3MB saved)
+exlaunch/deploy/subsdk9.bak*
+exlaunch/deploy/*.bak*
+**/subsdk9.bak*
+
+# Local unit tests (not shipped)
+/local_tests/

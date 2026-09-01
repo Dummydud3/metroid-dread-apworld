@@ -44,6 +44,30 @@ function RandomizerPowerup.CheckArtifacts(resource)
     RandomizerPowerup.SetItemAmount("ITEM_METROIDNIZATION", 1)
 end
 
+-- Remote AP DNA (format_dna_receive_lua / /give). Stock ODR has no GrantNextArtifact;
+-- without this, server DNA shows the popup but never increments the HUD counter.
+function RandomizerPowerup.GrantNextArtifact()
+    if not Init or not Init.iNumRequiredArtifacts or Init.iNumRequiredArtifacts == 0 then
+        Game.LogWarn(0, "GrantNextArtifact: DNA gate disabled (iNumRequiredArtifacts=0)")
+        return nil
+    end
+    for i = 1, Init.iNumRequiredArtifacts do
+        local artifact_id = "ITEM_RANDO_ARTIFACT_" .. i
+        if RandomizerPowerup.GetItemAmount(artifact_id) == 0 then
+            Game.LogWarn(0, "GrantNextArtifact: granting " .. artifact_id)
+            RandomizerPowerup.IncreaseItemAmount(artifact_id, 1)
+            local resource = {item_id = artifact_id, quantity = 1}
+            RandomizerPowerup.CheckArtifacts(resource)
+            if Scenario and Scenario.UpdateHudDnaCount then
+                Scenario.UpdateHudDnaCount()
+            end
+            return resource
+        end
+    end
+    Game.LogWarn(0, "GrantNextArtifact: all required artifacts already owned")
+    return nil
+end
+
 function RandomizerPowerup.MarkLocationCollected(locationIdentifier)
     local playerSection = Game.GetPlayerBlackboardSectionName()
     local propName = RandomizerPowerup.PropertyForLocation(locationIdentifier)

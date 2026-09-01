@@ -56,6 +56,9 @@ _EXTRACT_SKIP_PREFIXES = (
     "metroid_bread/dread-client-app/.git/",
 )
 _EXTRACT_SKIP_PARTS = ("/__pycache__/", "/.pytest_cache/", "/.mypy_cache/")
+# Deploy backups must never be unpacked even if an old apworld still contains them.
+_EXTRACT_SKIP_NAME_SUFFIXES = (".bak",)
+_EXTRACT_SKIP_NAME_CONTAINS = (".bak-", "subsdk9.bak")
 
 LAUNCH_NEED_DEPS_HINT = (
     "Need Node.js ≥18 (Install Node 24 if missing) and Python 3.11–3.13 "
@@ -467,6 +470,11 @@ def _should_skip_apworld_member(name: str) -> bool:
     if any(normalized.startswith(prefix) for prefix in _EXTRACT_SKIP_PREFIXES):
         return True
     if any(part in normalized for part in _EXTRACT_SKIP_PARTS):
+        return True
+    base = normalized.rsplit("/", 1)[-1].lower()
+    if any(base.endswith(suf) for suf in _EXTRACT_SKIP_NAME_SUFFIXES):
+        return True
+    if any(tok in base for tok in _EXTRACT_SKIP_NAME_CONTAINS):
         return True
     return False
 

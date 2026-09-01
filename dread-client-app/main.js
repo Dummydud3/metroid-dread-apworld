@@ -182,6 +182,15 @@ const DEFAULT_CONFIG = {
     "contents",
     DREAD_TITLE_ID
   ),
+  ryujinx_output_path: path.join(
+    process.env.APPDATA || "",
+    "Ryujinx",
+    "mods",
+    "contents",
+    DREAD_TITLE_ID
+  ),
+  atmosphere_output_path: "",
+  mod_compatibility: "ryujinx",
   games_folder: DEFAULT_OUTPUT_SCAN,
   ryujinx_path: "",
   dread_rom_path: "",
@@ -192,6 +201,14 @@ const DEFAULT_CONFIG = {
   // Hub Log panel: off = AP/normal only; on = full debug (@@APLOG@@debug@@…).
   debug_logs: false,
 };
+
+function normalizeModCompatibility(value) {
+  const raw = String(value || "ryujinx").trim().toLowerCase();
+  if (["atmosphere", "atmos", "cfw", "switch", "hardware"].includes(raw)) {
+    return "atmosphere";
+  }
+  return "ryujinx";
+}
 
 function pythonSpawnEnv(extra = {}) {
   return {
@@ -345,6 +362,14 @@ function loadConfig() {
     ...DEFAULT_CONFIG,
     base_rom_path: patch.base_rom_path || DEFAULT_CONFIG.base_rom_path,
     output_path: patch.output_path || DEFAULT_CONFIG.output_path,
+    ryujinx_output_path:
+      patch.ryujinx_output_path ||
+      DEFAULT_CONFIG.ryujinx_output_path ||
+      DEFAULT_CONFIG.output_path,
+    atmosphere_output_path: patch.atmosphere_output_path || "",
+    mod_compatibility: normalizeModCompatibility(
+      patch.mod_compatibility || DEFAULT_CONFIG.mod_compatibility
+    ),
     games_folder: patch.games_folder || DEFAULT_CONFIG.games_folder,
     freesink: patch.freesink != null ? Boolean(patch.freesink) : DEFAULT_CONFIG.freesink,
     clean_output: Boolean(patch.clean_output),
@@ -359,8 +384,21 @@ function loadConfig() {
   migratePlaceholderDreadIp(cfg);
   applyLauncherPrefill(cfg);
   delete cfg.poptracker_path;
+  cfg.mod_compatibility = normalizeModCompatibility(cfg.mod_compatibility);
+  if (!cfg.ryujinx_output_path) {
+    cfg.ryujinx_output_path =
+      cfg.mod_compatibility === "ryujinx"
+        ? cfg.output_path || DEFAULT_CONFIG.ryujinx_output_path
+        : DEFAULT_CONFIG.ryujinx_output_path;
+  }
+  if (cfg.atmosphere_output_path == null) {
+    cfg.atmosphere_output_path = "";
+  }
   if (!cfg.output_path) {
-    cfg.output_path = DEFAULT_CONFIG.output_path;
+    cfg.output_path =
+      cfg.mod_compatibility === "atmosphere"
+        ? cfg.atmosphere_output_path || ""
+        : cfg.ryujinx_output_path || DEFAULT_CONFIG.output_path;
   }
   if (!cfg.ryujinx_path) {
     cfg.ryujinx_path = findRyujinxPath() || "";
@@ -374,6 +412,12 @@ function loadConfig() {
 function saveConfig(partial) {
   const cfg = { ...loadConfig(), ...partial };
   delete cfg.poptracker_path;
+  cfg.mod_compatibility = normalizeModCompatibility(cfg.mod_compatibility);
+  if (cfg.mod_compatibility === "atmosphere") {
+    if (cfg.output_path) cfg.atmosphere_output_path = cfg.output_path;
+  } else if (cfg.output_path) {
+    cfg.ryujinx_output_path = cfg.output_path;
+  }
   writeJsonFile(CONFIG_PATH, cfg);
 
   // Keep patcher config in sync for CLI / legacy tools.
@@ -383,6 +427,10 @@ function saveConfig(partial) {
       ...patchDefaults,
       base_rom_path: cfg.base_rom_path,
       output_path: cfg.output_path,
+      ryujinx_output_path:
+        cfg.ryujinx_output_path || DEFAULT_CONFIG.ryujinx_output_path,
+      atmosphere_output_path: cfg.atmosphere_output_path || "",
+      mod_compatibility: cfg.mod_compatibility,
       player_name: cfg.slot || patchDefaults.player_name || "DreadPlayer",
       clean_output: Boolean(cfg.clean_output),
       freesink: Boolean(cfg.freesink),
@@ -466,6 +514,33 @@ function findPythonLauncher() {
       }).status === 0;
     if (probeManaged(versionOkShared) || probeManaged("import open_dread_rando")) {
       cachedPythonLauncher = managed;
+      return cachedPythonLauncher;
+    }
+  }
+
+  // Windows Hub client deps install into %LOCALAPPDATA%\MetroidBread\venv
+  // (see ensure_client_deps.py). Prefer that interpreter so Connect does not
+  // spawn bare `py -3.12` without websockets/yaml after deps succeed.
+  const winVenvPython = path.join(
+    process.env.LOCALAPPDATA || "",
+    "MetroidBread",
+    "venv",
+    "Scripts",
+    "python.exe"
+  );
+  if (winVenvPython && fs.existsSync(winVenvPython)) {
+    const venvLauncher = { cmd: winVenvPython, prefixArgs: [] };
+    const probeVenv = (code) =>
+      spawnSync(venvLauncher.cmd, [...venvLauncher.prefixArgs, "-c", code], {
+        timeout: 30000,
+        windowsHide: true,
+      }).status === 0;
+    if (
+      probeVenv("import websockets") ||
+      probeVenv(versionOkShared) ||
+      probeVenv("import open_dread_rando")
+    ) {
+      cachedPythonLauncher = venvLauncher;
       return cachedPythonLauncher;
     }
   }
@@ -561,8 +636,9 @@ function ensureClientDeps(launcher) {
         `Failed to install Python client packages (exit ${result.status}).`,
     };
   }
-  // Linux: ensure may have just created _metroid_bread_venv — prefer it for launch.
-  if (process.platform === "linux") {
+  // Linux/Windows: ensure may have just created/refreshed the Hub venv —
+  // clear cache so startClient re-resolves to that interpreter.
+  if (process.platform === "linux" || process.platform === "win32") {
     cachedPythonLauncher = null;
   }
   return { ok: true, message: combined };
@@ -745,17 +821,12 @@ function sendToRenderer(channel, payload) {
   }
 }
 
-function appendLog(stream, text, level = "normal") {
-  sendToRenderer("client-log", {
-    stream,
-    text,
-    level: level === "debug" ? "debug" : "normal",
-  });
-}
+const HUB_LOG_FILENAME = "metroid_bread_hub.log";
+const HUB_LOG_MAX_BYTES = 8 * 1024 * 1024;
 
 function getLogsDir() {
   // Matches Utils.user_path("logs") when Hub sets DREAD_HUB_INSTALL_ROOT /
-  // Utils.local_path to INSTALL_ROOT (writable Archipelago install).
+  // Utils.local_path to INSTALL_ROOT (writable Archipelago install / ProgramData).
   const dir = path.join(INSTALL_ROOT, "logs");
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -763,6 +834,53 @@ function getLogsDir() {
     /* ignore — openPath still attempts the path */
   }
   return dir;
+}
+
+function getHubLogPath() {
+  return path.join(getLogsDir(), HUB_LOG_FILENAME);
+}
+
+function appendHubLogFile(text) {
+  const cleaned = String(text || "");
+  if (!cleaned) return;
+  try {
+    const filePath = getHubLogPath();
+    try {
+      const st = fs.statSync(filePath);
+      if (st.isFile() && st.size >= HUB_LOG_MAX_BYTES) {
+        const bak = `${filePath}.1`;
+        try {
+          fs.unlinkSync(bak);
+        } catch (_) {
+          /* ignore */
+        }
+        try {
+          fs.renameSync(filePath, bak);
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    } catch (_) {
+      /* missing file — fine */
+    }
+    fs.appendFileSync(filePath, cleaned, "utf8");
+  } catch (_) {
+    /* never block the UI on log IO */
+  }
+}
+
+function appendLog(stream, text, level = "normal") {
+  const payloadText = String(text || "");
+  sendToRenderer("client-log", {
+    stream,
+    text: payloadText,
+    level: level === "debug" ? "debug" : "normal",
+  });
+  // Always tee Hub/main-process lines to disk (including debug) so connect
+  // failures are diagnosable even when the Log panel was unread.
+  const stamp = new Date().toISOString().replace(/\..+$/, "");
+  const tag = level === "debug" ? "DEBUG" : stream === "stderr" ? "STDERR" : "INFO";
+  appendHubLogFile(`[${stamp}] ${tag} ${payloadText.replace(/\r?\n$/, "")}\n`);
 }
 
 async function openLogsFolder() {
@@ -925,7 +1043,10 @@ function startClient(opts) {
   }
   appendLog(
     "stdout",
-    `[app] Checking Python client packages (${formatPythonCmd(launcher)})…\n`
+    `[app] Logs folder: ${getLogsDir()}\n` +
+      `[app] Hub log file: ${getHubLogPath()}\n` +
+      `[app] Install root: ${INSTALL_ROOT}\n` +
+      `[app] Checking Python client packages (${formatPythonCmd(launcher)})…\n`
   );
   if (process.platform === "linux") {
     appendLog(
@@ -943,7 +1064,7 @@ function startClient(opts) {
     appendLog("stdout", `[app] ${deps.message.replace(/\n/g, "\n[app] ")}\n`);
   }
 
-  // Re-resolve after ensure so Linux launches with the venv python.
+  // Re-resolve after ensure so Linux/Windows launch with the Hub venv python.
   const launchPy = findPythonLauncher() || launcher;
   const { cmd, prefixArgs } = launchPy;
   const args = [
@@ -996,7 +1117,7 @@ function startClient(opts) {
   });
   clientProcess.on("error", (err) => {
     clientProcess = null;
-    const msg = `Failed to start Python (${formatPythonCmd(launcher)}): ${err.message}`;
+    const msg = `Failed to start Python (${formatPythonCmd(launchPy)}): ${err.message}`;
     appendLog("stderr", `\n[app] ${msg}\n`);
     latestStatus = {
       type: "status",
@@ -1040,7 +1161,9 @@ function startClient(opts) {
     `[app] Connecting to Archipelago…\n` +
       `      Server: ${normalized.server}\n` +
       `      Slot:   ${normalized.slot}\n` +
-      `      Python: ${formatPythonCmd(launcher)}\n` +
+      `      Password: ${normalized.password ? "set" : "none"}\n` +
+      `      Script: ${CLIENT_SCRIPT}\n` +
+      `      Python: ${formatPythonCmd(launchPy)}\n` +
       `      AP import: ${AP_ROOT}\n` +
       `      AP install: ${INSTALL_ROOT}\n`
   );
@@ -1546,12 +1669,16 @@ function runPatch(opts) {
     });
   }
 
+  const modCompatibility = normalizeModCompatibility(
+    opts.modCompatibility || loadConfig().mod_compatibility
+  );
   const cfg = saveConfig({
     base_rom_path: opts.baseRomPath || loadConfig().base_rom_path,
     output_path: opts.outputPath || loadConfig().output_path,
     slot: opts.playerName || loadConfig().slot,
     clean_output: Boolean(opts.cleanOutput),
     freesink: opts.freesink != null ? Boolean(opts.freesink) : loadConfig().freesink,
+    mod_compatibility: modCompatibility,
   });
 
   const launcher = findPythonLauncher();
@@ -1570,6 +1697,8 @@ function runPatch(opts) {
     cfg.base_rom_path,
     "--output",
     cfg.output_path,
+    "--mod-compatibility",
+    cfg.mod_compatibility,
   ];
   if (cfg.clean_output) args.push("--clean");
   args.push(cfg.freesink ? "--freesink" : "--no-freesink");
@@ -2154,6 +2283,19 @@ async function promptApworldUpdateIfAvailable({ interactiveIfCurrent = false } =
 /* ---------- App lifecycle / IPC ---------- */
 
 app.whenReady().then(() => {
+  try {
+    getLogsDir();
+    appendHubLogFile(
+      `\n${"=".repeat(72)}\n` +
+        `[${new Date().toISOString()}] Hub start\n` +
+        `install_root: ${INSTALL_ROOT}\n` +
+        `world_dir: ${WORLD_DIR}\n` +
+        `ap_root: ${AP_ROOT}\n` +
+        `hub_log: ${getHubLogPath()}\n`
+    );
+  } catch (_) {
+    /* ignore */
+  }
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -2178,13 +2320,25 @@ app.on("before-quit", () => {
 
 ipcMain.handle("get-config", () => {
   const cfg = loadConfig();
-  if (!cfg.output_path || !fs.existsSync(path.dirname(cfg.output_path))) {
-    cfg.output_path = detectDefaultRyujinxOutput();
+  cfg.mod_compatibility = normalizeModCompatibility(cfg.mod_compatibility);
+  if (cfg.mod_compatibility === "ryujinx") {
+    if (!cfg.output_path || !fs.existsSync(path.dirname(cfg.output_path))) {
+      cfg.output_path = detectDefaultRyujinxOutput();
+      cfg.ryujinx_output_path = cfg.output_path;
+    }
   }
   return cfg;
 });
 ipcMain.handle("save-config", (_e, partial) => saveConfig(partial || {}));
 ipcMain.handle("open-logs-folder", () => openLogsFolder());
+ipcMain.handle("append-hub-log", (_e, text) => {
+  const stamp = new Date().toISOString().replace(/\..+$/, "");
+  const body = String(text || "").replace(/\r?\n$/, "");
+  if (!body) return { ok: true, path: getHubLogPath() };
+  appendHubLogFile(`[${stamp}] UI ${body}\n`);
+  return { ok: true, path: getHubLogPath() };
+});
+ipcMain.handle("get-logs-dir", () => ({ ok: true, path: getLogsDir(), hubLog: getHubLogPath() }));
 ipcMain.handle("check-apworld-update", () => checkApworldUpdate());
 ipcMain.handle("install-apworld-update", (_e, opts) =>
   installApworldUpdate(opts || {})

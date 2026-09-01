@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld("dreadHub", {
   getConfig: () => ipcRenderer.invoke("get-config"),
   saveConfig: (partial) => ipcRenderer.invoke("save-config", partial),
   openLogsFolder: () => ipcRenderer.invoke("open-logs-folder"),
+  /** Tee a renderer Log line into INSTALL_ROOT/logs/metroid_bread_hub.log */
+  appendHubLog: (text) => ipcRenderer.invoke("append-hub-log", text),
   checkApworldUpdate: () => ipcRenderer.invoke("check-apworld-update"),
   installApworldUpdate: (opts) =>
     ipcRenderer.invoke("install-apworld-update", opts),

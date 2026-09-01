@@ -26,12 +26,15 @@ Story / additional bosses (user requested every RDV boss fight)
 
 Client beaten detection (Hub tracker / All Bosses gate), in priority order:
   - Raven Beak: ``Init.bBeatenSinceLastReboot`` / finished_game
-  - Pickup-backed: AP location checked (``check_location`` / special index)
   - Spawn-group probe: scenario ``SPAWNGROUP.iNumDeaths`` → ``AP_BossBeaten_<key>``
   - Progress prop: ``GAME_PROGRESS`` boolean (Quiet Robe ``PROFESSOR_MET``)
-  - Fallback: same-region event unlock inference only (never shared-arena /
-    cross-region; that previously marked Burenia Twin Robots when Ghavoran
-    Gold Robot died)
+  - Pickup-backed: location reported by *this* Dread session
+    (``game_reported_locations`` / collected-indices bit) — NOT Archipelago
+    ``checked_locations``. Remote Collect/Release from another slot can mark
+    our boss pickups checked on the server without us fighting them.
+  - Fallback: same-region event unlock inference only against game-reported
+    pickups (never shared-arena / cross-region; that previously marked
+    Burenia Twin Robots when Ghavoran Gold Robot died)
 
 """
 

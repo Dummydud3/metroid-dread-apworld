@@ -105,9 +105,13 @@ ROOT = dread_paths.WORLD_DIR
 AP_ROOT = dread_paths.AP_ROOT
 DEFAULT_CONFIG = ROOT / "dread_direct_patch_config.json"
 DEFAULT_TEMPLATE = ROOT / "sample_patcher_WORKING.json"
+DREAD_TITLE_ID = "010093801237c000"
 DEFAULT_RYUJINX_MOD = Path(
-    os.path.expandvars(r"%APPDATA%\Ryujinx\mods\contents\010093801237c000")
+    os.path.expandvars(rf"%APPDATA%\Ryujinx\mods\contents\{DREAD_TITLE_ID}")
 )
+# Atmosphere output root is the CFW folder (usually <SD>/atmosphere). ODR nests
+# contents/<titleid>/ and exefs_patches/ under it — never wipe the whole tree.
+DEFAULT_ATMOSPHERE_ROOT = Path("")
 DEFAULT_BASE_ROM = Path(r"C:\Users\dummy\Downloads\md rando")
 # This is the exlaunch project's Makefile `OUT` directory (see OUT in
 # open-dread-rando-exlaunch/Makefile) -- i.e. every `./exlaunch.sh build`
@@ -140,6 +144,9 @@ def load_config() -> Dict[str, Any]:
     cfg: Dict[str, Any] = {
         "base_rom_path": str(DEFAULT_BASE_ROM),
         "output_path": str(DEFAULT_RYUJINX_MOD),
+        "ryujinx_output_path": str(DEFAULT_RYUJINX_MOD),
+        "atmosphere_output_path": "",
+        "mod_compatibility": "ryujinx",
         "player_name": "DreadPlayer",
         "clean_output": False,
         "freesink": False,
@@ -150,7 +157,89 @@ def load_config() -> Dict[str, Any]:
         "reveal_minimap_save": False,
     }
     cfg.update(dread_paths.load_patch_config(ROOT))
+    cfg["mod_compatibility"] = normalize_mod_compatibility(
+        cfg.get("mod_compatibility")
+    )
+    # Keep dual-path memory in sync with the active output_path.
+    compat = cfg["mod_compatibility"]
+    out = str(cfg.get("output_path") or "").strip()
+    if compat == "atmosphere":
+        if out and not str(cfg.get("atmosphere_output_path") or "").strip():
+            cfg["atmosphere_output_path"] = out
+        if not str(cfg.get("ryujinx_output_path") or "").strip():
+            cfg["ryujinx_output_path"] = str(DEFAULT_RYUJINX_MOD)
+    else:
+        if out and not str(cfg.get("ryujinx_output_path") or "").strip():
+            cfg["ryujinx_output_path"] = out
+        if not str(cfg.get("ryujinx_output_path") or "").strip():
+            cfg["ryujinx_output_path"] = str(DEFAULT_RYUJINX_MOD)
     return cfg
+
+
+def normalize_mod_compatibility(value: Optional[str]) -> str:
+    raw = (value or "ryujinx").strip().lower()
+    if raw in ("atmosphere", "atmos", "cfw", "switch", "hardware"):
+        return "atmosphere"
+    return "ryujinx"
+
+
+def mod_layout_paths(output: Path, compatibility: str) -> Dict[str, Path]:
+    """
+    Resolve romfs / exefs / IPS dirs the same way open-dread-rando does.
+
+    Ryujinx:  <output>/DreadRandovania/{romfs,exefs}
+    Atmosphere: <output>/contents/<tid>/{romfs,exefs}
+                <output>/exefs_patches/DreadRandovania/*.ips
+    """
+    compat = normalize_mod_compatibility(compatibility)
+    if compat == "atmosphere":
+        mod_root = output / "contents" / DREAD_TITLE_ID
+        return {
+            "compatibility": compat,
+            "mod_root": mod_root,
+            "romfs": mod_root / "romfs",
+            "exefs": mod_root / "exefs",
+            "exefs_patches": output / "exefs_patches" / "DreadRandovania",
+        }
+    mod_root = output / "DreadRandovania"
+    return {
+        "compatibility": compat,
+        "mod_root": mod_root,
+        "romfs": mod_root / "romfs",
+        "exefs": mod_root / "exefs",
+        "exefs_patches": mod_root / "exefs",
+    }
+
+
+def clean_mod_output(output: Path, compatibility: str) -> None:
+    """
+    Remove previous Metroid Bread / Randovania mod files only.
+
+    Never rmtree an Atmosphere CFW root — that would wipe unrelated mods.
+    """
+    compat = normalize_mod_compatibility(compatibility)
+    if compat == "atmosphere":
+        targets = [
+            output / "contents" / DREAD_TITLE_ID,
+            output / "exefs_patches" / "DreadRandovania",
+        ]
+        for path in targets:
+            if path.exists():
+                log(f"[INFO] Cleaning Atmosphere mod path: {path}")
+                shutil.rmtree(path, ignore_errors=True)
+        return
+
+    dread = output / "DreadRandovania"
+    if dread.exists():
+        log(f"[INFO] Cleaning Ryujinx mod path: {dread}")
+        shutil.rmtree(dread, ignore_errors=True)
+        return
+    # Legacy flat layout under the title folder.
+    for name in ("romfs", "exefs"):
+        path = output / name
+        if path.exists():
+            log(f"[INFO] Cleaning legacy Ryujinx path: {path}")
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def config_path(cfg: Dict[str, Any], key: str, fallback: Path) -> Path:
@@ -368,10 +457,17 @@ def ensure_remote_lua(
     *,
     seed_id: Optional[str] = None,
     spoiler_path: Optional[Path] = None,
+    mod_compatibility: Optional[str] = None,
 ) -> None:
     """Enable remote Lua and set the Metroid Bread AP title screen string."""
     patcher_data["enable_remote_lua"] = True
-    patcher_data["mod_compatibility"] = patcher_data.get("mod_compatibility") or "ryujinx"
+    # Always set layout target (Hub/CLI may override ap_to_patcher's default).
+    compat = normalize_mod_compatibility(
+        mod_compatibility
+        if mod_compatibility is not None
+        else patcher_data.get("mod_compatibility")
+    )
+    patcher_data["mod_compatibility"] = compat
     patcher_data["mod_category"] = patcher_data.get("mod_category") or "romfs"
     from ap_to_patcher import apply_company_title_screen
 
@@ -379,6 +475,10 @@ def ensure_remote_lua(
         patcher_data, seed_id=seed_id, spoiler_path=spoiler_path
     )
     log(f"[OK] Title screen: {title.replace(chr(10), ' / ')}")
+    ap_seed = str(patcher_data.get("_ap_seed_id") or "").strip()
+    if ap_seed:
+        log(f"[OK] AP seed id for mismatch guard: {ap_seed}")
+    log(f"[OK] mod_compatibility={compat}")
 
 
 def apply_freesink(patcher_data: dict, enabled: bool) -> None:
@@ -420,6 +520,29 @@ def _format_odr_validation_error(err: str, *, head: int = 1800, tail: int = 500)
     return f"{err[:head]}\n\n...[truncated {len(err) - head - tail} chars]...\n\n{err[-tail:]}"
 
 
+def _summarize_jsonschema_error(exc: BaseException) -> str:
+    """Prefer path + short message over dumping the whole pickups array."""
+    message = getattr(exc, "message", None)
+    path = getattr(exc, "absolute_path", None)
+    validator = getattr(exc, "validator", None)
+    if message is None:
+        return _format_odr_validation_error(str(exc))
+    path_list = list(path) if path is not None else []
+    path_s = "$" + "".join(f"[{p!r}]" if isinstance(p, int) else f".{p}" for p in path_list)
+    bits = [f"{path_s}: {message}"]
+    if validator is not None:
+        bits.append(f"(validator={validator!r} value={getattr(exc, 'validator_value', None)!r})")
+    # oneOf / anyOf context often has the real reason.
+    context = getattr(exc, "context", None) or ()
+    for i, sub in enumerate(context[:6]):
+        sub_path = list(getattr(sub, "absolute_path", []) or [])
+        sub_s = "$" + "".join(
+            f"[{p!r}]" if isinstance(p, int) else f".{p}" for p in sub_path
+        )
+        bits.append(f"  context[{i}] {sub_s}: {getattr(sub, 'message', sub)}")
+    return "\n".join(bits)
+
+
 def validate_patcher_json(patcher_data: dict) -> None:
     """Fail fast with a clear error if open-dread-rando would reject the JSON.
 
@@ -458,7 +581,7 @@ def validate_patcher_json(patcher_data: dict) -> None:
     except Exception as e:
         raise PatchError(
             "patcher.json failed open-dread-rando validation:\n"
-            f"{_format_odr_validation_error(str(e))}"
+            f"{_summarize_jsonschema_error(e)}"
         ) from e
 
 
@@ -746,6 +869,14 @@ pcall(function()
     ApLoadingTips.Install()
   end
 end)
+""".lstrip()
+
+AP_SEED_ID_MARKER = "-- AP_SEED_ID"
+# Placeholder {seed} is filled by install_ap_seed_id_bootstrap().
+AP_SEED_ID_BOOTSTRAP_TEMPLATE = """
+-- AP_SEED_ID
+-- Baked Archipelago seed digits for Hub client mismatch checks (vs RoomInfo.seed_name).
+Init.sApSeedId = "{seed}"
 """.lstrip()
 
 _HK_AUTOSAVE_BLOCK_RE = re.compile(
@@ -1063,6 +1194,46 @@ def _patch_init_for_ap_loading_tips(romfs: Path) -> None:
     log(f"[OK] patched init.lc with ApLoadingTips.Install at EOF ({len(data)} bytes)")
 
 
+def _escape_lua_string(value: str) -> str:
+    """Escape a value for use inside a double-quoted Lua string literal."""
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
+
+
+def install_ap_seed_id_bootstrap(romfs: Path, ap_seed_id: str | None) -> None:
+    """
+    Bake Init.sApSeedId into init.lc so the Hub client can compare RoomInfo.seed_name
+    against the patched RomFS (wrong-folder / stale mod guard).
+
+    Idempotent: replaces any prior -- AP_SEED_ID block. Empty/missing seed clears the
+    prior bootstrap so old values cannot linger across re-patches.
+    """
+    seed = (ap_seed_id or "").strip()
+    existing, pkg = _read_init_lc(romfs)
+    text = existing.decode("utf-8", errors="replace")
+    if AP_SEED_ID_MARKER in text:
+        idx = text.find(AP_SEED_ID_MARKER)
+        text = text[:idx].rstrip() + "\n"
+        log("[OK] removed prior AP seed id bootstrap from init.lc")
+
+    if not seed:
+        data = text.encode("utf-8")
+        _write_init_lc(romfs, data, pkg)
+        log("[WARN] no AP seed id to bake — Init.sApSeedId not set")
+        return
+
+    bootstrap = AP_SEED_ID_BOOTSTRAP_TEMPLATE.format(seed=_escape_lua_string(seed))
+    text = text.rstrip() + "\n\n" + bootstrap
+    data = text.encode("utf-8")
+    _write_init_lc(romfs, data, pkg)
+    log(f"[OK] baked Init.sApSeedId={seed!r} into init.lc ({len(data)} bytes)")
+
+
 def _patch_scenario_for_ap_loading_tips(romfs: Path) -> None:
     """Backup Install at EOF of scenario.lc (idempotent; safe if already installed)."""
     existing, pkg = _read_scenario_lc(romfs)
@@ -1205,27 +1376,47 @@ def finalize_mod(
     *,
     custom_exlaunch_deploy: Optional[Path] = None,
     map_icon_keys_json: Optional[Path] = None,
+    mod_compatibility: str = "ryujinx",
+    ap_seed_id: Optional[str] = None,
 ) -> None:
-    """Copy client-facing extras into the Ryujinx mod tree (Randovania layout)."""
-    mod_root = output / "DreadRandovania"
-    # open-dread-rando may write romfs at output/ or output/DreadRandovania/
-    candidates = [
-        output / "romfs",
-        mod_root / "romfs",
-        output,
-    ]
-
-    # Prefer a folder that already has romfs or exefs from the patcher
-    romfs_parent = output
-    for c in (output, mod_root):
+    """Copy client-facing extras into the mod tree (Ryujinx or Atmosphere layout)."""
+    layout = mod_layout_paths(output, mod_compatibility)
+    compat = layout["compatibility"]
+    mod_root = layout["mod_root"]
+    # Prefer ODR's layout paths; fall back if the patcher wrote a legacy tree.
+    romfs_parent = mod_root
+    for c in (mod_root, output / "DreadRandovania", output / "contents" / DREAD_TITLE_ID, output):
         if (c / "romfs").is_dir() or (c / "exefs").is_dir():
             romfs_parent = c
             break
+    log(
+        f"[INFO] finalize_mod layout={compat} "
+        f"mod_root={mod_root} romfs_parent={romfs_parent}"
+    )
 
     # Always keep a copy of patcher.json next to the mod for debugging / UUID
     dst_json = romfs_parent / "patcher.json"
     shutil.copy2(patcher_json, dst_json)
     log(f"[OK] patcher.json -> {dst_json}")
+
+    # Sidecar for Hub / tooling (same digits baked into Init.sApSeedId).
+    seed_for_sidecar = (ap_seed_id or "").strip()
+    if not seed_for_sidecar:
+        try:
+            with open(patcher_json, encoding="utf-8") as f:
+                pdata_seed = json.load(f)
+            if isinstance(pdata_seed, dict):
+                seed_for_sidecar = str(pdata_seed.get("_ap_seed_id") or "").strip()
+        except (OSError, json.JSONDecodeError, TypeError):
+            seed_for_sidecar = ""
+    if seed_for_sidecar:
+        ap_seed_path = romfs_parent / "ap_seed.json"
+        ap_seed_path.write_text(
+            json.dumps({"ap_seed_id": seed_for_sidecar}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        log(f"[OK] ap_seed.json -> {ap_seed_path} ({seed_for_sidecar!r})")
+        ap_seed_id = seed_for_sidecar
 
     # Phase 2: pickup/location → MAP_ICON_ItemCustom{n} for runtime OdrText labels.
     keys_src = map_icon_keys_json
@@ -1376,6 +1567,9 @@ def finalize_mod(
     # ForcedTooltip on Continue / New Game loading screens (init.lc, early).
     install_ap_loading_tips_scripts(romfs)
 
+    # Bake AP seed digits for Hub client seed-mismatch checks (RoomInfo vs RomFS).
+    install_ap_seed_id_bootstrap(romfs, ap_seed_id)
+
     # Death-only ExtraInfoPanel: park counter on ODR DNA-slot coords (no Ryujinx getters).
     fix_death_counter_hud_position(romfs)
 
@@ -1410,21 +1604,28 @@ def finalize_mod(
     except OSError:
         pass
 
-    exefs = romfs_parent / "exefs"
+    exefs = layout["exefs"]
+    # If ODR wrote exefs under a different parent, prefer that tree's exefs
+    # but still fall back to the layout path so Atmosphere gets a real install.
+    discovered = romfs_parent / "exefs"
+    if discovered.is_dir():
+        exefs = discovered
     if exefs.is_dir():
         subsdk = list(exefs.glob("subsdk*"))
-        log(f"[OK] exefs present ({len(subsdk)} subsdk* file(s))")
+        log(f"[OK] exefs present at {exefs} ({len(subsdk)} subsdk* file(s))")
     else:
-        log("[WARN] exefs/ not found under output — remote connector may be missing")
+        log(f"[WARN] exefs/ not found — creating {exefs} for custom OdrMap overlay")
         exefs.mkdir(parents=True, exist_ok=True)
 
     # ODR writes stock remote-lua exlaunch; overlay custom OdrMap binders when available.
     # Must run AFTER ODR exefs install so VisitBounds is not overwritten by stock.
+    # Atmosphere: contents/<tid>/exefs/subsdk9 — missing this crashes push_reachability.
     # See worlds/metroid_bread/docs/odrmap_exlaunch_binder.md.
+    log(f"[INFO] Installing custom OdrMap/OdrTip subsdk9 -> {exefs} ({compat})")
     install_custom_exlaunch(exefs, custom_exlaunch_deploy)
     log(
         "[OK] finalize_mod complete: ApWarp + ApLoadingTips + TOC/pkg map script + "
-        "AP map-icon atlas + custom OdrMap exefs (enable_remote_lua kept on)"
+        f"AP map-icon atlas + custom OdrMap exefs ({compat}; enable_remote_lua kept on)"
     )
 
 
@@ -1440,20 +1641,24 @@ def patch_from_spoiler(
     custom_exlaunch_deploy: Optional[Path] = None,
     reveal_minimap_save: bool = False,
     layout_uuid: Optional[str] = None,
+    mod_compatibility: str = "ryujinx",
 ) -> Path:
+    compat = normalize_mod_compatibility(mod_compatibility)
+    layout = mod_layout_paths(output, compat)
     log("=" * 60)
     log("Archipelago Dread Direct Patcher")
-    log("(spoiler -> patcher.json -> open-dread-rando -> Ryujinx mod)")
+    log(f"(spoiler -> patcher.json -> open-dread-rando -> {compat} mod)")
     log("=" * 60)
     log(f"Spoiler : {spoiler}")
     log(f"Player  : {player}")
     log(f"Base ROM: {base_rom}")
     log(f"Output  : {output}")
+    log(f"Layout  : {compat} (romfs={layout['romfs']}, exefs={layout['exefs']})")
     log(f"Freesink: {freesink}")
 
-    if clean_output and output.exists():
-        log(f"Cleaning output: {output}")
-        shutil.rmtree(output, ignore_errors=True)
+    if clean_output:
+        # Never rmtree the whole Atmosphere CFW root — only known mod subtrees.
+        clean_mod_output(output, compat)
 
     try:
         from ap_to_patcher import resolve_dread_player
@@ -1469,7 +1674,9 @@ def patch_from_spoiler(
     except ValueError as e:
         raise PatchError(str(e)) from e
     # Re-apply with the spoiler path so seed id is never the RDV template leftover.
-    ensure_remote_lua(patcher_data, spoiler_path=spoiler)
+    ensure_remote_lua(
+        patcher_data, spoiler_path=spoiler, mod_compatibility=compat
+    )
     apply_freesink(patcher_data, freesink)
 
     py = find_python_with_odr()
@@ -1481,6 +1688,8 @@ def patch_from_spoiler(
     from ap_to_patcher import apply_upgrade_menu_flags, sanitize_patcher_for_odr
 
     apply_upgrade_menu_flags(patcher_data, py_cmd=py)
+    # Capture AP-private seed before schema sanitize / dump (ODR rejects _ap_seed_id).
+    ap_seed_id = str(patcher_data.pop("_ap_seed_id", "") or "").strip() or None
     stripped = sanitize_patcher_for_odr(patcher_data, py_cmd=py)
     if stripped:
         log(
@@ -1514,28 +1723,39 @@ def patch_from_spoiler(
     )
 
     # Validate against schema.json only (avoid importing dread_patcher → misc_patches).
+    # Print path+message (not the whole pickups dump) on failure.
     val = subprocess.run(
         py
         + [
             "-c",
             (
-                "import json,sys;"
-                "from pathlib import Path;"
-                "import open_dread_rando;"
+                "import json,sys;\n"
+                "from pathlib import Path;\n"
+                "import open_dread_rando;\n"
                 "from open_dread_rando.validator_with_default import "
-                "DefaultValidatingDraft7Validator;"
+                "DefaultValidatingDraft7Validator;\n"
                 "schema=json.load(open("
                 "Path(open_dread_rando.__file__).resolve().parent/'files'/'schema.json',"
-                "encoding='utf-8'));"
-                "DefaultValidatingDraft7Validator(schema).validate("
-                "json.load(open(sys.argv[1],encoding='utf-8')));"
-                "print('SCHEMA_OK')"
+                "encoding='utf-8'));\n"
+                "data=json.load(open(sys.argv[1],encoding='utf-8'));\n"
+                "print(f'AP_PICKUPS={len(data.get(\"pickups\") or [])}');\n"
+                "try:\n"
+                " DefaultValidatingDraft7Validator(schema).validate(data);\n"
+                " print('SCHEMA_OK')\n"
+                "except Exception as e:\n"
+                " msg=getattr(e,'message',str(e));\n"
+                " path='.'.join(str(p) for p in list(getattr(e,'absolute_path',[]) or [])) or '$';\n"
+                " print(f'SCHEMA_FAIL path={path} validator={getattr(e,\"validator\",None)} msg={msg}', file=sys.stderr);\n"
+                " raise\n"
             ),
             str(out_json),
         ],
         capture_output=True,
         text=True,
     )
+    if val.stdout:
+        for line in val.stdout.strip().splitlines():
+            log(f"[INFO] {line}")
     if val.returncode != 0 or "SCHEMA_OK" not in (val.stdout or ""):
         err = (val.stderr or val.stdout or "").strip()
         if "misc_patches" in err or "ModuleNotFoundError" in err:
@@ -1547,8 +1767,10 @@ def patch_from_spoiler(
     log("[OK] patcher.json passes open-dread-rando schema")
 
     run_open_dread_rando(py, out_json, base_rom, output)
-    # Prefer the ODR/Ryujinx mod layout; fall back to bare output/romfs.
+    # Prefer the active layout; also accept the other platform / legacy paths.
     romfs_candidates = [
+        layout["romfs"],
+        output / "contents" / DREAD_TITLE_ID / "romfs",
         output / "DreadRandovania" / "romfs",
         output / "romfs",
         output,
@@ -1568,13 +1790,23 @@ def patch_from_spoiler(
         out_json,
         custom_exlaunch_deploy=custom_exlaunch_deploy,
         map_icon_keys_json=out_keys,
+        mod_compatibility=compat,
+        ap_seed_id=ap_seed_id,
     )
     # Optional offline dim reveal (default OFF; never fails the patch).
     maybe_reveal_minimap_save(enabled=reveal_minimap_save)
 
     log("\n" + "=" * 60)
-    log("DONE - enable the mod in Ryujinx, start a NEW save, then:")
-    log("  Launch_Dread_Client -> /connect ... -> /connect_dread")
+    if compat == "atmosphere":
+        log("DONE - Atmosphere layout ready under your CFW root:")
+        log(f"  romfs/exefs : {layout['romfs'].parent}")
+        log(f"  IPS patches : {layout['exefs_patches']}")
+        log("  Confirm custom subsdk9 is in contents/<tid>/exefs/ (OdrMap/OdrTip).")
+        log("Copy/sync to the Switch SD if needed, reboot, start a NEW save, then:")
+        log("  Launch_Dread_Client -> set Switch IP -> /connect ... -> /connect_dread")
+    else:
+        log("DONE - enable the mod in Ryujinx, start a NEW save, then:")
+        log("  Launch_Dread_Client -> /connect ... -> /connect_dread")
     log("Quit Randovania Game Connection first if :6969 is busy.")
     log("=" * 60)
     return out_json
@@ -1622,6 +1854,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Force layout_uuid (recover an existing save). Default: preserve prior "
         "AP_<player>_patcher.json or derive a stable uuid5 from seed+player.",
     )
+    parser.add_argument(
+        "--mod-compatibility",
+        choices=["ryujinx", "atmosphere"],
+        default=normalize_mod_compatibility(cfg.get("mod_compatibility")),
+        help="Output layout: Ryujinx DreadRandovania/ vs Atmosphere contents/<tid>/",
+    )
     parser.add_argument("--write-config", action="store_true", help="Write dread_direct_patch_config.json from args")
     args = parser.parse_args(argv)
 
@@ -1632,11 +1870,22 @@ def main(argv: Optional[list[str]] = None) -> int:
         log(f"[WARN] --custom-exlaunch-deploy has no subsdk9: {deploy}")
         deploy = None
 
+    compat = normalize_mod_compatibility(args.mod_compatibility)
     if args.write_config:
+        out_s = str(args.output)
+        ryujinx_out = str(cfg.get("ryujinx_output_path") or DEFAULT_RYUJINX_MOD)
+        atmosphere_out = str(cfg.get("atmosphere_output_path") or "")
+        if compat == "atmosphere":
+            atmosphere_out = out_s
+        else:
+            ryujinx_out = out_s
         save_config(
             {
                 "base_rom_path": str(args.base_rom),
-                "output_path": str(args.output),
+                "output_path": out_s,
+                "ryujinx_output_path": ryujinx_out,
+                "atmosphere_output_path": atmosphere_out,
+                "mod_compatibility": compat,
                 "player_name": args.player,
                 "clean_output": bool(args.clean),
                 "freesink": bool(args.freesink),
@@ -1675,6 +1924,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         custom_exlaunch_deploy=deploy,
         reveal_minimap_save=bool(args.reveal_minimap_save),
         layout_uuid=args.layout_uuid,
+        mod_compatibility=compat,
     )
     return 0
 

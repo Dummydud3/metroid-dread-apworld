@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -61,3 +61,8 @@ Thumbs.db
 # Local unit tests (not shipped in apworld / not committed)
 /local_tests/
 CAUSE_OF_DEATH_MATRIX.md
+
+# ExeFS deploy backups (keep live subsdk9 only)
+exlaunch/deploy/subsdk9.bak*
+exlaunch/deploy/*.bak*
+**/subsdk9.bak*
