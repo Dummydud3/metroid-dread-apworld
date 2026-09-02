@@ -79,7 +79,11 @@ def apply_yield_overrides(
         _set_resource_qty(out["resources"], "ITEM_WEAPON_POWER_BOMB_MAX", pb)
         out["caption"] = f"Power Bomb Tank acquired.\nPower Bomb capacity increased by {pb}."
     elif item_name == "Energy Tank":
-        _set_resource_qty(out["resources"], "ITEM_MAX_LIFE", ept)
+        # Match ODR/Randovania: grant ITEM_ENERGY_TANKS x1. RandomizerPowerup.IncreaseEnergy
+        # then applies Init.fEnergyPerTank to ITEM_MAX_LIFE + live LIFE.fMaxLife.
+        # Putting ITEM_MAX_LIFE in resources only updates the blackboard, so remote
+        # AP grants looked dead until inventory reload.
+        _set_resource_qty(out["resources"], "ITEM_ENERGY_TANKS", 1)
         out["caption"] = f"Energy Tank acquired.\nEnergy capacity increased by {ept}."
     elif item_name == "Energy Part":
         # ODR still grants ITEM_LIFE_SHARDS qty 1; caption reflects ept/4 when immediate.
@@ -91,7 +95,7 @@ def apply_yield_overrides(
 DREAD_ITEM_MAPPING = {
     # Energy
     "Energy Tank": {
-        "resources": [{"item_id": "ITEM_MAX_LIFE", "quantity": 100}],
+        "resources": [{"item_id": "ITEM_ENERGY_TANKS", "quantity": 1}],
         "model": "item_energytank",
         "icon": "item_energytank",
         "caption": "Energy Tank acquired.\nEnergy capacity increased by 100."

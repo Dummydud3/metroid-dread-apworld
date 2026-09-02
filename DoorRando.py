@@ -3,9 +3,11 @@
 Enumerates physical doors from logic_database dock nodes, mutates
 default_dock_weakness in-memory, and emits open-dread-rando door_patches.
 
-Individual Doors assignment is a light RDV-style two-phase flow (see
-``DoorRandoAssigner``): pre-fill unlock → item fill → post-fill reach-gated
-locks. Softening remains emergency-only for fill / preflight repair.
+Philosophy (dual mandate — see ``DoorRandoAssigner``): doors must both
+**reroute** traversal vs vanilla and **assist** assumed fill. Assignment is
+RDV-style Individual Doors timing: classify → pre-fill unlock (assist +
+reroute) → item fill → post-fill reach-gated interesting locks. Softening
+remains emergency-only for fill / preflight repair — never the normal design.
 """
 from __future__ import annotations
 
@@ -34,8 +36,19 @@ BASIC_DOOR_TYPES = _door_db.BASIC_ODR_DOOR_TYPES
 # phase_shift is not an ODR DoorType at all.
 ODR_CANNOT_ADD_DOOR_TYPES = _door_db.ODR_CANNOT_ADD_DOOR_TYPES
 
+# ODR DoorType.need_shield=True — each costs 2 shield IDs per scenario.
 SHIELDED_DOOR_TYPES = frozenset({
-    "wide_beam", "plasma_beam", "wave_beam", "missile", "super_missile",
+    "wide_beam",
+    "plasma_beam",
+    "wave_beam",
+    "missile",
+    "super_missile",
+    "ice_missile",
+    "storm_missile",
+    "diffusion_beam",
+    "bomb",
+    "cross_bomb",
+    "power_bomb",
 })
 
 SHIELD_IDS_PER_SCENARIO = 100
@@ -67,7 +80,7 @@ ALL_DOOR_WEAKNESS_NAMES = frozenset(WEAKNESS_DOOR_TYPE)
 # RDV change_from (sensors may be converted away; never placed as targets).
 DEFAULT_DOORS_TO_CHANGE = _door_db.header_change_from()
 
-# Basic ODR-safe change_to only (no Sensor / Phase / blast / closed).
+# Phase-2 ODR-addable change_to (no Sensor / Phase / Closed).
 DEFAULT_CHANGE_DOORS_TO = _door_db.basic_change_to_weaknesses()
 
 # Assignments: physical_key -> weakness name
@@ -168,23 +181,23 @@ def roll_assignments(
 ) -> Dict[PhysicalKey, str]:
     """Pre-fill unlock assignments for Individual Doors (locks assigned post-fill).
 
-    Returns ``{ (scenario, actor): unlocked_weakness }`` for ~``to_shuffle_proportion``
-    of eligible docks. Empty when vanilla. Prefer ``DoorRandoAssigner.pre_fill_roll``
-    when the shuffled key list is also needed.
+    Returns ``{ (scenario, actor): unlocked_weakness }`` for fill-assist +
+    reroute docks. Empty when vanilla. Prefer ``DoorRandoAssigner.pre_fill_roll``
+    when assist/reroute key lists are also needed.
     """
     if mode in ("vanilla", "off", None) or mode == 0:
         return {}
 
     from . import DoorRandoAssigner
 
-    assignments, _keys = DoorRandoAssigner.pre_fill_roll(
+    result = DoorRandoAssigner.pre_fill_roll(
         logic,
         rng,
         doors_to_change=doors_to_change,
         change_doors_to=change_doors_to,
         start_counts=start_counts,
     )
-    return assignments
+    return dict(result.assignments)
 
 
 def apply_assignments(parser, assignments: Dict[PhysicalKey, str]) -> None:
@@ -369,11 +382,25 @@ def pick_doors_to_soften(
     scored: List[Tuple[int, PhysicalKey]],
     *,
     top_k: int = 6,
+    assignments: Optional[Dict[PhysicalKey, str]] = None,
 ) -> List[PhysicalKey]:
-    """Choose top-K doors; prefer positive scores, else still take top-K."""
+    """
+    Choose top-K doors to soften for fill repair.
+
+    Prefer positive check-delta (opens more checks). Among equal helpfulness,
+    soften lower-tier / less interesting locks first so Wave/Grapple chokepoints
+    survive longer than Missile/Charge tint locks.
+    """
     if not scored or top_k <= 0:
         return []
-    positive = [key for score, key in scored if score > 0]
-    if positive:
-        return positive[:top_k]
-    return [key for _score, key in scored[:top_k]]
+    from .DoorRandoAssigner import LOCK_TIER
+
+    def sort_key(pair: Tuple[int, PhysicalKey]) -> Tuple[int, int, str, str]:
+        score, key = pair
+        weakness = (assignments or {}).get(key, "")
+        tier = LOCK_TIER.get(weakness, 3)
+        return (-score, tier, key[0], key[1])
+
+    positive = [(score, key) for score, key in scored if score > 0]
+    ordered = sorted(positive if positive else scored, key=sort_key)
+    return [key for _score, key in ordered[:top_k]]

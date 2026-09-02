@@ -1,0 +1,691 @@
+{
+  "schema_version": 2,
+  "profile": "doors_off_tricks_disabled",
+  "assumptions": {
+    "door_lock_rando": "off",
+    "transport_rando": "off",
+    "tricks": "all_disabled",
+    "combat_tricks": "disabled",
+    "include_boss_pickups": true,
+    "game_goal": "defeat_raven_beak",
+    "random_seed": 0,
+    "progressive_defaults": {
+      "progressive_beams": true,
+      "progressive_charge": true,
+      "progressive_missiles": false,
+      "progressive_bombs": true,
+      "progressive_suit": true,
+      "progressive_spin": true
+    },
+    "start_with_pulse_radar": true,
+    "vanilla_flash_shift_behaviour": true,
+    "starting_missiles": 15,
+    "energy_per_tank": 100,
+    "note": "min_kit_size is the fewest StartKit progression items precollected so sphere 0 has >= min_start_checks reachable active pickups. Kit choice is greedy and seed-shuffled (see random_seed). trick_alt is the fewest trick raises (from all-disabled) that open sphere 0 with Starting Items=0 instead of the kit."
+  },
+  "min_start_checks": 2,
+  "max_start_kit": 5,
+  "starts": [
+    {
+      "path": "Artaria/Intro Room/Start Point",
+      "option_key": "artaria_intro_room_start_point",
+      "display_name": "Artaria - Intro Room - Start Point",
+      "scenario": "s010_cave",
+      "actor": "StartPoint0",
+      "is_default": true,
+      "empty_checks": 2,
+      "min_kit_size": 0,
+      "kit": [],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Artaria/Map Station/Save Station",
+      "option_key": "artaria_map_station_save_station",
+      "display_name": "Artaria - Map Station - Save Station",
+      "scenario": "s010_cave",
+      "actor": "PRP_CV_MapStation001_WeightPlate",
+      "is_default": false,
+      "empty_checks": 2,
+      "min_kit_size": 0,
+      "kit": [],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Artaria/Navigation Station North/Save Station",
+      "option_key": "artaria_navigation_station_north_save_station",
+      "display_name": "Artaria - Navigation Station North - Save Station",
+      "scenario": "s010_cave",
+      "actor": "PRP_CV_AccessPoint002_WeightPlate",
+      "is_default": false,
+      "empty_checks": 1,
+      "min_kit_size": 1,
+      "kit": [
+        "Progressive Charge Beam"
+      ],
+      "checks_with_kit": 3,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Artaria/Navigation Station South/Save Station",
+      "option_key": "artaria_navigation_station_south_save_station",
+      "display_name": "Artaria - Navigation Station South - Save Station",
+      "scenario": "s010_cave",
+      "actor": "PRP_CV_AccessPoint001_WeightPlate",
+      "is_default": false,
+      "empty_checks": 2,
+      "min_kit_size": 0,
+      "kit": [],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Artaria/Save Station East/Save Station",
+      "option_key": "artaria_save_station_east_save_station",
+      "display_name": "Artaria - Save Station East - Save Station",
+      "scenario": "s010_cave",
+      "actor": "PRP_CV_SaveStation002_WeightPlate",
+      "is_default": false,
+      "empty_checks": 2,
+      "min_kit_size": 0,
+      "kit": [],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Artaria/Save Station North/Save Station",
+      "option_key": "artaria_save_station_north_save_station",
+      "display_name": "Artaria - Save Station North - Save Station",
+      "scenario": "s010_cave",
+      "actor": "PRP_CV_SaveStation004_WeightPlate",
+      "is_default": false,
+      "empty_checks": 2,
+      "min_kit_size": 0,
+      "kit": [],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Artaria/Save Station South/Save Station",
+      "option_key": "artaria_save_station_south_save_station",
+      "display_name": "Artaria - Save Station South - Save Station",
+      "scenario": "s010_cave",
+      "actor": "PRP_CV_SaveStation001_WeightPlate",
+      "is_default": false,
+      "empty_checks": 1,
+      "min_kit_size": 1,
+      "kit": [
+        "Spider Magnet"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": [
+        {
+          "key": "combat_tricks",
+          "level": 1,
+          "display": "Combat",
+          "level_name": "Beginner"
+        },
+        {
+          "key": "pseudo_wave",
+          "level": 2,
+          "display": "Pseudo-Wave Beam",
+          "level_name": "Intermediate"
+        }
+      ]
+    },
+    {
+      "path": "Artaria/Save Station West/Save Station",
+      "option_key": "artaria_save_station_west_save_station",
+      "display_name": "Artaria - Save Station West - Save Station",
+      "scenario": "s010_cave",
+      "actor": "PRP_CV_SaveStation003_WeightPlate",
+      "is_default": false,
+      "empty_checks": 2,
+      "min_kit_size": 0,
+      "kit": [],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Burenia/Map Station/Save Station",
+      "option_key": "burenia_map_station_save_station",
+      "display_name": "Burenia - Map Station - Save Station",
+      "scenario": "s040_aqua",
+      "actor": "maproom_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 3,
+      "kit": [
+        "Grapple Beam",
+        "Morph Ball",
+        "Progressive Spin"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Burenia/Navigation Station North/Save Station",
+      "option_key": "burenia_navigation_station_north_save_station",
+      "display_name": "Burenia - Navigation Station North - Save Station",
+      "scenario": "s040_aqua",
+      "actor": "accesspoint_000_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 2,
+      "kit": [
+        "Speed Booster",
+        "Morph Ball"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Burenia/Navigation Station South/Save Station",
+      "option_key": "burenia_navigation_station_south_save_station",
+      "display_name": "Burenia - Navigation Station South - Save Station",
+      "scenario": "s040_aqua",
+      "actor": "accesspoint_001_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 1,
+      "kit": [
+        "Screw Attack"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Burenia/Save Station Middle/Save Station",
+      "option_key": "burenia_save_station_middle_save_station",
+      "display_name": "Burenia - Save Station Middle - Save Station",
+      "scenario": "s040_aqua",
+      "actor": "savestation_000_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 2,
+      "kit": [
+        "Spider Magnet",
+        "Flash Shift"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Burenia/Save Station North/Save Station",
+      "option_key": "burenia_save_station_north_save_station",
+      "display_name": "Burenia - Save Station North - Save Station",
+      "scenario": "s040_aqua",
+      "actor": "savestation_002_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 3,
+      "kit": [
+        "Morph Ball",
+        "Grapple Beam",
+        "Progressive Spin"
+      ],
+      "checks_with_kit": 3,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Burenia/Save Station South/Save Station",
+      "option_key": "burenia_save_station_south_save_station",
+      "display_name": "Burenia - Save Station South - Save Station",
+      "scenario": "s040_aqua",
+      "actor": "savestation_001_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 5,
+      "kit": [
+        "Screw Attack",
+        "Morph Ball",
+        "Grapple Beam",
+        "Storm Missile",
+        "Flash Shift"
+      ],
+      "checks_with_kit": 1,
+      "meets_min_checks": false,
+      "trick_alt": [
+        {
+          "key": "movement_tricks",
+          "level": 2,
+          "display": "Movement",
+          "level_name": "Intermediate"
+        },
+        {
+          "key": "slide_jump",
+          "level": 1,
+          "display": "Slide Jump",
+          "level_name": "Beginner"
+        },
+        {
+          "key": "water_bomb_jump",
+          "level": 1,
+          "display": "Water Bomb Jump",
+          "level_name": "Beginner"
+        },
+        {
+          "key": "cross_bomb_launch",
+          "level": 1,
+          "display": "Cross Bomb Launch",
+          "level_name": "Beginner"
+        },
+        {
+          "key": "speedbooster_conservation",
+          "level": 1,
+          "display": "Speed Booster Conservation",
+          "level_name": "Beginner"
+        },
+        {
+          "key": "climb_sloped_tunnels",
+          "level": 2,
+          "display": "Climb Sloped Tunnels",
+          "level_name": "Intermediate"
+        },
+        {
+          "key": "floor_clip",
+          "level": 2,
+          "display": "Floor Clip",
+          "level_name": "Intermediate"
+        },
+        {
+          "key": "stand_on_frozen_enemy",
+          "level": 1,
+          "display": "Stand on Frozen Enemy",
+          "level_name": "Beginner"
+        },
+        {
+          "key": "ledge_warp",
+          "level": 2,
+          "display": "Ledge Warp",
+          "level_name": "Intermediate"
+        }
+      ]
+    },
+    {
+      "path": "Cataris/Map Station/Save Station",
+      "option_key": "cataris_map_station_save_station",
+      "display_name": "Cataris - Map Station - Save Station",
+      "scenario": "s020_magma",
+      "actor": "maproom_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 1,
+      "kit": [
+        "Morph Ball"
+      ],
+      "checks_with_kit": 9,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Cataris/Navigation Station Northwest/Save Station",
+      "option_key": "cataris_navigation_station_northwest_save_station",
+      "display_name": "Cataris - Navigation Station Northwest - Save Station",
+      "scenario": "s020_magma",
+      "actor": "accesspoint_platform_000",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 1,
+      "kit": [
+        "Morph Ball"
+      ],
+      "checks_with_kit": 9,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Cataris/Navigation Station Southeast/Save Station",
+      "option_key": "cataris_navigation_station_southeast_save_station",
+      "display_name": "Cataris - Navigation Station Southeast - Save Station",
+      "scenario": "s020_magma",
+      "actor": "accesspoint_platform",
+      "is_default": false,
+      "empty_checks": 2,
+      "min_kit_size": 0,
+      "kit": [],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Cataris/Save Station East/Save Station",
+      "option_key": "cataris_save_station_east_save_station",
+      "display_name": "Cataris - Save Station East - Save Station",
+      "scenario": "s020_magma",
+      "actor": "savestation_001_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 5,
+      "kit": [
+        "Morph Ball",
+        "Spider Magnet",
+        "Progressive Charge Beam",
+        "Progressive Suit",
+        "Progressive Suit"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Cataris/Save Station West/Save Station",
+      "option_key": "cataris_save_station_west_save_station",
+      "display_name": "Cataris - Save Station West - Save Station",
+      "scenario": "s020_magma",
+      "actor": "savestation_000_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 1,
+      "kit": [
+        "Morph Ball"
+      ],
+      "checks_with_kit": 8,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Dairon/Map Station/Save Station",
+      "option_key": "dairon_map_station_save_station",
+      "display_name": "Dairon - Map Station - Save Station",
+      "scenario": "s030_baselab",
+      "actor": "maproom_000_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 3,
+      "kit": [
+        "Spider Magnet",
+        "Morph Ball",
+        "Power Bomb"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Dairon/Navigation Station North/Save Station",
+      "option_key": "dairon_navigation_station_north_save_station",
+      "display_name": "Dairon - Navigation Station North - Save Station",
+      "scenario": "s030_baselab",
+      "actor": "accesspoint_001_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 4,
+      "kit": [
+        "Morph Ball",
+        "Progressive Charge Beam",
+        "Progressive Beam",
+        "Progressive Bombs"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Dairon/Navigation Station South/Save Station",
+      "option_key": "dairon_navigation_station_south_save_station",
+      "display_name": "Dairon - Navigation Station South - Save Station",
+      "scenario": "s030_baselab",
+      "actor": "accesspoint_000_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 4,
+      "kit": [
+        "Progressive Charge Beam",
+        "Progressive Suit",
+        "Morph Ball",
+        "Grapple Beam"
+      ],
+      "checks_with_kit": 3,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Dairon/Save Station East/Save Station",
+      "option_key": "dairon_save_station_east_save_station",
+      "display_name": "Dairon - Save Station East - Save Station",
+      "scenario": "s030_baselab",
+      "actor": "savestation_000_platform",
+      "is_default": false,
+      "empty_checks": 1,
+      "min_kit_size": 1,
+      "kit": [
+        "Speed Booster"
+      ],
+      "checks_with_kit": 3,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Dairon/Save Station West/Save Station",
+      "option_key": "dairon_save_station_west_save_station",
+      "display_name": "Dairon - Save Station West - Save Station",
+      "scenario": "s030_baselab",
+      "actor": "savestation_001_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 2,
+      "kit": [
+        "Morph Ball",
+        "Progressive Bombs"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Elun/Save Station/Save Station",
+      "option_key": "elun_save_station_save_station",
+      "display_name": "Elun - Save Station - Save Station",
+      "scenario": "s060_quarantine",
+      "actor": "weightactivatedplatform_save",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 5,
+      "kit": [
+        "Grapple Beam",
+        "Speed Booster",
+        "Super Missile",
+        "Morph Ball",
+        "Progressive Bombs"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Ferenia/Map Station/Save Station",
+      "option_key": "ferenia_map_station_save_station",
+      "display_name": "Ferenia - Map Station - Save Station",
+      "scenario": "s070_basesanc",
+      "actor": "maproom_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 3,
+      "kit": [
+        "Progressive Spin",
+        "Morph Ball",
+        "Power Bomb"
+      ],
+      "checks_with_kit": 4,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Ferenia/Navigation Station/Save Station",
+      "option_key": "ferenia_navigation_station_save_station",
+      "display_name": "Ferenia - Navigation Station - Save Station",
+      "scenario": "s070_basesanc",
+      "actor": "accesspoint_000_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 2,
+      "kit": [
+        "Morph Ball",
+        "Power Bomb"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Ferenia/Save Station North/Save Station",
+      "option_key": "ferenia_save_station_north_save_station",
+      "display_name": "Ferenia - Save Station North - Save Station",
+      "scenario": "s070_basesanc",
+      "actor": "savestation_000_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 1,
+      "kit": [
+        "Morph Ball"
+      ],
+      "checks_with_kit": 0,
+      "meets_min_checks": false,
+      "trick_alt": null
+    },
+    {
+      "path": "Ferenia/Save Station Southeast/Save Station",
+      "option_key": "ferenia_save_station_southeast_save_station",
+      "display_name": "Ferenia - Save Station Southeast - Save Station",
+      "scenario": "s070_basesanc",
+      "actor": "savestation_001_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 3,
+      "kit": [
+        "Morph Ball",
+        "Flash Shift",
+        "Screw Attack"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Ghavoran/Map Station/Save Station",
+      "option_key": "ghavoran_map_station_save_station",
+      "display_name": "Ghavoran - Map Station - Save Station",
+      "scenario": "s050_forest",
+      "actor": "maproom_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 4,
+      "kit": [
+        "Morph Ball",
+        "Progressive Bombs",
+        "Progressive Spin",
+        "Ice Missile"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Ghavoran/Navigation Station/Save Station",
+      "option_key": "ghavoran_navigation_station_save_station",
+      "display_name": "Ghavoran - Navigation Station - Save Station",
+      "scenario": "s050_forest",
+      "actor": "accesspoint_000_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 2,
+      "kit": [
+        "Ice Missile",
+        "Progressive Spin"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Ghavoran/Save Station Center/Save Station",
+      "option_key": "ghavoran_save_station_center_save_station",
+      "display_name": "Ghavoran - Save Station Center - Save Station",
+      "scenario": "s050_forest",
+      "actor": "savestation_000_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 5,
+      "kit": [
+        "Morph Ball",
+        "Progressive Bombs",
+        "Progressive Spin",
+        "Progressive Spin",
+        "Progressive Bombs"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Ghavoran/Save Station East/Save Station",
+      "option_key": "ghavoran_save_station_east_save_station",
+      "display_name": "Ghavoran - Save Station East - Save Station",
+      "scenario": "s050_forest",
+      "actor": "weightactivatedplatform_save",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 3,
+      "kit": [
+        "Speed Booster",
+        "Morph Ball",
+        "Power Bomb"
+      ],
+      "checks_with_kit": 3,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Hanubia/Navigation Station/Save Station",
+      "option_key": "hanubia_navigation_station_save_station",
+      "display_name": "Hanubia - Navigation Station - Save Station",
+      "scenario": "s080_shipyard",
+      "actor": "weightactivatedplatform_access_000",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 3,
+      "kit": [
+        "Morph Ball",
+        "Power Bomb",
+        "Grapple Beam"
+      ],
+      "checks_with_kit": 2,
+      "meets_min_checks": true,
+      "trick_alt": null
+    },
+    {
+      "path": "Itorash/Transport to Hanubia/Elevator to Hanubia",
+      "option_key": "itorash_transport_to_hanubia_elevator_to_hanubia",
+      "display_name": "Itorash - Transport to Hanubia - Elevator to Hanubia",
+      "scenario": "s090_skybase",
+      "actor": "elevator_shipyard_000_platform",
+      "is_default": false,
+      "empty_checks": 0,
+      "min_kit_size": 4,
+      "kit": [
+        "Progressive Spin",
+        "Power Bomb",
+        "Morph Ball",
+        "Speed Booster"
+      ],
+      "checks_with_kit": 0,
+      "meets_min_checks": false,
+      "trick_alt": null
+    }
+  ]
+}

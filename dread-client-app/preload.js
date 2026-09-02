@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld("dreadHub", {
   saveYaml: (opts) => ipcRenderer.invoke("save-yaml", opts),
   pickYamlSave: (name) => ipcRenderer.invoke("pick-yaml-save", name),
   pickYamlOpen: () => ipcRenderer.invoke("pick-yaml-open"),
+  probeYamlStartSphere0: (opts) =>
+    ipcRenderer.invoke("probe-yaml-start-sphere0", opts || {}),
   onLog: (handler) => {
     const listener = (_e, payload) => handler(payload);
     ipcRenderer.on("client-log", listener);

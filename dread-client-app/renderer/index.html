@@ -40,6 +40,16 @@
           </div>
           <p class="hint">Build a Metroid Bread player YAML for Archipelago. Save it into your Players folder, then generate a seed.</p>
 
+          <div id="yaml-validation" class="yaml-validation is-probing" role="status" aria-live="polite">
+            <div class="yaml-validation-icon" aria-hidden="true"></div>
+            <div class="yaml-validation-body">
+              <strong id="yaml-validation-title">Checking YAML…</strong>
+              <p id="yaml-validation-message">Checking start / Starting Items against logic…</p>
+              <p id="yaml-validation-fix" class="yaml-validation-fix" hidden></p>
+              <p id="yaml-validation-fix-alt" class="yaml-validation-fix-alt" hidden></p>
+            </div>
+          </div>
+
           <div class="row2">
             <label>
               Player / slot name
@@ -56,13 +66,33 @@
           </div>
 
           <div class="row2">
-            <label>
-              Starting location
+            <label id="yaml-start-field" class="yaml-field">
+              <span class="yaml-field-label">
+                <span class="yaml-field-badge" aria-hidden="true"></span>
+                Starting location
+              </span>
               <select id="yaml-start" data-yaml="starting_location">
                 <option value="default">Default (Artaria Intro)</option>
                 <option value="random_save_station">Random save / map / nav</option>
               </select>
             </label>
+            <label id="yaml-kit-field" class="yaml-field">
+              <span class="yaml-field-label">
+                <span class="yaml-field-badge" aria-hidden="true"></span>
+                Starting Items (Start Kit)
+              </span>
+              <input
+                id="yaml-starting-kit"
+                type="number"
+                data-yaml="starting_kit_items"
+                min="0"
+                max="5"
+                value="0"
+              />
+            </label>
+          </div>
+
+          <div class="row2">
             <label class="check inline">
               <input id="yaml-deathlink" type="checkbox" data-yaml="death_link" />
               <span>Death Link</span>
@@ -428,6 +458,7 @@
       </div>
     </div>
 
+    <script src="yaml_option_hints.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

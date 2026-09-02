@@ -286,6 +286,41 @@ select:focus {
   margin-bottom: 0;
 }
 
+.trick-grid label.yaml-field.is-warning select,
+.trick-grid label.yaml-field.is-error select,
+#yaml-pool label.yaml-field.is-warning input,
+#yaml-pool label.yaml-field.is-error input,
+#yaml-ammo label.yaml-field.is-warning input,
+#yaml-ammo label.yaml-field.is-error input,
+#yaml-cosmetics-env label.yaml-field.is-warning input,
+#yaml-cosmetics-env label.yaml-field.is-error input,
+#yaml-cosmetics label.yaml-field.is-warning,
+#yaml-cosmetics label.yaml-field.is-error {
+  border-width: 2px;
+}
+#yaml-cosmetics label.yaml-field.is-warning {
+  outline: 2px solid rgba(232, 165, 75, 0.8);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+#yaml-cosmetics label.yaml-field.is-error {
+  outline: 2px solid rgba(224, 107, 107, 0.85);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.trick-grid label.yaml-field.is-warning select,
+#yaml-pool label.yaml-field.is-warning input,
+#yaml-ammo label.yaml-field.is-warning input,
+#yaml-cosmetics-env label.yaml-field.is-warning input {
+  border-color: rgba(232, 165, 75, 0.8);
+}
+.trick-grid label.yaml-field.is-error select,
+#yaml-pool label.yaml-field.is-error input,
+#yaml-ammo label.yaml-field.is-error input,
+#yaml-cosmetics-env label.yaml-field.is-error input {
+  border-color: rgba(224, 107, 107, 0.85);
+}
+
 @media (max-width: 700px) {
   .check-grid,
   .trick-grid {
@@ -717,4 +752,243 @@ button.ghost {
   .volume-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---------- YAML validation panel ---------- */
+.yaml-validation {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: rgba(5, 12, 18, 0.55);
+}
+
+.yaml-validation-icon {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  border-radius: 50%;
+  position: relative;
+}
+
+.yaml-validation-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.yaml-validation-body strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  margin-bottom: 4px;
+}
+
+.yaml-validation-body p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.yaml-validation-fix {
+  margin-top: 8px !important;
+  color: var(--text) !important;
+}
+
+.yaml-validation-fix-alt {
+  margin-top: 4px !important;
+  color: var(--text) !important;
+}
+
+.yaml-validation.is-probing {
+  border-color: rgba(138, 167, 181, 0.55);
+}
+.yaml-validation.is-probing .yaml-validation-icon {
+  border: 2px solid rgba(138, 167, 181, 0.35);
+  border-top-color: var(--muted);
+  animation: yaml-spin 0.7s linear infinite;
+}
+.yaml-validation.is-ok {
+  border-color: rgba(93, 202, 138, 0.75);
+}
+.yaml-validation.is-ok .yaml-validation-icon::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 3px;
+  width: 6px;
+  height: 12px;
+  border: solid var(--ok);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.yaml-validation.is-warning {
+  border-color: rgba(232, 165, 75, 0.8);
+}
+.yaml-validation.is-error {
+  border-color: rgba(224, 107, 107, 0.85);
+}
+.yaml-validation.is-warning .yaml-validation-icon,
+.yaml-validation.is-error .yaml-validation-icon {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  border-radius: 0;
+  background: var(--warn);
+}
+.yaml-validation.is-error .yaml-validation-icon {
+  background: var(--danger);
+}
+.yaml-validation.is-warning .yaml-validation-icon::after,
+.yaml-validation.is-error .yaml-validation-icon::after {
+  content: "!";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 7px;
+  text-align: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #1a1208;
+}
+
+@keyframes yaml-spin {
+  to { transform: rotate(360deg); }
+}
+
+.yaml-field {
+  position: relative;
+}
+.yaml-field-caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.yaml-field-caption-text {
+  line-height: 1.2;
+}
+.yaml-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.subhead-with-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.yaml-info-btn {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  border: 1px solid #7a8694;
+  background: #5c6773;
+  color: #e8edf2;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  vertical-align: middle;
+  box-shadow: none;
+}
+.yaml-info-btn:hover,
+.yaml-info-btn:focus-visible {
+  background: #74808c;
+  border-color: #9aa6b2;
+  outline: none;
+}
+.check .yaml-info-btn {
+  margin-left: 2px;
+}
+.yaml-hint-popover {
+  position: fixed;
+  z-index: 4000;
+  max-width: min(340px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #0f1a22;
+  color: var(--text);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.yaml-hint-popover strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.yaml-hint-popover p {
+  margin: 0;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.yaml-field-badge {
+  display: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+.yaml-field.is-probing select,
+.yaml-field.is-probing input,
+.yaml-field.is-ok select,
+.yaml-field.is-ok input,
+.yaml-field.is-warning select,
+.yaml-field.is-warning input,
+.yaml-field.is-error select,
+.yaml-field.is-error input {
+  border-width: 2px;
+}
+.yaml-field.is-probing select,
+.yaml-field.is-probing input {
+  border-color: rgba(138, 167, 181, 0.55);
+}
+.yaml-field.is-ok select,
+.yaml-field.is-ok input {
+  border-color: rgba(93, 202, 138, 0.75);
+}
+.yaml-field.is-warning select,
+.yaml-field.is-warning input {
+  border-color: rgba(232, 165, 75, 0.8);
+}
+.yaml-field.is-error select,
+.yaml-field.is-error input {
+  border-color: rgba(224, 107, 107, 0.85);
+}
+.yaml-field.is-ok .yaml-field-badge,
+.yaml-field.is-warning .yaml-field-badge,
+.yaml-field.is-error .yaml-field-badge,
+.yaml-field.is-probing .yaml-field-badge {
+  display: inline-block;
+}
+.yaml-field.is-ok .yaml-field-badge {
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px var(--ok);
+}
+.yaml-field.is-warning .yaml-field-badge,
+.yaml-field.is-error .yaml-field-badge {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background: var(--warn);
+}
+.yaml-field.is-error .yaml-field-badge {
+  background: var(--danger);
+}
+.yaml-field.is-probing .yaml-field-badge {
+  border-radius: 50%;
+  border: 2px solid rgba(138, 167, 181, 0.35);
+  border-top-color: var(--muted);
+  animation: yaml-spin 0.7s linear infinite;
 }

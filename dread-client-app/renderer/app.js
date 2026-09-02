@@ -134,8 +134,8 @@
     "itorash",
   ];
 
-  // Align with Options.py valid_keys (RDV change_from / basic change_to).
-  // Never offer Sensor / Phase Shift / blast as Change Doors To targets.
+  // Align with Options.py valid_keys (RDV change_from / Phase-2 change_to).
+  // Never offer Sensor / Phase Shift / Access Permanently Closed as targets.
   const DOORS_TO_CHANGE_KEYS = [
     "Access Open",
     "Charge Beam Door",
@@ -150,11 +150,17 @@
   ];
 
   const CHANGE_DOORS_TO_KEYS = [
+    "Bomb Door",
     "Charge Beam Door",
+    "Cross Bomb Door",
+    "Diffusion Beam Door",
     "Grapple Beam Door",
+    "Ice Missile Door",
     "Missile Door",
     "Plasma Beam Door",
     "Power Beam Door",
+    "Power Bomb Door",
+    "Storm Missile Door",
     "Super Missile Door",
     "Wave Beam Door",
     "Wide Beam Door",
@@ -253,29 +259,243 @@
     return fallback || "disabled";
   }
 
+  function yamlHintText(key) {
+    const map = window.YAML_OPTION_HINTS || {};
+    return map[key] || "";
+  }
+
+  function hasChoiceYamlHints(hintKey) {
+    if (!hintKey) return false;
+    const map = window.YAML_OPTION_HINTS || {};
+    const prefix = `${hintKey}::`;
+    for (const k of Object.keys(map)) {
+      if (k.startsWith(prefix)) return true;
+    }
+    return false;
+  }
+
+  /** Prefer option-specific hint (key::selectedValue) when a select is in the same label. */
+  function resolveYamlHint(hintKey, anchor, labelText) {
+    const map = window.YAML_OPTION_HINTS || {};
+    const lab = anchor?.closest?.("label");
+    const sel =
+      lab?.querySelector(`select[data-yaml="${hintKey}"]`) ||
+      lab?.querySelector("select[data-yaml]") ||
+      null;
+    if (sel) {
+      const value = String(sel.value || "");
+      const choiceKey = `${hintKey}::${value}`;
+      const choiceText = map[choiceKey];
+      if (choiceText) {
+        const optLabel = sel.options[sel.selectedIndex]?.textContent?.trim() || value;
+        return {
+          text: choiceText,
+          title: `${labelText || hintKey}: ${optLabel}`,
+          popKey: choiceKey,
+        };
+      }
+    }
+    const text = map[hintKey];
+    if (!text) return null;
+    return { text, title: labelText || hintKey, popKey: hintKey };
+  }
+
+  function makeInfoButton(hintKey, labelText) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "yaml-info-btn";
+    btn.dataset.hintKey = hintKey;
+    btn.setAttribute("aria-label", `About ${labelText || hintKey}`);
+    btn.title = "More info";
+    btn.textContent = "i";
+    btn.addEventListener("mousedown", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+    });
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      showYamlHintPopover(btn, hintKey, labelText);
+    });
+    return btn;
+  }
+
+  function labelCaption(text, hintKey) {
+    const wrap = document.createElement("span");
+    wrap.className = "yaml-field-caption";
+    const name = document.createElement("span");
+    name.className = "yaml-field-caption-text";
+    name.textContent = text;
+    wrap.appendChild(name);
+    if (hintKey && (yamlHintText(hintKey) || hasChoiceYamlHints(hintKey))) {
+      wrap.appendChild(makeInfoButton(hintKey, text));
+    }
+    return wrap;
+  }
+
+  let _yamlHintPopover = null;
+  let _yamlHintOutsideHandler = null;
+
+  function hideYamlHintPopover() {
+    if (_yamlHintPopover) {
+      _yamlHintPopover.remove();
+      _yamlHintPopover = null;
+    }
+    if (_yamlHintOutsideHandler) {
+      document.removeEventListener("mousedown", _yamlHintOutsideHandler, true);
+      document.removeEventListener("keydown", _yamlHintOutsideHandler, true);
+      _yamlHintOutsideHandler = null;
+    }
+  }
+
+  function showYamlHintPopover(anchor, hintKey, labelText) {
+    const resolved = resolveYamlHint(hintKey, anchor, labelText);
+    if (!resolved) return;
+    const already = _yamlHintPopover && _yamlHintPopover.dataset.hintKey === resolved.popKey;
+    hideYamlHintPopover();
+    if (already) return;
+
+    const pop = document.createElement("div");
+    pop.className = "yaml-hint-popover";
+    pop.dataset.hintKey = resolved.popKey;
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", resolved.title);
+    const title = document.createElement("strong");
+    title.textContent = resolved.title;
+    const body = document.createElement("p");
+    body.textContent = resolved.text;
+    pop.appendChild(title);
+    pop.appendChild(body);
+    document.body.appendChild(pop);
+    _yamlHintPopover = pop;
+
+    const rect = anchor.getBoundingClientRect();
+    const pad = 8;
+    let left = rect.left;
+    let top = rect.bottom + 6;
+    // Measure after attach
+    const pw = pop.offsetWidth;
+    const ph = pop.offsetHeight;
+    if (left + pw > window.innerWidth - pad) left = Math.max(pad, window.innerWidth - pw - pad);
+    if (top + ph > window.innerHeight - pad) top = Math.max(pad, rect.top - ph - 6);
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
+
+    _yamlHintOutsideHandler = (ev) => {
+      if (ev.type === "keydown" && ev.key !== "Escape") return;
+      if (ev.type === "mousedown" && (pop.contains(ev.target) || anchor.contains(ev.target))) return;
+      hideYamlHintPopover();
+    };
+    document.addEventListener("mousedown", _yamlHintOutsideHandler, true);
+    document.addEventListener("keydown", _yamlHintOutsideHandler, true);
+  }
+
+  function decorateDoorSetSectionHeaders() {
+    const map = {
+      "Doors to change": "doors_to_change",
+      "Change doors to": "change_doors_to",
+    };
+    document.querySelectorAll("#yaml-door-sets .subhead").forEach((el) => {
+      if (el.querySelector(".yaml-info-btn")) return;
+      const key = map[el.textContent.trim()];
+      if (!key || !yamlHintText(key)) return;
+      el.classList.add("subhead-with-info");
+      el.appendChild(makeInfoButton(key, el.textContent.trim()));
+    });
+  }
+
+  function decorateStaticYamlLabels() {
+    const rewritePlain = (controlId, hintKey, labelText) => {
+      const control = $(controlId);
+      const lab = control?.closest("label");
+      if (!lab || lab.querySelector(".yaml-info-btn")) return;
+      if (!yamlHintText(hintKey) && !hasChoiceYamlHints(hintKey)) return;
+      Array.from(lab.childNodes)
+        .filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim())
+        .forEach((n) => n.remove());
+      if (!lab.querySelector(".yaml-field-caption")) {
+        lab.insertBefore(labelCaption(labelText, hintKey), control);
+      }
+    };
+    rewritePlain("yaml-name", "yaml_player_name", "Player / slot name");
+    rewritePlain("yaml-accessibility", "accessibility", "Accessibility");
+    const accessLab = $("yaml-accessibility")?.closest("label");
+    if (accessLab) {
+      accessLab.classList.add("yaml-field");
+      accessLab.dataset.yamlField = "accessibility";
+    }
+
+    const death = $("yaml-deathlink");
+    const deathLab = death?.closest("label");
+    if (deathLab && !deathLab.querySelector(".yaml-info-btn") && yamlHintText("death_link")) {
+      const span = deathLab.querySelector("span");
+      if (span) span.after(makeInfoButton("death_link", "Death Link"));
+      else deathLab.appendChild(makeInfoButton("death_link", "Death Link"));
+    }
+
+    const startLab = $("yaml-start-field");
+    if (startLab && !startLab.querySelector(".yaml-info-btn") && yamlHintText("starting_location")) {
+      startLab.querySelector(".yaml-field-label")?.appendChild(
+        makeInfoButton("starting_location", "Starting location")
+      );
+    }
+    const kitLab = $("yaml-kit-field");
+    if (kitLab && !kitLab.querySelector(".yaml-info-btn") && yamlHintText("starting_kit_items")) {
+      kitLab.querySelector(".yaml-field-label")?.appendChild(
+        makeInfoButton("starting_kit_items", "Starting Items (Start Kit)")
+      );
+    }
+  }
+
   function appendCheck(root, key, label, opts = {}) {
     const lab = document.createElement("label");
-    lab.className = "check";
+    lab.className = "check yaml-field";
+    lab.dataset.yamlField = key;
     if (opts.span) lab.style.gridColumn = "1 / -1";
-    lab.innerHTML = `<input type="checkbox" data-yaml="${key}" ${opts.id ? `id="${opts.id}"` : ""} /><span>${label}</span>`;
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.dataset.yaml = key;
+    if (opts.id) input.id = opts.id;
+    const span = document.createElement("span");
+    span.textContent = label;
+    lab.appendChild(input);
+    lab.appendChild(span);
+    if (yamlHintText(key)) lab.appendChild(makeInfoButton(key, label));
     root.appendChild(lab);
     return lab;
   }
 
   function appendNumber(root, key, label, min, max) {
     const lab = document.createElement("label");
-    lab.innerHTML = `${label}<input type="number" data-yaml="${key}" min="${min}" max="${max}" />`;
+    lab.className = "yaml-field";
+    lab.dataset.yamlField = key;
+    lab.appendChild(labelCaption(label, key));
+    const input = document.createElement("input");
+    input.type = "number";
+    input.dataset.yaml = key;
+    input.min = String(min);
+    input.max = String(max);
+    lab.appendChild(input);
     root.appendChild(lab);
     return lab;
   }
 
   function appendSelect(root, key, label, options, opts = {}) {
     const lab = document.createElement("label");
+    lab.className = "yaml-field";
     if (opts.id) lab.id = opts.id;
-    const optsHtml = options
-      .map(([val, text]) => `<option value="${val}">${text}</option>`)
-      .join("");
-    lab.innerHTML = `${label}<select data-yaml="${key}" ${opts.selectId ? `id="${opts.selectId}"` : ""}>${optsHtml}</select>`;
+    lab.dataset.yamlField = key;
+    lab.appendChild(labelCaption(label, key));
+    const sel = document.createElement("select");
+    sel.dataset.yaml = key;
+    if (opts.selectId) sel.id = opts.selectId;
+    for (const [val, text] of options) {
+      const opt = document.createElement("option");
+      opt.value = val;
+      opt.textContent = text;
+      sel.appendChild(opt);
+    }
+    lab.appendChild(sel);
     root.appendChild(lab);
     return lab;
   }
@@ -285,10 +505,21 @@
     for (const val of values) {
       const lab = document.createElement("label");
       lab.className = "check";
-      const checked = defaults.has(val) ? "checked" : "";
-      lab.innerHTML =
-        `<input type="checkbox" data-yaml-set="${key}" value="${val.replace(/"/g, "&quot;")}" ${checked} />` +
-        `<span>${val}</span>`;
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.dataset.yamlSet = key;
+      input.value = val;
+      if (defaults.has(val)) input.checked = true;
+      const span = document.createElement("span");
+      span.textContent = val;
+      lab.appendChild(input);
+      lab.appendChild(span);
+      const hintKey = `${key}::${val}`;
+      // Only per-value hints (setKey::Value). Skip set-level fallback so groups
+      // like disabled_lights can omit bubbles on each region checkbox.
+      if (yamlHintText(hintKey)) {
+        lab.appendChild(makeInfoButton(hintKey, val));
+      }
       root.appendChild(lab);
     }
   }
@@ -634,6 +865,22 @@
       goal.innerHTML = "";
       appendSelect(goal, "game_goal", "Game Goal", GAME_GOAL);
     }
+
+    const syncGameGoalAccessibility = () => {
+      const goalEl = document.querySelector('[data-yaml="game_goal"]');
+      const accessEl = $("yaml-accessibility");
+      if (!goalEl || !accessEl) return;
+      if (goalEl.value === "one_hundred_percent" && accessEl.value !== "full") {
+        accessEl.value = "full";
+        accessEl.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    };
+    document.querySelector('[data-yaml="game_goal"]')?.addEventListener(
+      "change",
+      syncGameGoalAccessibility
+    );
+    goal && (goal._syncGameGoalAccessibility = syncGameGoalAccessibility);
+
     const dna = $("yaml-dna");
     if (dna) {
       dna.innerHTML = "";
@@ -742,12 +989,21 @@
         });
         const reqWrap = requireEl?.closest("label");
         if (reqWrap) reqWrap.style.opacity = vanilla ? "0.45" : "";
-        // Included ammo used when vanilla OR (non-vanilla + require main).
+        // Vanilla Flash Shift always ships with 2 included dashes (locked).
+        // Otherwise included ammo is only used when Require Main Item is on.
         const includedWrap = $("yaml-flash-included-wrap");
         const includedInp = includedWrap?.querySelector("input");
-        const includedUseful = vanilla || (!vanilla && requireMain);
-        if (includedInp) includedInp.disabled = !includedUseful;
-        if (includedWrap) includedWrap.style.opacity = includedUseful ? "" : "0.45";
+        if (vanilla) {
+          if (includedInp) {
+            includedInp.value = String(FLASH_SHIFT.includedDefault);
+            includedInp.disabled = true;
+          }
+          if (includedWrap) includedWrap.style.opacity = "0.45";
+        } else {
+          const includedUseful = requireMain;
+          if (includedInp) includedInp.disabled = !includedUseful;
+          if (includedWrap) includedWrap.style.opacity = includedUseful ? "" : "0.45";
+        }
       };
       $("yaml-flash-vanilla")?.addEventListener("change", syncFlashDeps);
       $("yaml-flash-require")?.addEventListener("change", syncFlashDeps);
@@ -780,21 +1036,23 @@
     tricks.innerHTML = "";
     for (const [key, label, , levels] of TRICKS) {
       const lab = document.createElement("label");
-      const opts = levels
-        .map((v) => `<option value="${v}">${TRICK_LEVEL_LABEL[v] || v}</option>`)
-        .join("");
-      lab.innerHTML = `${label}<select data-yaml="${key}">${opts}</select>`;
+      lab.className = "yaml-field";
+      lab.dataset.yamlField = key;
+      lab.appendChild(labelCaption(label, key));
+      const sel = document.createElement("select");
+      sel.dataset.yaml = key;
+      for (const v of levels) {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = TRICK_LEVEL_LABEL[v] || v;
+        sel.appendChild(opt);
+      }
+      lab.appendChild(sel);
       tricks.appendChild(lab);
     }
 
     // Reverse Grapple: Options.py Toggle (RDV only uses Beginner).
-    const rev = document.createElement("label");
-    rev.className = "check";
-    rev.style.gridColumn = "1 / -1";
-    rev.innerHTML =
-      `<input type="checkbox" data-yaml="reverse_grapple_block" />` +
-      `<span>Reverse Grapple Block</span>`;
-    tricks.appendChild(rev);
+    appendCheck(tricks, "reverse_grapple_block", "Reverse Grapple Block", { span: true });
 
     const syncDnaDeps = () => {
       const n = Number(document.querySelector('[data-yaml="required_dna"]')?.value || 0);
@@ -817,6 +1075,8 @@
     dna && (dna._syncDnaDeps = syncDnaDeps);
 
     if (doors && doors._syncDoorSets) doors._syncDoorSets();
+    decorateDoorSetSectionHeaders();
+    decorateStaticYamlLabels();
   }
 
   function defaultForKey(key) {
@@ -900,6 +1160,8 @@
     if (doorsRoot && doorsRoot._syncDoorSets) doorsRoot._syncDoorSets();
     const dnaRoot = $("yaml-dna");
     if (dnaRoot && dnaRoot._syncDnaDeps) dnaRoot._syncDnaDeps();
+    const goalRoot = $("yaml-goal");
+    if (goalRoot && goalRoot._syncGameGoalAccessibility) goalRoot._syncGameGoalAccessibility();
 
     state.yamlLoadedDread = { ...dread };
   }
@@ -926,6 +1188,11 @@
     dread.change_doors_to = readOptionSet("change_doors_to");
     dread.disabled_lights = readOptionSet("disabled_lights");
 
+    // Vanilla Flash Shift always uses 2 included chain dashes.
+    if (dread[FLASH_SHIFT.vanillaKey]) {
+      dread[FLASH_SHIFT.includedKey] = FLASH_SHIFT.includedDefault;
+    }
+
     // When door rando is off, keep sets for round-trip but generator ignores them.
     state.yamlLoadedDread = { ...dread };
     return {
@@ -934,6 +1201,275 @@
       description: "Metroid Bread player options",
       "Metroid Bread": dread,
     };
+  }
+
+  const TRICK_LEVEL_TO_INT = {
+    disabled: 0,
+    beginner: 1,
+    intermediate: 2,
+    advanced: 3,
+    expert: 4,
+    ludicrous: 5,
+  };
+
+  let yamlProbeTimer = null;
+  let yamlProbeReqId = 0;
+
+  function collectYamlProbePayload() {
+    const dread = readYamlFromForm()["Metroid Bread"] || {};
+    const tricks = {};
+    for (const [key] of TRICKS) {
+      const raw = dread[key];
+      const mapped = TRICK_LEVEL_TO_INT[String(raw || "disabled")];
+      tricks[key] = mapped != null ? mapped : Number(raw) || 0;
+    }
+    const boolOpt = (key, fallback = true) => {
+      if (dread[key] === undefined || dread[key] === null) return fallback;
+      return Boolean(dread[key]);
+    };
+    const numOpt = (key, fallback) => {
+      const n = Number(dread[key]);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    return {
+      starting_location: dread.starting_location || "default",
+      starting_kit_items: Number(dread.starting_kit_items) || 0,
+      door_lock_rando: dread.door_lock_rando || "vanilla",
+      transport_rando: dread.transport_rando || "off",
+      doors_to_change: Array.isArray(dread.doors_to_change)
+        ? dread.doors_to_change
+        : [],
+      change_doors_to: Array.isArray(dread.change_doors_to)
+        ? dread.change_doors_to
+        : [],
+      include_boss_pickups: dread.include_boss_pickups !== false,
+      start_with_pulse_radar: dread.start_with_pulse_radar !== false,
+      progressive_beams: Boolean(dread.progressive_beams),
+      progressive_charge: Boolean(dread.progressive_charge),
+      progressive_missiles: Boolean(dread.progressive_missiles),
+      progressive_bombs: Boolean(dread.progressive_bombs),
+      progressive_suit: Boolean(dread.progressive_suit),
+      progressive_spin: Boolean(dread.progressive_spin),
+      energy_tanks: numOpt("energy_tanks", 8),
+      energy_parts: numOpt("energy_parts", 16),
+      energy_per_tank: numOpt("energy_per_tank", 100),
+      immediate_energy_parts: boolOpt("immediate_energy_parts", true),
+      starting_missiles: numOpt("starting_missiles", 15),
+      starting_power_bombs: numOpt("starting_power_bombs", 0),
+      missile_tanks: numOpt("missile_tanks", 35),
+      missile_plus_tanks: numOpt("missile_plus_tanks", 10),
+      power_bomb_tanks: numOpt("power_bomb_tanks", 12),
+      nerf_power_bombs: Boolean(dread.nerf_power_bombs),
+      constant_heat_damage: numOpt("constant_heat_damage", 20),
+      constant_cold_damage: numOpt("constant_cold_damage", 20),
+      accessibility: String(dread.accessibility || "items").toLowerCase(),
+      tricks,
+      seed: 0,
+    };
+  }
+
+  const YAML_HIGHLIGHT_SEV = ["is-probing", "is-ok", "is-warning", "is-error"];
+
+  function yamlFieldWrap(key) {
+    return (
+      document.querySelector(`label.yaml-field[data-yaml-field="${key}"]`) ||
+      document.querySelector(`[data-yaml="${key}"]`)?.closest("label.yaml-field") ||
+      document.querySelector(`[data-yaml="${key}"]`)?.closest("label")
+    );
+  }
+
+  function clearYamlProbeHighlights() {
+    document
+      .querySelectorAll(
+        "#yaml-tricks .yaml-field, #yaml-pool .yaml-field, #yaml-ammo .yaml-field, " +
+          "#yaml-cosmetics-env .yaml-field, #yaml-cosmetics .yaml-field, " +
+          "label.yaml-field[data-yaml-field]"
+      )
+      .forEach((el) => {
+        el.classList.remove(...YAML_HIGHLIGHT_SEV);
+      });
+  }
+
+  function markYamlField(key, severity) {
+    if (!key || severity === "ok" || severity === "probing") return;
+    const cls = severity === "error" ? "is-error" : "is-warning";
+    const wrap = yamlFieldWrap(key);
+    if (!wrap) return;
+    wrap.classList.remove(...YAML_HIGHLIGHT_SEV);
+    wrap.classList.add(cls);
+  }
+
+  function startKitHighlightKeys(result) {
+    // Only paint Starting location / Starting Items when that field caused the
+    // sphere-0 failure — not for accessibility / energy / other conflicts.
+    if (!result) return [];
+    const title = String(result.title || "");
+    const keys = [];
+    if (
+      /Starting location/i.test(title) ||
+      /No random start/i.test(title) ||
+      /Unknown starting location/i.test(title)
+    ) {
+      keys.push("starting_location");
+    }
+    if (/Starting Items/i.test(title)) {
+      keys.push("starting_kit_items");
+    }
+    return keys;
+  }
+
+  function applyYamlProbeHighlights(result) {
+    clearYamlProbeHighlights();
+    if (!result || result.cancelled) return;
+    const sev = result.severity || (result.ok === false ? "error" : "ok");
+    const trickSev = sev === "error" ? "error" : sev === "warning" ? "warning" : null;
+    if (trickSev && Array.isArray(result.trick_alt)) {
+      for (const entry of result.trick_alt) {
+        if (entry && entry.key) markYamlField(String(entry.key), trickSev);
+      }
+    }
+    const conflicts = Array.isArray(result.conflicts) ? result.conflicts : [];
+    for (const c of conflicts) {
+      const fields = Array.isArray(c.fields) ? c.fields : [];
+      const cSev = c.severity === "error" ? "error" : "warning";
+      for (const key of fields) {
+        if (key === "starting_location" || key === "starting_kit_items") continue;
+        markYamlField(key, cSev);
+      }
+    }
+    if (sev === "error" || sev === "warning") {
+      for (const key of startKitHighlightKeys(result)) {
+        markYamlField(key, sev === "error" ? "error" : "warning");
+      }
+    }
+  }
+
+  function setYamlValidationUI(severity, title, message, fix, fixAlt, result) {
+    const panel = $("yaml-validation");
+    if (!panel) return;
+    panel.classList.remove("is-probing", "is-ok", "is-warning", "is-error");
+    panel.classList.add(`is-${severity}`);
+    const titleEl = $("yaml-validation-title");
+    const msgEl = $("yaml-validation-message");
+    const fixEl = $("yaml-validation-fix");
+    const altEl = $("yaml-validation-fix-alt");
+    if (titleEl) titleEl.textContent = title || "";
+    if (msgEl) msgEl.textContent = message || "";
+    if (fixEl) {
+      if (fix) {
+        fixEl.hidden = false;
+        fixEl.textContent = `Easiest fix: ${fix}`;
+      } else {
+        fixEl.hidden = true;
+        fixEl.textContent = "";
+      }
+    }
+    if (altEl) {
+      if (fixAlt) {
+        altEl.hidden = false;
+        altEl.textContent = `Or enable tricks: ${fixAlt}`;
+      } else {
+        altEl.hidden = true;
+        altEl.textContent = "";
+      }
+    }
+    // Clear start/kit paints; applyYamlProbeHighlights re-adds only when responsible.
+    ["yaml-start-field", "yaml-kit-field"].forEach((id) => {
+      const field = $(id);
+      if (!field) return;
+      field.classList.remove("is-probing", "is-ok", "is-warning", "is-error");
+      if (severity === "probing") field.classList.add("is-probing");
+    });
+    if (severity === "probing") {
+      clearYamlProbeHighlights();
+    } else if (result) {
+      applyYamlProbeHighlights(result);
+    } else if (severity === "ok") {
+      clearYamlProbeHighlights();
+    }
+  }
+
+  function scheduleYamlValidation({ immediate = false } = {}) {
+    if (!hub.probeYamlStartSphere0) return;
+    // Invalidate any in-flight probe / pending debounce immediately so edits
+    // stay responsive and stale results never paint.
+    if (yamlProbeTimer) {
+      clearTimeout(yamlProbeTimer);
+      yamlProbeTimer = null;
+    }
+    const reqId = ++yamlProbeReqId;
+    setYamlValidationUI(
+      "probing",
+      "Checking YAML…",
+      "Checking start / Starting Items against logic…",
+      "",
+      ""
+    );
+    const run = async () => {
+      if (reqId !== yamlProbeReqId) return;
+      let result;
+      try {
+        result = await hub.probeYamlStartSphere0(collectYamlProbePayload());
+      } catch (err) {
+        if (reqId !== yamlProbeReqId) return;
+        setYamlValidationUI(
+          "error",
+          "Probe failed",
+          String(err.message || err),
+          "Retry after Hub Python/venv is ready.",
+          ""
+        );
+        return;
+      }
+      if (reqId !== yamlProbeReqId) return;
+      if (result && result.cancelled) return;
+      const sev = result.severity || (result.ok === false ? "error" : "ok");
+      setYamlValidationUI(
+        sev === "ok" || sev === "warning" || sev === "error" || sev === "probing"
+          ? sev
+          : "error",
+        result.title || (sev === "ok" ? "YAML looks good" : "Validation issue"),
+        result.message || "",
+        result.fix || "",
+        result.fix_alt || "",
+        result
+      );
+    };
+    if (immediate) run();
+    else yamlProbeTimer = setTimeout(run, 300);
+  }
+
+  function wireYamlValidationListeners() {
+    const root = $("view-yaml");
+    if (!root || root.dataset.yamlValidateWired === "1") return;
+    root.dataset.yamlValidateWired = "1";
+    root.addEventListener("change", (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLElement)) return;
+      if (
+        t.matches(
+          "[data-yaml], [data-yaml-set], #yaml-start, #yaml-starting-kit, #yaml-door-lock"
+        )
+      ) {
+        scheduleYamlValidation();
+      }
+    });
+    root.addEventListener("input", (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLElement)) return;
+      if (
+        t.matches(
+          '[data-yaml="starting_kit_items"], #yaml-starting-kit, ' +
+            '#yaml-pool input[data-yaml], #yaml-ammo input[data-yaml], ' +
+            'input[data-yaml="energy_tanks"], input[data-yaml="energy_parts"], ' +
+            'input[data-yaml="energy_per_tank"], input[data-yaml="starting_missiles"], ' +
+            'input[data-yaml="starting_power_bombs"], ' +
+            'input[data-yaml="constant_heat_damage"], input[data-yaml="constant_cold_damage"]'
+        )
+      ) {
+        scheduleYamlValidation();
+      }
+    });
   }
 
   $("yaml-open").addEventListener("click", async () => {
@@ -946,6 +1482,7 @@
     }
     applyYamlToForm(result.config);
     $("yaml-status").textContent = `Loaded ${path}`;
+    scheduleYamlValidation({ immediate: true });
   });
 
   $("yaml-save").addEventListener("click", async () => {
@@ -1909,6 +2446,7 @@
 
   async function boot() {
     buildYamlForm();
+    wireYamlValidationListeners();
     await loadStartingLocationOptions();
     const cfg = await hub.getConfig();
     $("server").value = cfg.server || "";
@@ -1937,6 +2475,7 @@
 
     const yaml = await hub.loadYaml(cfg.yaml_path);
     applyYamlToForm(yaml.config || {});
+    scheduleYamlValidation({ immediate: true });
 
     const running = await hub.isRunning();
     state.running = Boolean(running);

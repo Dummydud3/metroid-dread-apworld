@@ -1741,10 +1741,16 @@ def apply_company_title_screen(
 def normalize_ap_seed_id(value: Optional[str]) -> str:
     """Canonical seed id for client↔game compare (title / RoomInfo / Init.sApSeedId)."""
     raw = (value or "").strip()
-    if not raw:
+    # Pipe-delimited payloads are never AP seeds (e.g. MapIconBankStatus).
+    if not raw or "|" in raw:
         return ""
     display = format_display_seed_id(raw)
-    return display or raw
+    if display:
+        return display
+    # Do not fall back to arbitrary strings — that poisoned mismatch checks.
+    if re.fullmatch(r"\d{10,}", raw):
+        return raw
+    return ""
 
 
 def seeds_match(client_seed: Optional[str], game_seed: Optional[str]) -> bool:

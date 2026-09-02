@@ -195,12 +195,20 @@ def build_start_kit(
     world,
     min_locations: int = MIN_START_LOCATIONS,
     base_kit: Sequence[KitItem] = (),
+    max_kit: int = MAX_START_KIT,
 ) -> List[KitItem]:
     """Greedily pick the fewest items that give the start `min_locations` checks.
 
     `base_kit` is kept and extended, so a kit rolled against the vanilla graph
     can be reused after door / transport rando instead of starting over.
+
+    `max_kit` caps how many items may be granted (YAML ``starting_kit_items``).
+    ``0`` returns an empty kit (no auto Start Kit).
     """
+    max_kit = max(0, min(int(max_kit), MAX_START_KIT))
+    if max_kit <= 0:
+        return []
+
     logic = world.logic
     active = set(world.active_location_names())
 
@@ -240,7 +248,7 @@ def build_start_kit(
             return f_checks > b_checks
         return f_nodes > b_nodes
 
-    kit: List[KitItem] = list(base_kit)
+    kit: List[KitItem] = list(base_kit)[:max_kit]
     counts = kit_counts(kit)
     current = score(counts)
     if current[0] >= min_locations:
@@ -282,8 +290,8 @@ def build_start_kit(
                     best, best_score = [first, second], found
         return best
 
-    while len(kit) < MAX_START_KIT and pool:
-        step = best_step(MAX_START_KIT - len(kit))
+    while len(kit) < max_kit and pool:
+        step = best_step(max_kit - len(kit))
         if not step:
             break
         for pool_item in step:

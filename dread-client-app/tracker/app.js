@@ -73,17 +73,72 @@
     return counts;
   }
 
+  function poolNameCounts() {
+    const raw = status.tracker_item_pool;
+    if (!raw || typeof raw !== "object") return null;
+    const keys = Object.keys(raw);
+    if (!keys.length) return null;
+    const out = new Map();
+    for (const [name, count] of Object.entries(raw)) {
+      const n = Number(count);
+      if (name && Number.isFinite(n) && n > 0) out.set(String(name), n);
+    }
+    return out.size ? out : null;
+  }
+
+  function filteredItemCodes(owned) {
+    const pool = poolNameCounts();
+    // No pool yet (offline / old seed): show full catalog rows.
+    if (!pool) {
+      const all = [];
+      for (const row of catalog.item_rows || []) {
+        for (const code of row) all.push(code);
+      }
+      return { codes: all, pool: null };
+    }
+    const allowed = new Set(pool.keys());
+    const codes = [];
+    const seen = new Set();
+    for (const row of catalog.item_rows || []) {
+      for (const code of row) {
+        if (seen.has(code)) continue;
+        const meta = itemByCode.get(code);
+        if (!meta) continue;
+        const inPool = allowed.has(meta.name);
+        const isOwned = (owned.get(code) || 0) > 0;
+        if (!inPool && !isOwned) continue;
+        seen.add(code);
+        codes.push(code);
+      }
+    }
+    return { codes, pool };
+  }
+
+  function packItemRows(codes, perRow = 4) {
+    const rows = [];
+    for (let i = 0; i < codes.length; i += perRow) {
+      rows.push(codes.slice(i, i + perRow));
+    }
+    return rows;
+  }
+
   function renderItems() {
     const owned = countOwned();
+    const { codes, pool } = filteredItemCodes(owned);
+    const rows = pool ? packItemRows(codes, 4) : (catalog.item_rows || []);
     els.itemGrid.innerHTML = "";
-    for (const row of catalog.item_rows || []) {
+    for (const row of rows) {
       const rowEl = document.createElement("div");
       rowEl.className = "item-row";
       for (const code of row) {
         const meta = itemByCode.get(code);
         if (!meta) continue;
         const n = owned.get(code) || 0;
-        const max = meta.max_count || 1;
+        const poolMax = pool ? pool.get(meta.name) : null;
+        const max =
+          poolMax != null && Number.isFinite(poolMax) && poolMax > 0
+            ? poolMax
+            : meta.max_count || 1;
         const cell = document.createElement("div");
         cell.className = "item" + (n > 0 ? " owned" : "");
         cell.title = meta.name;
@@ -114,7 +169,9 @@
         }
         rowEl.appendChild(cell);
       }
-      els.itemGrid.appendChild(rowEl);
+      if (rowEl.childNodes.length) {
+        els.itemGrid.appendChild(rowEl);
+      }
     }
   }
 

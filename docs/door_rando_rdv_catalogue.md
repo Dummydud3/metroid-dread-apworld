@@ -185,10 +185,11 @@ Export guard (`patch_data_factory._door_patches`): refuses weaknesses lacking `e
   in `NON_PATCHABLE_SOURCE_WEAKNESSES` (Phase Shift / thermal / powered).
 - Vanilla weakness must be in option `doors_to_change` (default ≈ RDV
   `change_from`, **includes Sensor Lock Door**; **excludes** Phase Shift).
-- Shuffle count ≈ `to_shuffle_proportion` (0.6 from header).
+- Shuffle count ≈ `reroute_shuffle_proportion` (~0.85 of non-assist eligible).
 - Pre-fill target for shuffled docks: header `unlocked` (Power Beam Door).
-- Post-fill target pool = option `change_doors_to` ∩ basic ODR types from header
-  `change_to` (never Sensor / Phase / blast until Phase 4).
+- Post-fill target pool = option `change_doors_to` ∩ Phase-2 ODR-addable types
+  from header `change_to` (beams / missiles / grapple / blast / Ice / Storm /
+  Diffusion). Never Sensor / Phase; **Closed deferred**.
 - Per-dock `incompatible_dock_weaknesses` (Grapple bans) applied at post-fill.
 - Start-frontier doors stay vanilla (not selected).
 - Per-scenario shield ID budget (~100 ids, cost 2 per shielded door, margin 10).
@@ -209,18 +210,18 @@ Export guard (`patch_data_factory._door_patches`): refuses weaknesses lacking `e
 | `to_shuffle_proportion` 0.6 | Yes | **Yes** (header-driven) |
 | `force_change_two_way` | Explicit | Implicit via shared actor key |
 | Actor coverage | All `actor_name`s with type | Skips capitalized `Door###` / `Door049 (PR-PR)` (case filter) |
-| Extended blast pool (bomb/ice/storm/…) | In `change_to` | Intentionally omitted from basic pool |
-| Closed-door locked type | In pool + resolver rules | Not in basic pool |
-| Thermal / phase / powered | Excluded | Mapped in `WEAKNESS_DOOR_TYPE` but not in basic targets |
+| Extended blast pool (bomb/ice/storm/…) | In `change_to` | **Phase 2 shipped** (ODR-addable ∩ header) |
+| Closed-door locked type | In pool + resolver rules | Deferred (no AP dead-door resolver) |
+| Thermal / phase / powered | Excluded | Mapped in `WEAKNESS_DOOR_TYPE` but not in targets |
 
 ### 2.4 Footguns closed
 
 **Was Footgun A — UI unsafe `Change Doors To` keys.** Closed: Options + client
-valid keys match basic pool only.
+valid keys match the Phase-2 ODR-addable pool (no Sensor / Phase / Closed).
 
 **Was Footgun B — Grapple incompat ignored.** Closed in post-fill filter.
 
-**Remaining — Presence actors** may still convert under the basic pool without
+**Remaining — Presence actors** may still convert under the Phase-2 pool without
 RDV’s full resolver; lower priority than Sensor emit / Grapple incompat.
 
 **Not a current emit path:** unrestricted Sensor **targets**.
@@ -314,9 +315,9 @@ ODR specially widens `doorpresence` collision (`patch_doorpresence_collision`). 
 - Replace `startswith("door")` with “has Mercury actor + weakness has `type`” (accept `Door036 (PW-PW)` etc., matching RDV export).  
 - Keep skipping docks without patchable actors.
 
-**Phase 4 — Extended types (optional)**  
+**Phase 4 — Closed / intentional dead doors (optional)**  
 
-- Add RDV `change_to` blast types once Phase 2 is stable and ODR custom shields are confirmed in the AP patch pipeline.  
+- Access Permanently Closed once AP has intentional dead-door / resolver rules.  
 - Never add Sensor / Phase Shift / thermal / powered.
 
 ### 4.3 AP files to change
@@ -341,15 +342,17 @@ ODR specially widens `doorpresence` collision (`patch_doorpresence_collision`). 
 
 ---
 
-## 5. Status — light Individual Doors assigner (AP)
+## 5. Status — Individual Doors assigner (AP)
 
 Shipped:
 
-- **Options / client UI hotfix:** `ChangeDoorsTo.valid_keys` and client
-  `CHANGE_DOORS_TO_KEYS` are basic ODR-safe types only (no Sensor / Phase /
-  blast). `DoorsToChange` keeps RDV `change_from` (Sensor may convert away).
+- **Options / client UI:** `ChangeDoorsTo.valid_keys` and client
+  `CHANGE_DOORS_TO_KEYS` are Phase-2 ODR-addable types (beams / missiles /
+  grapple / Bomb / Cross Bomb / Power Bomb / Ice / Storm / Diffusion). Never
+  Sensor / Phase / Closed. `DoorsToChange` keeps RDV `change_from` (Sensor may
+  convert away).
 - **`assignments_to_door_patches` + `ap_to_patcher`:** refuse / drop
-  `phantom_cloak` and `phase_shift`; patcher allowlists basic addable types;
+  `phantom_cloak` and `phase_shift`; patcher allowlists Phase-2 addable types;
   **drop non-patchable Mercury actors** (`doorshutter*`, `doorheat*`, …) so
   ODR never sees Phase Shift shutters.
 - **Collect / eligibility:** `physical_key_for_node` uses ODR `ActorData`
@@ -357,14 +360,14 @@ Shipped:
 - **Grapple incompat:** `incompatible_dock_weaknesses` honored in post-fill
   target filter (and exposed via `DoorRando.incompatible_weaknesses_for_key`).
 - **Data-driven pools:** `door_rando_db.py` loads `change_from` / `change_to` /
-  unlocked / locked / `to_shuffle_proportion` (0.6) / two-way from
-  `logic_database/header.json`.
-- **Light assigner (`DoorRandoAssigner`):** pre-fill unlock shuffled docks →
-  item fill → post-fill reach-gated locks using DreadLogic reach + sphere-style
-  inventory growth (same family as soften / start-frontier). Soften remains
-  emergency-only. Basic beam/missile/grapple pool only (no Phase 4 blast/closed).
+  unlocked / locked / `to_shuffle_proportion` / two-way from
+  `logic_database/header.json`; AP uses `reroute_shuffle_proportion` (~0.85).
+- **Assigner (`DoorRandoAssigner`):** dual mandate — fill-assist unlocks +
+  reroute set → item fill → post-fill weighted reach-gated locks (Power Beam
+  not a normal random outcome). Soften remains emergency-only. Shield budget
+  covers blast / Ice / Storm / Diffusion.
 
-This is **not** a full RDV resolver port; it deliberately stays light.
+This is **not** a full RDV resolver port; Closed remains deferred.
 
 ---
 
@@ -373,7 +376,9 @@ This is **not** a full RDV resolver port; it deliberately stays light.
 1. **Never emit `phantom_cloak` / Sensor as a patch target** (`DoorType.PRESENCE.can_be_added is False`).  
 2. **Never patch Phase Shift shutters / thermal actors** (`doorshutter*`, `doorheat*` — not in ODR `DoorType` actordefs; seals `door_actor_to_type` ValueError).  
 3. **Honor `incompatible_dock_weaknesses` (no Grapple on listed docks)** and `exclude_from_dock_rando`.  
-4. **Reach-gate hard locks (RDV post-fill)** before expanding beyond the basic beam/missile pool — random full-map blast/closed locks without a resolver will softlock or force brittle soften hacks.
+4. **Reach-gate hard locks (RDV post-fill)** — blast / Ice / Storm / Diffusion
+   are in the Phase-2 pool and must stay reach-gated. Closed remains deferred
+   until intentional dead-door rules exist.
 
 ---
 

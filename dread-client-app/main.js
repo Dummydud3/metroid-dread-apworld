@@ -234,6 +234,8 @@ function pythonSpawnEnv(extra = {}) {
   return {
     ...process.env,
     PYTHONUNBUFFERED: "1",
+    PYTHONIOENCODING: "utf-8",
+    PYTHONUTF8: "1",
     SKIP_REQUIREMENTS_UPDATE: "1",
     DREAD_HUB_AP_ROOT: AP_ROOT,
     DREAD_HUB_INSTALL_ROOT: INSTALL_ROOT,
@@ -777,8 +779,13 @@ function trackerPayloadFromStatus(st) {
     missing_locations: 0,
     slot: "",
     scenario: "",
+    tracker_item_pool: null,
   };
   if (!st || typeof st !== "object") return base;
+  const pool =
+    st.tracker_item_pool && typeof st.tracker_item_pool === "object"
+      ? st.tracker_item_pool
+      : null;
   return {
     ...base,
     ...st,
@@ -793,6 +800,7 @@ function trackerPayloadFromStatus(st) {
     in_logic_count: Array.isArray(st.in_logic_location_ids)
       ? st.in_logic_location_ids.length
       : Number(st.in_logic_count) || 0,
+    tracker_item_pool: pool,
   };
 }
 
@@ -1911,11 +1919,17 @@ function defaultYamlConfig() {
         "Wide Beam Door",
       ],
       change_doors_to: [
+        "Bomb Door",
         "Charge Beam Door",
+        "Cross Bomb Door",
+        "Diffusion Beam Door",
         "Grapple Beam Door",
+        "Ice Missile Door",
         "Missile Door",
         "Plasma Beam Door",
         "Power Beam Door",
+        "Power Bomb Door",
+        "Storm Missile Door",
         "Super Missile Door",
         "Wave Beam Door",
         "Wide Beam Door",
@@ -1924,6 +1938,7 @@ function defaultYamlConfig() {
       include_boss_pickups: true,
       start_with_pulse_radar: true,
       starting_location: "default",
+      starting_kit_items: 0,
       early_morph_ball: false,
       progressive_beams: true,
       progressive_charge: true,
@@ -2489,4 +2504,685 @@ ipcMain.handle("pick-yaml-open", async () => {
   });
   if (result.canceled || !result.filePaths.length) return null;
   return result.filePaths[0];
+});
+
+const YAML_SPHERE0_CATALOGUE = path.join(
+  WORLD_DIR,
+  "logic_database",
+  "start_sphere0_catalogue.json"
+);
+const YAML_PROBE_SCRIPT = path.join(WORLD_DIR, "start_sphere0_probe.py");
+const TRICK_OPTION_KEYS = [
+  "knowledge_tricks",
+  "movement_tricks",
+  "combat_tricks",
+  "slide_jump",
+  "wall_jump_tricks",
+  "infinite_bomb_jump",
+  "water_bomb_jump",
+  "water_space_jump",
+  "single_wall_wall_jump",
+  "diagonal_bomb_jump",
+  "cross_bomb_launch",
+  "grapple_movement",
+  "speedbooster_conservation",
+  "short_boost",
+  "flash_shift_skip",
+  "heat_cold_runs",
+  "climb_sloped_tunnels",
+  "climb_sloped_surfaces",
+  "floor_clip",
+  "damage_boost",
+  "pseudo_wave",
+  "diffusion_abuse",
+  "stand_on_frozen_enemy",
+  "cross_bomb_skip",
+  "ledge_warp",
+];
+
+function yamlProbeAllTricksDisabled(tricks) {
+  if (!tricks || typeof tricks !== "object") return true;
+  return TRICK_OPTION_KEYS.every((k) => Number(tricks[k] || 0) === 0);
+}
+
+function yamlProbeDoorsOff(opts) {
+  const doors = String(opts.door_lock_rando || "vanilla").toLowerCase();
+  const transport = String(opts.transport_rando || "off").toLowerCase();
+  const doorsOff = ["vanilla", "off", "0"].includes(doors);
+  const transportOff = ["off", "0", "vanilla"].includes(transport);
+  return doorsOff && transportOff;
+}
+
+function formatTrickAlt(entries) {
+  if (!Array.isArray(entries) || !entries.length) return "";
+  return entries
+    .map((e) => {
+      const name = (e && (e.display || e.key)) || "?";
+      const lvl = (e && (e.level_name || e.level)) || "?";
+      return `${name} at ${lvl}+`;
+    })
+    .join(", ");
+}
+
+/** Keep in sync with worlds/metroid_bread/yaml_option_conflicts.py */
+function yamlEffectiveEnergyTanks(opts) {
+  const tanks = Math.max(0, Number(opts.energy_tanks) || 0);
+  const parts = Math.max(0, Number(opts.energy_parts) || 0);
+  const immediate = opts.immediate_energy_parts !== false && Number(opts.immediate_energy_parts) !== 0;
+  return immediate ? tanks + parts : tanks + Math.floor(parts / 4);
+}
+
+/** Same peak-HP formula as MetroidBreadWorld._max_obtainable_energy */
+function yamlMaxObtainableEnergy(opts) {
+  const ept = Math.max(1, Number(opts.energy_per_tank != null ? opts.energy_per_tank : 100) || 100);
+  const tanks = Math.max(0, Number(opts.energy_tanks != null ? opts.energy_tanks : 8) || 0);
+  const parts = Math.max(0, Number(opts.energy_parts != null ? opts.energy_parts : 16) || 0);
+  return Math.floor(ept - 1 + tanks * ept + parts * (ept / 4));
+}
+
+/** Raven Beak / Gold Chozo-style Damage gate still required at this Combat level */
+function yamlCombatBossEnergyNeed(combat) {
+  if (combat <= 0) return 799;
+  if (combat === 1) return 549;
+  if (combat === 2) return 299;
+  return 0;
+}
+
+function yamlOptionConflicts(opts) {
+  const tricks = opts.tricks || {};
+  const combat =
+    tricks.combat_tricks != null
+      ? Number(tricks.combat_tricks) || 0
+      : opts.combat_tricks != null
+        ? Number(opts.combat_tricks) || 0
+        : 1;
+  const heatCold =
+    tricks.heat_cold_runs != null
+      ? Number(tricks.heat_cold_runs) || 0
+      : Number(opts.heat_cold_runs) || 0;
+  const tanks = Math.max(0, Number(opts.energy_tanks != null ? opts.energy_tanks : 8) || 0);
+  const parts = Math.max(0, Number(opts.energy_parts != null ? opts.energy_parts : 16) || 0);
+  const ept = Math.max(0, Number(opts.energy_per_tank != null ? opts.energy_per_tank : 100) || 0);
+  const missiles = Math.max(
+    0,
+    Number(opts.starting_missiles != null ? opts.starting_missiles : 15) || 0
+  );
+  const values = {
+    energy_tanks: tanks,
+    energy_parts: parts,
+    energy_per_tank: ept,
+    immediate_energy_parts:
+      opts.immediate_energy_parts === false || Number(opts.immediate_energy_parts) === 0
+        ? 0
+        : 1,
+  };
+  const effective = yamlEffectiveEnergyTanks(values);
+  const maxEnergy = yamlMaxObtainableEnergy(values);
+  const energyNeed = yamlCombatBossEnergyNeed(combat);
+  const out = [];
+
+  if (energyNeed > 0 && maxEnergy < energyNeed) {
+    const combatLabel =
+      combat <= 0 ? "Disabled" : combat === 1 ? "Beginner" : "Intermediate";
+    const genNote =
+      combat <= 0
+        ? " Generation may raise Energy Per Tank or force Combat Beginner."
+        : "";
+    out.push({
+      id: "energy_pool_below_combat_gate",
+      severity: "warning",
+      title: "Energy pool too low for Combat setting",
+      message:
+        `Max energy from the pool is ~${maxEnergy}, but Combat ${combatLabel} still expects ` +
+        `>=${energyNeed} for hard boss Damage gates (e.g. Raven Beak / Gold Chozo).${genNote}`,
+      fix: "Raise Energy Tanks/Parts or Energy Per Tank, or raise Combat.",
+      fields: ["combat_tricks", "energy_tanks", "energy_parts", "energy_per_tank"],
+    });
+  }
+
+  if (combat === 0 && effective < 4) {
+    out.push({
+      id: "combat_energy_starved",
+      severity: "warning",
+      title: "Combat Disabled with low energy pool",
+      message:
+        `Combat is Disabled while the energy pool is thin (~${effective} tank-equivalent(s)). ` +
+        "Early bosses may need Energy in logic without Combat Beginner skips.",
+      fix: "Set Combat to Beginner (default), or raise Energy Tanks/Parts.",
+      fields: ["combat_tricks", "energy_tanks", "energy_parts"],
+    });
+  }
+  if (combat <= 1 && tanks === 0 && parts === 0) {
+    out.push({
+      id: "combat_energy_empty",
+      severity: "warning",
+      title: "No energy in the item pool",
+      message:
+        "Energy Tanks and Energy Parts are both 0 while Combat is Disabled or Beginner - " +
+        "bosses/heat have no energy upgrades.",
+      fix: "Add Energy Tanks/Parts, or raise Combat above Beginner.",
+      fields: ["combat_tricks", "energy_tanks", "energy_parts"],
+    });
+  }
+  if (combat <= 1 && ept < 50) {
+    out.push({
+      id: "energy_per_tank_low",
+      severity: "warning",
+      title: "Low Energy Per Tank with low Combat",
+      message:
+        `Energy Per Tank is ${ept} while Combat is Disabled/Beginner - ` +
+        "boss and heat/cold checks stay painful.",
+      fix: "Raise Energy Per Tank (default 100) or raise Combat.",
+      fields: ["combat_tricks", "energy_per_tank"],
+    });
+  }
+  if (missiles === 0) {
+    out.push({
+      id: "starting_missiles_zero",
+      severity: "warning",
+      title: "Starting Missiles is 0",
+      message:
+        "Starting Missiles is 0 - early missile doors and combat have no ammo until tanks are found.",
+      fix: "Set Starting Missiles to at least 15 (default) unless intentional.",
+      fields: ["starting_missiles"],
+    });
+  }
+  if (heatCold >= 2 && effective < 4) {
+    out.push({
+      id: "heat_cold_energy",
+      severity: "warning",
+      title: "Heat/Cold Runs with low energy pool",
+      message:
+        `Heat/Cold Runs is Intermediate+ while the energy pool is thin (~${effective} tank-equivalent(s)).`,
+      fix: "Raise Energy Tanks/Parts, or lower Heat/Cold Runs.",
+      fields: ["heat_cold_runs", "energy_tanks", "energy_parts"],
+    });
+  }
+  const heatDps = Math.max(
+    0,
+    Number(opts.constant_heat_damage != null ? opts.constant_heat_damage : 20) || 0
+  );
+  const coldDps = Math.max(
+    0,
+    Number(opts.constant_cold_damage != null ? opts.constant_cold_damage : 20) || 0
+  );
+  if (heatCold >= 1 && effective < 4 && (heatDps > 20 || coldDps > 20)) {
+    const hot = [];
+    if (heatDps > 20) hot.push(`heat ${heatDps}`);
+    if (coldDps > 20) hot.push(`cold ${coldDps}`);
+    out.push({
+      id: "heat_cold_dps_energy",
+      severity: "warning",
+      title: "High env DPS with Heat/Cold Runs and thin energy",
+      message:
+        `Heat/Cold Runs is on with constant ${hot.join(" / ")} DPS (>20) and a thin energy pool ` +
+        `(~${effective} tank-equivalent(s)).`,
+      fix:
+        "Lower Constant Heat/Cold DPS to <=20, raise Energy Tanks/Parts, or disable Heat/Cold Runs.",
+      fields: [
+        "heat_cold_runs",
+        "constant_heat_damage",
+        "constant_cold_damage",
+        "energy_tanks",
+        "energy_parts",
+      ],
+    });
+  }
+  const damageBoost =
+    tricks.damage_boost != null
+      ? Number(tricks.damage_boost) || 0
+      : Number(opts.damage_boost) || 0;
+  if (damageBoost >= 2 && effective < 4) {
+    out.push({
+      id: "damage_boost_energy",
+      severity: "warning",
+      title: "Damage Boost with low energy pool",
+      message:
+        `Damage Boost is Intermediate+ while the energy pool is thin (~${effective} tank-equivalent(s)) ` +
+        "- knockback routes spend health.",
+      fix: "Raise Energy Tanks/Parts, or lower Damage Boost.",
+      fields: ["damage_boost", "energy_tanks", "energy_parts"],
+    });
+  }
+  const immediateOn =
+    opts.immediate_energy_parts !== false && Number(opts.immediate_energy_parts) !== 0;
+  if (!immediateOn && parts < 4) {
+    out.push({
+      id: "immediate_parts_off_low",
+      severity: "warning",
+      title: "Immediate Energy Parts off with few parts",
+      message:
+        `Immediate Energy Parts is off and Energy Parts is ${parts} ` +
+        "(need 4 fragments for one tank-equivalent).",
+      fix: "Enable Immediate Energy Parts, or set Energy Parts to at least 4.",
+      fields: ["immediate_energy_parts", "energy_parts"],
+    });
+  }
+
+  const access = String(opts.accessibility || "items").trim().toLowerCase();
+  if (access === "minimal") {
+    out.push({
+      id: "accessibility_minimal_upgrade",
+      severity: "warning",
+      title: "Accessibility Minimal upgrades to Items",
+      message:
+        "Accessibility Minimal is upgraded to Items during generation " +
+        "(Metroid Bread victory clearance).",
+      fix: "Set Accessibility to Items (same effective result) or Full.",
+      fields: ["accessibility"],
+    });
+  }
+
+  return out;
+}
+
+function mergeYamlConflicts(result, conflicts) {
+  if (!result || typeof result !== "object") return result;
+  const out = { ...result, conflicts: Array.isArray(conflicts) ? conflicts : [] };
+  if (!out.conflicts.length) return out;
+  const sev = String(out.severity || "ok");
+  const hasError = out.conflicts.some((c) => String(c.severity || "") === "error");
+  const bullets = out.conflicts.map((c) => `* ${c.message}`).join(" ");
+  const base = String(out.message || "");
+  const err = out.conflicts.find((c) => String(c.severity || "") === "error");
+  if (hasError) {
+    out.severity = "error";
+    out.title = (err && err.title) || out.conflicts[0].title || "Option conflicts";
+    out.message =
+      sev === "ok"
+        ? `${base} ${bullets}`.trim()
+        : `${base} Also: ${out.conflicts.map((c) => c.title).join("; ")}.`.trim();
+    if (!out.fix) out.fix = (err && err.fix) || out.conflicts[0].fix || "";
+  } else if (sev === "ok") {
+    out.severity = "warning";
+    out.title = "Option conflicts";
+    out.message = `${base} ${bullets}`.trim();
+    if (!out.fix) out.fix = out.conflicts[0].fix || "";
+  } else {
+    const summary = out.conflicts.map((c) => c.title).join("; ");
+    out.message = `${base} Also: ${summary}.`.trim();
+  }
+  return out;
+}
+
+function evaluateFromCatalogue(opts) {
+  if (!fs.existsSync(YAML_SPHERE0_CATALOGUE)) return null;
+  let catalog;
+  try {
+    catalog = readJsonFile(YAML_SPHERE0_CATALOGUE);
+  } catch (_) {
+    return null;
+  }
+  const starts = Array.isArray(catalog.starts) ? catalog.starts : [];
+  const budget = Math.max(0, Math.min(5, Number(opts.starting_kit_items) || 0));
+  const key = String(opts.starting_location || "default");
+
+  const byKey = (k) => {
+    if (k === "default" || k === "artaria_intro_room_start_point") {
+      return starts.find((s) => s.is_default) || starts[0];
+    }
+    return starts.find((s) => s.option_key === k);
+  };
+
+  const severityFor = (row) => {
+    if (!row) {
+      return {
+        ok: false,
+        severity: "error",
+        title: "Unknown starting location",
+        message: `No catalogue entry for ${key}.`,
+        fix: "Pick Default or a listed save station.",
+        fix_alt: "",
+        starting_kit_items: budget,
+        starting_location: key,
+      };
+    }
+    const trickAlt = row.trick_alt || null;
+    // Catalogue trick_alt opens with Starting Items=0. Still a valid alternative
+    // when budget is under min_kit_size (raise items OR enable those tricks).
+    const fixAlt =
+      budget === 0 || budget < (row.min_kit_size || 0)
+        ? formatTrickAlt(trickAlt)
+        : "";
+    if (!row.meets_min_checks) {
+      return {
+        ok: true,
+        severity: "error",
+        title: "Starting location can't open sphere 0",
+        message:
+          `${row.path} still has only ${row.checks_with_kit} check(s) even with a max Start Kit ` +
+          `(need ${catalog.min_start_checks || 2}).`,
+        fix: "Pick Default (Artaria Intro) or another open save.",
+        fix_alt: fixAlt,
+        trick_alt: trickAlt,
+        selected: row,
+        starting_kit_items: budget,
+        starting_location: key,
+      };
+    }
+    if (budget < row.min_kit_size) {
+      const items = (row.kit || []).join(", ") || "(none)";
+      return {
+        ok: true,
+        severity: "error",
+        title: "Starting Items too low",
+        message:
+          `${row.path} needs ${row.min_kit_size} Starting Item(s) (${items}); ` +
+          `Starting Items is ${budget}.`,
+        fix: `Set Starting Items to at least ${row.min_kit_size}, or choose Default (Artaria Intro).`,
+        fix_alt: fixAlt,
+        trick_alt: trickAlt,
+        selected: row,
+        starting_kit_items: budget,
+        starting_location: key,
+      };
+    }
+    const note =
+      row.min_kit_size === 0
+        ? `${row.path} opens with ${row.empty_checks} sphere-0 check(s) on empty inventory.`
+        : `${row.path} needs kit [${(row.kit || []).join(", ")}]; budget ${budget} is enough.`;
+    return {
+      ok: true,
+      severity: "ok",
+      title: "YAML looks good",
+      message: `Likely to generate successfully. ${note}`,
+      fix: "",
+      fix_alt: "",
+      selected: row,
+      starting_kit_items: budget,
+      starting_location: key,
+    };
+  };
+
+  if (key === "random_save_station") {
+    const under = starts.filter((s) => s.meets_min_checks && budget < s.min_kit_size);
+    const hard = starts.filter((s) => !s.meets_min_checks);
+    const okRows = starts.filter((s) => s.meets_min_checks && budget >= s.min_kit_size);
+    if (!okRows.length) {
+      const sample = under[0] || hard[0];
+      return {
+        ok: true,
+        severity: "error",
+        title: "Starting Items too low for every viable start",
+        message: `${under.length + hard.length}/${starts.length} starts need more than Starting Items=${budget}.`,
+        fix: "Raise Starting Items or choose Default.",
+        fix_alt: sample ? formatTrickAlt(sample.trick_alt) : "",
+        trick_alt: sample ? sample.trick_alt : null,
+        starts,
+        starting_kit_items: budget,
+        starting_location: key,
+      };
+    }
+    if (under.length) {
+      const examples = under.slice(0, 3).map((s) => s.path).join(", ");
+      const need = Math.max(...under.map((s) => s.min_kit_size));
+      const sample = under[0];
+      const sampleAlt = formatTrickAlt(sample && sample.trick_alt);
+      return {
+        ok: true,
+        severity: "warning",
+        title: "Some random starts need more Starting Items",
+        message:
+          `${under.length} of ${starts.length} starts need more than Starting Items=${budget} ` +
+          `(e.g. ${examples}). Random may still pick a viable start.`,
+        fix: `Raise Starting Items to ${need} to cover more of the pool, or keep Default.`,
+        fix_alt: sampleAlt
+          ? `e.g. for ${sample.path}: ${sampleAlt}`
+          : "",
+        trick_alt: sample ? sample.trick_alt : null,
+        starts,
+        starting_kit_items: budget,
+        starting_location: key,
+      };
+    }
+    return {
+      ok: true,
+      severity: "ok",
+      title: "YAML looks good",
+      message:
+        `Likely to generate successfully. Random pool: ${okRows.length}/${starts.length} ` +
+        `starts open with Starting Items=${budget}.`,
+      fix: "",
+      fix_alt: "",
+      starts,
+      starting_kit_items: budget,
+      starting_location: key,
+    };
+  }
+
+  return severityFor(byKey(key));
+}
+
+/** In-flight YAML sphere-0 Python probe (async so the Hub UI stays responsive). */
+let yamlProbeChild = null;
+let yamlProbeToken = 0;
+
+function killYamlProbeProcess() {
+  const child = yamlProbeChild;
+  yamlProbeChild = null;
+  if (!child || child.killed) return;
+  try {
+    if (process.platform === "win32" && child.pid) {
+      spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
+    } else {
+      child.kill("SIGKILL");
+    }
+  } catch (_) {
+    try {
+      child.kill();
+    } catch (__) {
+      /* ignore */
+    }
+  }
+}
+
+function runYamlProbeProcess(payload) {
+  const launcher = findPythonLauncher();
+  if (!launcher) {
+    return Promise.resolve({
+      ok: false,
+      severity: "error",
+      title: "Python missing",
+      message: pythonMissingError(),
+      fix: "Install Python 3.11–3.13 for the Hub client.",
+      fix_alt: "",
+    });
+  }
+  if (!fs.existsSync(YAML_PROBE_SCRIPT)) {
+    return Promise.resolve({
+      ok: false,
+      severity: "error",
+      title: "Probe script missing",
+      message: `Not found: ${YAML_PROBE_SCRIPT}`,
+      fix: "Reinstall / update the Metroid Bread Hub package.",
+      fix_alt: "",
+    });
+  }
+
+  const token = ++yamlProbeToken;
+  killYamlProbeProcess();
+
+  const launchPy = findPythonLauncher() || launcher;
+  // -P / PYTHONSAFEPATH: do not prepend the script directory to sys.path.
+  // Otherwise world Options.py shadows ap_core Options (circular ImportError).
+  const args = [...(launchPy.prefixArgs || []), "-P", YAML_PROBE_SCRIPT];
+
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(launchPy.cmd, args, {
+        cwd: INSTALL_ROOT,
+        env: pythonSpawnEnv({ PYTHONSAFEPATH: "1" }),
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (err) {
+      resolve({
+        ok: false,
+        severity: "error",
+        title: "Probe failed to start",
+        message: String(err.message || err),
+        fix: "Check Hub Python / venv, then retry.",
+        fix_alt: "",
+      });
+      return;
+    }
+
+    yamlProbeChild = child;
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (yamlProbeChild === child) yamlProbeChild = null;
+      resolve(result);
+    };
+
+    const cancelledResult = () => ({
+      cancelled: true,
+      ok: false,
+      severity: "probing",
+      title: "",
+      message: "",
+      fix: "",
+      fix_alt: "",
+    });
+
+    const timer = setTimeout(() => {
+      if (token !== yamlProbeToken) {
+        finish(cancelledResult());
+        return;
+      }
+      killYamlProbeProcess();
+      finish({
+        ok: false,
+        severity: "error",
+        title: "Probe timed out",
+        message: "Sphere-0 probe exceeded 120s.",
+        fix: "Simplify YAML options or retry.",
+        fix_alt: "",
+      });
+    }, 120000);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (err) => {
+      if (token !== yamlProbeToken) {
+        finish(cancelledResult());
+        return;
+      }
+      finish({
+        ok: false,
+        severity: "error",
+        title: "Probe failed to start",
+        message: String(err.message || err),
+        fix: "Check Hub Python / venv, then retry.",
+        fix_alt: "",
+      });
+    });
+    child.on("close", () => {
+      if (token !== yamlProbeToken) {
+        finish(cancelledResult());
+        return;
+      }
+      const out = String(stdout || "").trim();
+      const errText = String(stderr || "").trim();
+      if (!out) {
+        finish({
+          ok: false,
+          severity: "error",
+          title: "Probe returned no data",
+          message: errText || "empty stdout",
+          fix:
+            "Restart Hub after updating Metroid Bread. If this persists, check that ap_core is next to the world (Options circular import) and logic_database is present.",
+          fix_alt: "",
+        });
+        return;
+      }
+      try {
+        // Prefer last non-empty line that parses as a JSON object (ignore banners).
+        const lines = out.split(/\r?\n/).filter(Boolean);
+        let parsed = null;
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const line = lines[i].trim();
+          if (!line.startsWith("{")) continue;
+          try {
+            parsed = JSON.parse(line);
+            break;
+          } catch (_) {
+            /* try earlier line */
+          }
+        }
+        if (!parsed) {
+          parsed = JSON.parse(lines[lines.length - 1]);
+        }
+        parsed.source = "probe";
+        finish(parsed);
+      } catch (err) {
+        finish({
+          ok: false,
+          severity: "error",
+          title: "Probe JSON parse failed",
+          message: `${err.message}\n${out.slice(0, 400)}`,
+          fix: "Update Hub / apworld and retry.",
+          fix_alt: "",
+        });
+      }
+    });
+
+    try {
+      child.stdin.write(JSON.stringify(payload));
+      child.stdin.end();
+    } catch (err) {
+      killYamlProbeProcess();
+      if (token !== yamlProbeToken) {
+        finish(cancelledResult());
+        return;
+      }
+      finish({
+        ok: false,
+        severity: "error",
+        title: "Probe failed to start",
+        message: String(err.message || err),
+        fix: "Check Hub Python / venv, then retry.",
+        fix_alt: "",
+      });
+    }
+  });
+}
+
+ipcMain.handle("probe-yaml-start-sphere0", async (_e, opts) => {
+  const payload = opts && typeof opts === "object" ? opts : {};
+  const tricks = payload.tricks || {};
+  const doorsOff = yamlProbeDoorsOff(payload);
+  const tricksOff = yamlProbeAllTricksDisabled(tricks);
+  const access = String(payload.accessibility || "items").trim().toLowerCase();
+  // Full accessibility needs a live reachability check (uncleared pickups/events).
+  const needsLive = access === "full";
+
+  if (doorsOff && tricksOff && !needsLive) {
+    const cached = evaluateFromCatalogue(payload);
+    if (cached) {
+      cached.source = "catalogue";
+      cached.doors_unvalidated = false;
+      // Cancel any leftover live probe from a prior tricks-on edit.
+      yamlProbeToken += 1;
+      killYamlProbeProcess();
+      return mergeYamlConflicts(cached, yamlOptionConflicts(payload));
+    }
+  }
+
+  return runYamlProbeProcess(payload);
 });

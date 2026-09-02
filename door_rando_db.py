@@ -1,9 +1,9 @@
 """Dock-rando pools and config loaded from logic_database/header.json.
 
 Source of truth for RDV Individual Doors parameters (change_from / change_to /
-unlocked / locked / to_shuffle_proportion / force_change_two_way). AP still
-intersects change_to with the basic ODR-safe beam/missile/grapple pool until
-Phase 4.
+unlocked / locked / to_shuffle_proportion / force_change_two_way). AP intersects
+``change_to`` with ODR-addable types (Phase 2: beams / missiles / grapple /
+blast / Ice / Storm / Diffusion). Access Permanently Closed is deferred.
 
 Reads header.json via ``logic_parser.read_database_bytes`` so this works from a
 loose ``worlds/metroid_bread`` folder *and* from ``metroid_bread.apworld``
@@ -23,7 +23,9 @@ from .logic_parser import read_database_bytes
 # Filesystem fallback for standalone tooling; zip-safe path uses pkgutil.
 _LOGIC_DB = Path(__file__).resolve().parent / "logic_database"
 
-# ODR-safe basic targets (Phase 2). Blast / closed stay out until Phase 4.
+# ODR door_type strings AP may emit as Individual Doors targets (Phase 2).
+# Includes blast / Ice / Storm / Diffusion. Excludes closed (deferred) and
+# anything with can_be_added=False (see ODR_CANNOT_ADD_DOOR_TYPES).
 BASIC_ODR_DOOR_TYPES: FrozenSet[str] = frozenset({
     "power_beam",
     "charge_beam",
@@ -33,12 +35,26 @@ BASIC_ODR_DOOR_TYPES: FrozenSet[str] = frozenset({
     "plasma_beam",
     "missile",
     "super_missile",
+    "ice_missile",
+    "storm_missile",
+    "diffusion_beam",
+    "bomb",
+    "cross_bomb",
+    "power_bomb",
 })
+
+# Alias used by callers that want the Phase-2 expanded name.
+EXPANDED_ODR_DOOR_TYPES: FrozenSet[str] = BASIC_ODR_DOOR_TYPES
 
 # Never emit as patch targets (ODR can_be_added=False or not a DoorType).
 ODR_CANNOT_ADD_DOOR_TYPES: FrozenSet[str] = frozenset({
     "phantom_cloak",
     "phase_shift",
+})
+
+# Intentionally not in the AP target pool (ODR can add; AP has no dead-door resolver).
+DEFERRED_CHANGE_TO_DOOR_TYPES: FrozenSet[str] = frozenset({
+    "closed",
 })
 
 # Mercury actordef bases ODR ``DoorType`` / ``ActorData`` can identify as doors.
@@ -198,12 +214,14 @@ def header_change_to() -> FrozenSet[str]:
 
 
 def basic_change_to_weaknesses() -> FrozenSet[str]:
-    """RDV change_to ∩ basic ODR types, excluding non-addable."""
+    """RDV change_to ∩ Phase-2 ODR-addable types (excl. Closed / Sensor)."""
     odr = weakness_odr_types()
     out = set()
     for name in header_change_to():
         dt = odr.get(name)
         if not dt or dt in ODR_CANNOT_ADD_DOOR_TYPES:
+            continue
+        if dt in DEFERRED_CHANGE_TO_DOOR_TYPES:
             continue
         if dt in BASIC_ODR_DOOR_TYPES:
             out.add(name)
@@ -211,7 +229,18 @@ def basic_change_to_weaknesses() -> FrozenSet[str]:
 
 
 def to_shuffle_proportion() -> float:
+    """Legacy header proportion (0.6). Prefer ``reroute_shuffle_proportion``."""
     return float(dock_rando_config()["to_shuffle_proportion"])
+
+
+def reroute_shuffle_proportion() -> float:
+    """
+    Fraction of non-assist eligible docks that enter the reroute (lock) set.
+
+    Phase 1 AP default is higher than RDV header 0.6 so more of the map
+    actually changes after post-fill.
+    """
+    return 0.85
 
 
 def force_change_two_way() -> bool:
@@ -223,5 +252,5 @@ def odr_type_for_weakness(weakness: str) -> Optional[str]:
 
 
 def patchable_door_types() -> FrozenSet[str]:
-    """ODR door_type strings allowed in door_patches (basic pool for now)."""
-    return BASIC_ODR_DOOR_TYPES
+    """ODR door_type strings allowed in door_patches (Phase-2 expanded pool)."""
+    return EXPANDED_ODR_DOOR_TYPES

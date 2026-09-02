@@ -606,8 +606,12 @@ def counts_from_inventory_amounts(
             continue
         ap_name, unit = rule
         unit = max(1, int(unit))
-        if item_id == "ITEM_MAX_LIFE":
-            # Base energy is 99; each Energy Tank adds 100.
+        if item_id == "ITEM_ENERGY_TANKS":
+            # One inventory unit per Energy Tank (IncreaseEnergy owns HP).
+            n = amount // unit
+        elif item_id == "ITEM_MAX_LIFE":
+            # Legacy: older grants wrote energy into ITEM_MAX_LIFE directly.
+            # Base energy is 99; each Energy Tank adds 100 (default ept).
             n = max(0, (amount - 99) // 100)
         elif item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN":
             # Chain stacks are not AP "Flash Shift Upgrade" pickup copies.
@@ -2697,6 +2701,9 @@ def inventory_grant_would_be_noop(
     stackable = {
         "ITEM_WEAPON_MISSILE_MAX",
         "ITEM_WEAPON_POWER_BOMB_MAX",
+        # Energy Tank (ODR): counter item; IncreaseEnergy bumps MAX_LIFE + live LIFE.
+        "ITEM_ENERGY_TANKS",
+        # Legacy / residual: older builds granted tanks as ITEM_MAX_LIFE directly.
         "ITEM_MAX_LIFE",
         "ITEM_LIFE_SHARDS",
         "ITEM_NONE",

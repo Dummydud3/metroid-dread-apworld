@@ -2264,8 +2264,19 @@ class MetroidBreadContext(CommonContext):
         self._map_icon_labels: Dict[str, str] = {}
         self._map_icon_labels_sig: Optional[tuple] = None
         self._map_icon_labels_task: Optional[asyncio.Task] = None
-        self._map_icon_labels_debounce_s = 0.35
+        # Trailing debounce for label/sprite/global EXEC. Keep this ≥ reachable
+        # debounce so LocationChecks + inventory + RoomUpdate coalesce into one
+        # storm instead of 3–4 overlapping pushes (Ryujinx LockMutex InvalidHandle).
+        self._map_icon_labels_debounce_s = 1.0
         self._map_icon_labels_force_pending = False
+        self._map_icon_labels_extra_delay_s = 0.0
+        # After a local in-world pickup, hold map EXEC until the grant Lua settles.
+        self._map_grant_settle_until = 0.0
+        # Serialize full label pushes; coalesce overlapping callers into one rerun.
+        self._map_icon_labels_pushing = False
+        self._map_icon_labels_rerun_pending = False
+        self._map_icon_labels_last_push_mono = 0.0
+        self._map_icon_labels_min_interval_s = 2.0
         # OdrText.SetLocalized soft-fails (reason=bank-not-ready) until the game
         # itself has populated its CLanguageManager BTXT dictionary. Neither the
         # Lua-side backoff retry nor this push's own sig-cache reliably keep
@@ -2290,6 +2301,10 @@ class MetroidBreadContext(CommonContext):
         self._test_hint_location_ids: set = set()
 
         self._lua_response_future: Optional[asyncio.Future] = None
+        # EXEC replies still in flight after wait_response timeouts. Discard that
+        # many successful EXEC payloads before completing the next waiter
+        # (otherwise MapIconBankStatus can poison GetApSeedId, etc.).
+        self._lua_stale_exec_responses: int = 0
         self._last_lua_error: Optional[BaseException] = None
         self.death_poll_task: Optional[asyncio.Task] = None
         self.keep_alive_task: Optional[asyncio.Task] = None
@@ -3233,7 +3248,9 @@ class MetroidBreadContext(CommonContext):
             # actually changed) instead of only when areas expand — otherwise
             # those in-logic transitions are silently dropped.
             if not force and sig == self._reachable_areas_sig:
-                self._schedule_map_icon_labels_push(force=bool(force))
+                # Areas unchanged — still refresh in-logic icon labels, but do
+                # not force (signature skip is a cheap no-op when nothing moved).
+                self._schedule_map_icon_labels_push(force=False)
                 return
             self._reachable_areas_sig = sig
             lua = reachable_map.format_apply_reachable_lua(areas)
@@ -3445,6 +3462,14 @@ class MetroidBreadContext(CommonContext):
         """Alias: variants map (base → variant key)."""
         return self._rebuild_map_icon_variants()
 
+    def _note_local_pickup_map_settle(self, seconds: float = 2.0) -> None:
+        """Hold map-icon EXEC until in-world grant Lua can finish (pickup softlock)."""
+        until = time.monotonic() + max(0.0, float(seconds))
+        self._map_grant_settle_until = max(
+            float(getattr(self, "_map_grant_settle_until", 0.0) or 0.0),
+            until,
+        )
+
     def _schedule_map_icon_labels_push(
         self, force: bool = False, *, extra_delay_s: float = 0.0
     ) -> None:
@@ -3453,6 +3478,10 @@ class MetroidBreadContext(CommonContext):
         extra_delay_s: added after the usual settle+debounce — use after a real
         VisitBounds paint so ProcessCommand reply + socket Send can drain before
         the label EXEC storm (Ryujinx LockMutex InvalidHandle after load).
+
+        Multiple callers (LocationChecks, RoomUpdate, inventory reachable, bank
+        watch) coalesce into one trailing task. Overlapping in-flight pushes
+        set a rerun flag instead of stacking EXEC storms.
         """
         if not self.map_icon_labels_enabled or not self.game_connected:
             return
@@ -3474,6 +3503,28 @@ class MetroidBreadContext(CommonContext):
                     if self._game_mode == "INGAME" and not self._in_transition():
                         break
                     await asyncio.sleep(0.25)
+                # Wait out local pickup grant EXEC before starting the map storm.
+                for _ in range(40):
+                    if not self.game_connected:
+                        return
+                    settle_until = float(
+                        getattr(self, "_map_grant_settle_until", 0.0) or 0.0
+                    )
+                    now = time.monotonic()
+                    if now >= settle_until:
+                        break
+                    await asyncio.sleep(min(0.25, settle_until - now))
+                # Pace full storms so back-to-back force schedules cannot
+                # immediately re-flood after a completed push.
+                min_gap = float(
+                    getattr(self, "_map_icon_labels_min_interval_s", 2.0) or 2.0
+                )
+                last = float(
+                    getattr(self, "_map_icon_labels_last_push_mono", 0.0) or 0.0
+                )
+                gap = min_gap - (time.monotonic() - last)
+                if gap > 0:
+                    await asyncio.sleep(gap)
                 extra = float(getattr(self, "_map_icon_labels_extra_delay_s", 0.0) or 0.0)
                 self._map_icon_labels_extra_delay_s = 0.0
                 await asyncio.sleep(self._map_icon_labels_debounce_s + extra)
@@ -3492,6 +3543,12 @@ class MetroidBreadContext(CommonContext):
         while the native GetLocalized hook stays disabled — see map_hooks/text_hooks)."""
         if not self.map_icon_labels_enabled or not self.game_connected:
             return
+        if getattr(self, "_map_icon_labels_pushing", False):
+            # Coalesce: one in-flight storm; rerun once after it finishes.
+            self._map_icon_labels_rerun_pending = True
+            if force:
+                self._map_icon_labels_force_pending = True
+            return
         if self._game_mode != "INGAME" or self._in_transition():
             logger.debug(
                 "Map icon labels deferred (mode=%s transition=%s)",
@@ -3499,65 +3556,77 @@ class MetroidBreadContext(CommonContext):
                 self._in_transition(),
             )
             return
+        self._map_icon_labels_pushing = True
         try:
-            variants, texts = self._rebuild_map_icon_states()
-            if not variants and not force:
-                return
-            sig = map_icon_labels.variants_signature(variants)
-            if not force and sig == self._map_icon_labels_sig:
-                return
-            if not variants:
+            try:
+                variants, texts = self._rebuild_map_icon_states()
+                if not variants and not force:
+                    return
+                sig = map_icon_labels.variants_signature(variants)
+                if not force and sig == self._map_icon_labels_sig:
+                    return
+                if not variants:
+                    self._map_icon_labels_sig = sig
+                    return
+                sample = next(iter(sorted(variants.items())), ("?", "?"))
+                revealed_n = sum(1 for v in variants.values() if "_R" in v)
+                in_logic_n = sum(
+                    1
+                    for v in variants.values()
+                    if v.endswith("_IL") or v.endswith("_R_IL")
+                )
+                buf = self._lua_buffer_size()
+                # Must include text: OdrMap.SetIconInspectorLabel only registers a
+                # GetLocalized redirect, and that native hook is currently disabled
+                # (crash-safety build) — a redirect-only push is visually a no-op.
+                # format_apply_map_icon_variants_chunks packs texts+variants together
+                # and keeps every chunk under buffer_size (more, smaller chunks than
+                # the old redirect-only push, never oversized).
+                chunks = map_icon_labels.format_apply_map_icon_variants_chunks(
+                    variants, texts=texts, buffer_size=buf
+                )
+                logger.debug(
+                    "Map icon labels: pushing %s variant(s) in %s chunk(s) "
+                    "(revealed~%s in_logic~%s e.g. %s→%s)",
+                    len(variants),
+                    len(chunks),
+                    revealed_n,
+                    in_logic_n,
+                    sample[0],
+                    sample[1],
+                )
+                for i, lua in enumerate(chunks):
+                    if len(lua) > buf:
+                        logger.warning(
+                            "Map icon label chunk %s/%s still oversized (%s > %s) — skipping",
+                            i + 1,
+                            len(chunks),
+                            len(lua),
+                            buf,
+                        )
+                        continue
+                    await self.run_lua_code(lua, wait_response=False)
+                    # Yield so the game can drain EXEC packets between chunks.
+                    await asyncio.sleep(0.08)
                 self._map_icon_labels_sig = sig
-                return
-            sample = next(iter(sorted(variants.items())), ("?", "?"))
-            revealed_n = sum(1 for v in variants.values() if "_R" in v)
-            in_logic_n = sum(
-                1 for v in variants.values() if v.endswith("_IL") or v.endswith("_R_IL")
-            )
-            buf = self._lua_buffer_size()
-            # Must include text: OdrMap.SetIconInspectorLabel only registers a
-            # GetLocalized redirect, and that native hook is currently disabled
-            # (crash-safety build) — a redirect-only push is visually a no-op.
-            # format_apply_map_icon_variants_chunks packs texts+variants together
-            # and keeps every chunk under buffer_size (more, smaller chunks than
-            # the old redirect-only push, never oversized).
-            chunks = map_icon_labels.format_apply_map_icon_variants_chunks(
-                variants, texts=texts, buffer_size=buf
-            )
-            logger.debug(
-                "Map icon labels: pushing %s variant(s) in %s chunk(s) "
-                "(revealed~%s in_logic~%s e.g. %s→%s)",
-                len(variants),
-                len(chunks),
-                revealed_n,
-                in_logic_n,
-                sample[0],
-                sample[1],
-            )
-            for i, lua in enumerate(chunks):
-                if len(lua) > buf:
-                    logger.warning(
-                        "Map icon label chunk %s/%s still oversized (%s > %s) — skipping",
-                        i + 1,
-                        len(chunks),
-                        len(lua),
-                        buf,
-                    )
-                    continue
-                await self.run_lua_code(lua, wait_response=False)
-                # Yield so the game can drain EXEC packets between chunks.
-                await asyncio.sleep(0.05)
-            self._map_icon_labels_sig = sig
-        except Exception as exc:
-            logger.warning("push_map_icon_labels: %s", exc)
-        try:
-            await self.push_map_icon_sprites(force=force)
-        except Exception as exc:
-            logger.warning("push_map_icon_sprites: %s", exc)
-        try:
-            await self.push_map_icon_globals(force=force)
-        except Exception as exc:
-            logger.warning("push_map_icon_globals: %s", exc)
+                self._map_icon_labels_last_push_mono = time.monotonic()
+            except Exception as exc:
+                logger.warning("push_map_icon_labels: %s", exc)
+            try:
+                await self.push_map_icon_sprites(force=force)
+            except Exception as exc:
+                logger.warning("push_map_icon_sprites: %s", exc)
+            try:
+                await self.push_map_icon_globals(force=force)
+            except Exception as exc:
+                logger.warning("push_map_icon_globals: %s", exc)
+        finally:
+            self._map_icon_labels_pushing = False
+            if getattr(self, "_map_icon_labels_rerun_pending", False):
+                self._map_icon_labels_rerun_pending = False
+                self._schedule_map_icon_labels_push(
+                    force=bool(getattr(self, "_map_icon_labels_force_pending", False))
+                )
 
     def _lua_buffer_size(self) -> int:
         """Remote-Lua EXEC packet limit; every chunk must fit inside one."""
@@ -3729,6 +3798,45 @@ class MetroidBreadContext(CommonContext):
             )
             asyncio.create_task(self.run_lua_code(lua, wait_response=False))
 
+    def _tracker_item_pool(self) -> Optional[Dict[str, int]]:
+        """Seed item types/counts for Hub Map Tracker icon filtering.
+
+        Prefer exact ``tracker_item_pool`` from slot_data / patch_extras (new seeds).
+        Older seeds: synthesize from progressive_* + tank/DNA/FS/SB option fields
+        when those are present; otherwise return None so the tracker shows all icons.
+        """
+        try:
+            from worlds.metroid_bread.tracker_item_pool import (
+                merge_option_sources,
+                normalize_tracker_item_pool,
+                synthesize_tracker_item_pool,
+            )
+        except Exception:
+            try:
+                from .tracker_item_pool import (
+                    merge_option_sources,
+                    normalize_tracker_item_pool,
+                    synthesize_tracker_item_pool,
+                )
+            except Exception:
+                return None
+
+        slot = self._slot_data if isinstance(self._slot_data, dict) else {}
+        extras = self._patch_extras if isinstance(self._patch_extras, dict) else {}
+        if not extras:
+            nested = slot.get("patch_extras")
+            extras = nested if isinstance(nested, dict) else {}
+
+        exact = normalize_tracker_item_pool(slot.get("tracker_item_pool"))
+        if exact is None:
+            exact = normalize_tracker_item_pool(extras.get("tracker_item_pool"))
+        if exact is not None:
+            return exact
+
+        sources = merge_option_sources(extras, slot)
+        # Prefer nested patch_extras option fields already merged above via extras.
+        return synthesize_tracker_item_pool(sources)
+
     def ui_status_payload(self) -> dict:
         # WebSocket alone is not "connected" for Hub — wait until slot auth completes.
         ap_connected = bool(
@@ -3755,7 +3863,7 @@ class MetroidBreadContext(CommonContext):
             game_name = self.game or ""
         if not game_name:
             game_name = self.game or ""
-        return {
+        payload = {
             "ap_connected": ap_connected,
             "game_connected": bool(self.game_connected),
             "slot": self.auth or "",
@@ -3791,6 +3899,10 @@ class MetroidBreadContext(CommonContext):
             "game_goal": int(getattr(self, "_slot_game_goal", 0) or 0),
             "game_beaten": bool(self._game_beaten_flag or self.finished_game),
         }
+        tracker_pool = self._tracker_item_pool() if self.electron_ui else None
+        if tracker_pool:
+            payload["tracker_item_pool"] = dict(tracker_pool)
+        return payload
 
     def emit_ui_status(self) -> None:
         try:
@@ -4724,6 +4836,13 @@ class MetroidBreadContext(CommonContext):
                 self._last_lua_error = exc
                 return None
             self._last_lua_error = None
+            if self._lua_stale_exec_responses > 0:
+                self._lua_stale_exec_responses -= 1
+                logger.debug(
+                    "Discarding stale Lua EXEC response (%s still pending)",
+                    self._lua_stale_exec_responses,
+                )
+                return data
             if self._lua_response_future and not self._lua_response_future.done():
                 self._lua_response_future.set_result(data)
             return data
@@ -4794,6 +4913,11 @@ class MetroidBreadContext(CommonContext):
                     return data
 
                 return await asyncio.wait_for(future, timeout=timeout)
+            except asyncio.TimeoutError:
+                if wait_response:
+                    # Late EXEC reply must not complete the *next* waiter's future.
+                    self._lua_stale_exec_responses += 1
+                raise
             finally:
                 if self._lua_response_future is future:
                     self._lua_response_future = None
@@ -4999,7 +5123,8 @@ class MetroidBreadContext(CommonContext):
                     waiting_since = None
                     next_stall_warning = 30.0
                     delay = 5.0
-                    await self.push_map_icon_labels(force=True)
+                    # Debounced — never inline a second full EXEC storm mid-pickup.
+                    self._schedule_map_icon_labels_push(force=True)
                 elif not ready:
                     self._map_icon_bank_ready = False
                     now = time.monotonic()
@@ -5082,6 +5207,15 @@ class MetroidBreadContext(CommonContext):
             raw = resp.decode("utf-8", errors="replace").strip()
         if raw.lower() in ("nil", "none", "null"):
             raw = ""
+        # Reject crossed Lua replies (e.g. MapIconBankStatus → "0.1.17-…|true|ok").
+        try:
+            from ap_to_patcher import normalize_ap_seed_id
+
+            raw = normalize_ap_seed_id(raw)
+        except Exception:
+            if "|" in raw or "label-flag" in raw:
+                logger.debug("Ignoring non-seed Lua payload for Init.sApSeedId: %r", raw)
+                raw = ""
         self.game_ap_seed_id = raw
         return raw
 
@@ -5101,15 +5235,17 @@ class MetroidBreadContext(CommonContext):
         if not str(ap_seed).strip():
             return False
 
-        game_seed = self.game_ap_seed_id
-        if not game_seed:
-            game_seed = await self._refresh_game_ap_seed_id()
+        # Always re-read: a poisoned cache (stale EXEC reply) caused false mismatches.
+        game_seed = await self._refresh_game_ap_seed_id()
 
         try:
             from ap_to_patcher import normalize_ap_seed_id, seeds_match
         except Exception:
             def normalize_ap_seed_id(value: Optional[str]) -> str:
-                return (value or "").strip()
+                text = (value or "").strip()
+                if not text or "|" in text:
+                    return ""
+                return text
 
             def seeds_match(client_seed: Optional[str], game_seed: Optional[str]) -> bool:
                 a = normalize_ap_seed_id(client_seed)
@@ -5493,6 +5629,7 @@ class MetroidBreadContext(CommonContext):
         self.current_scenario = None
         self.game_ap_seed_id = ""
         self._seed_mismatch_triggered = False
+        self._lua_stale_exec_responses = 0
 
         if self.death_poll_task:
             self.death_poll_task.cancel()
@@ -5501,6 +5638,14 @@ class MetroidBreadContext(CommonContext):
             self._map_icon_bank_watch_task.cancel()
             self._map_icon_bank_watch_task = None
         self._map_icon_bank_ready = False
+        self._map_icon_labels_pushing = False
+        self._map_icon_labels_rerun_pending = False
+        self._map_icon_labels_force_pending = False
+        self._map_icon_labels_extra_delay_s = 0.0
+        self._map_grant_settle_until = 0.0
+        if self._map_icon_labels_task and not self._map_icon_labels_task.done():
+            self._map_icon_labels_task.cancel()
+        self._map_icon_labels_task = None
         if self.keep_alive_task:
             self.keep_alive_task.cancel()
             self.keep_alive_task = None
@@ -5649,9 +5794,12 @@ class MetroidBreadContext(CommonContext):
         if not pending:
             # May have been waiting on this sync before granting remote / catch-up items.
             await self.send_items_to_game()
-            # Still sync collected labels for already-checked bits (reconnect / catch-up).
-            # Force: early connect apply often soft-fails before the language bank is ready.
-            self._schedule_map_icon_labels_push(force=True)
+            # Do NOT force a full label EXEC storm on every empty locations: poll —
+            # that was stacking 3–4 pushes per pickup and aborting Ryujinx
+            # (LockMutex InvalidHandle). Only catch up when we have never applied
+            # labels this session (reconnect) and the language bank is ready.
+            if self._map_icon_labels_sig is None and self._map_icon_bank_ready:
+                self._schedule_map_icon_labels_push(force=True)
             self._schedule_all_bosses_itorash_gate()
             return
 
@@ -5695,8 +5843,10 @@ class MetroidBreadContext(CommonContext):
                 "(not connected yet or missing_locations mismatch?)",
                 len(pending),
             )
-        # Fire-and-forget labels; never serialize behind item grants.
-        self._schedule_map_icon_labels_push(force=True)
+        # Hold map EXEC until in-world grant Lua finishes, then one coalesced push
+        # (LocationChecks + RoomUpdate + inventory reachable all share this schedule).
+        self._note_local_pickup_map_settle(2.0)
+        self._schedule_map_icon_labels_push(force=True, extra_delay_s=1.5)
         self._schedule_all_bosses_itorash_gate()
         await self.send_items_to_game()
 

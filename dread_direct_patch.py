@@ -18,8 +18,8 @@ Archipelago Metroid Bread — Direct Patcher (bypasses Randovania Export UI)
    minimap data into the mod
 5. finalize_mod() brands credits.txt (Metroid Bread + Archipelago Implementation /
    Dummydude before Major Item Locations), strips leftover HK autosave bootstrap,
-   installs ApWarp hotkeys, hardcodes ODR death-counter DNA-slot HUD coords
-   (Ryujinx-safe), then ships reachable-map data into RomFS
+   installs ApWarp hotkeys + Elun arrival-gate restore, hardcodes ODR death-counter
+   DNA-slot HUD coords (Ryujinx-safe), then ships reachable-map data into RomFS
 6. Save-file dim reveal is OFF by default (reveal_minimap_save: false).
    Bright paint uses VisitBoundsSafe in-game; the offline tool remains under tools/.
 7. map_icon_keys.json maps pickup_index / location_id / actor → MAP_ICON_ItemCustom{n}
@@ -859,6 +859,17 @@ if ApWarp and ApWarp.Install then
 end
 """.lstrip()
 
+AP_ELUN_ARRIVAL_GATE_MARKER = "-- AP_ELUN_ARRIVAL_GATE"
+AP_ELUN_ARRIVAL_GATE_BOOTSTRAP = """
+-- AP_ELUN_ARRIVAL_GATE
+-- Transport-rando / ApWarp: restore Elun arrival seal (ev_gatesealed_second) on load.
+-- Install after ApWarp so OnLoadScenarioFinished / CheckDebugInputs chain correctly.
+Game.DoFile("system/scripts/ap_elun_arrival_gate.lua")
+if ApElunArrivalGate and ApElunArrivalGate.Install then
+    ApElunArrivalGate.Install()
+end
+""".lstrip()
+
 AP_LOADING_TIPS_MARKER = "-- AP_LOADING_TIPS"
 AP_LOADING_TIPS_BOOTSTRAP = """
 -- AP_LOADING_TIPS
@@ -893,6 +904,15 @@ _AP_WARP_BLOCK_RE = re.compile(
     r"(?:.*\n)*?"
     r"if ApWarp and ApWarp\.Install then\n"
     r"\s*ApWarp\.Install\(\)\n"
+    r"end\n?",
+    re.MULTILINE,
+)
+
+_AP_ELUN_ARRIVAL_GATE_BLOCK_RE = re.compile(
+    r"\n*-- AP_ELUN_ARRIVAL_GATE\n"
+    r"(?:.*\n)*?"
+    r"if ApElunArrivalGate and ApElunArrivalGate\.Install then\n"
+    r"\s*ApElunArrivalGate\.Install\(\)\n"
     r"end\n?",
     re.MULTILINE,
 )
@@ -1082,6 +1102,33 @@ def install_ap_warp_scripts(romfs: Path) -> None:
         raise PatchError(f"missing ApWarp script: {src}")
     _register_system_script_asset(romfs, "ap_warp", src.read_bytes())
     _patch_scenario_for_ap_warp(romfs)
+
+
+def install_ap_elun_arrival_gate_scripts(romfs: Path) -> None:
+    """Restore Elun arrival gate on load (transport rando + ApWarp softlock)."""
+    src = dread_paths.dread_scripts_dir() / "ap_elun_arrival_gate.lua"
+    if not src.is_file():
+        raise PatchError(f"missing Elun arrival-gate script: {src}")
+    _register_system_script_asset(romfs, "ap_elun_arrival_gate", src.read_bytes())
+    _patch_scenario_for_ap_elun_arrival_gate(romfs)
+
+
+def _patch_scenario_for_ap_elun_arrival_gate(romfs: Path) -> None:
+    """Install ApElunArrivalGate bootstrap at EOF of scenario.lc (after ApWarp)."""
+    existing, pkg = _read_scenario_lc(romfs)
+    text = existing.decode("utf-8", errors="replace")
+    if AP_ELUN_ARRIVAL_GATE_MARKER in text:
+        relocated = _AP_ELUN_ARRIVAL_GATE_BLOCK_RE.sub("\n", text)
+        if relocated == text:
+            log("[WARN] ApElunArrivalGate marker found but block could not be relocated")
+            return
+        text = relocated
+        log("[OK] removed prior ApElunArrivalGate bootstrap (will re-append at EOF)")
+
+    text = text.rstrip() + "\n\n" + AP_ELUN_ARRIVAL_GATE_BOOTSTRAP
+    data = text.encode("utf-8")
+    _write_scenario_lc(romfs, data, pkg)
+    log(f"[OK] patched scenario.lc with ApElunArrivalGate.Install at EOF ({len(data)} bytes)")
 
 
 def _patch_scenario_for_ap_warp(romfs: Path) -> None:
@@ -1563,6 +1610,9 @@ def finalize_mod(
 
     # Location-independent warp hotkeys (last checkpoint / last save).
     install_ap_warp_scripts(romfs)
+
+    # Elun re-entry: ForceOpen ev_gatesealed_second (ApWarp / transport rando).
+    install_ap_elun_arrival_gate_scripts(romfs)
 
     # ForcedTooltip on Continue / New Game loading screens (init.lc, early).
     install_ap_loading_tips_scripts(romfs)

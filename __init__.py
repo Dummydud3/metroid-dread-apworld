@@ -7,7 +7,7 @@ Uses Randovania logic_database as the live reachability engine (see dread_logic.
 from __future__ import annotations
 
 import json
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 # Register launcher component before heavy world imports so a later import
 # failure cannot hide "Metroid Bread Client" from the Archipelago Launcher.
@@ -163,12 +163,17 @@ class MetroidBreadWorld(World):
     # Filled during generate_early / pre_fill for spoiler → patcher.
     door_assignments: dict
     door_patches: list
-    # Physical keys selected for Individual Doors (locks assigned in post_fill).
+    # Reroute set: get interesting locks in post_fill.
     door_shuffled_keys: list
+    # Force-unlocked for assumed fill; stay Power Beam after post_fill.
+    door_fill_assist_keys: list
+    # Start-frontier docks left vanilla.
+    door_protected_keys: list
     transport_matching: dict
     elevator_patches: list
     patch_extras: dict
     start_kit: list
+    recommended_start_kit: list
     # Boss/EMMI checks kept despite include_boss_pickups=false for DNA capacity.
     forced_boss_locations: set
 
@@ -177,10 +182,13 @@ class MetroidBreadWorld(World):
         self.door_assignments = {}
         self.door_patches = []
         self.door_shuffled_keys = []
+        self.door_fill_assist_keys = []
+        self.door_protected_keys = []
         self.transport_matching = {}
         self.elevator_patches = []
         self.patch_extras = {}
         self.start_kit = []
+        self.recommended_start_kit: list = []
         self.forced_boss_locations = set()
         self.early_expand_pins: List[str] = []
 
@@ -428,9 +436,128 @@ class MetroidBreadWorld(World):
             and not self._start_kit_reaches_goal()
         )
 
+    def _start_kit_budget(self) -> int:
+        try:
+            return max(0, min(StartKit.MAX_START_KIT, int(self.options.starting_kit_items.value)))
+        except Exception:
+            return 0
+
+    def _starting_location_key(self) -> str:
+        try:
+            return str(self.options.starting_location.current_key)
+        except Exception:
+            return "default"
+
+    def _kit_ok_with(self, kit: list) -> bool:
+        prev = list(self.start_kit)
+        self.start_kit = list(kit)
+        try:
+            return self._kit_is_ok()
+        finally:
+            self.start_kit = prev
+
+    def _assign_start_kit(self, *, base_kit: list = ()) -> None:
+        """Set recommended (uncapped) + budgeted start_kit from YAML Starting Items."""
+        budget = self._start_kit_budget()
+        self.recommended_start_kit = StartKit.build_start_kit(
+            self, base_kit=base_kit, max_kit=StartKit.MAX_START_KIT
+        )
+        if budget <= 0:
+            self.start_kit = []
+        else:
+            self.start_kit = StartKit.build_start_kit(
+                self, base_kit=base_kit, max_kit=budget
+            )
+
+    def _underbudget_message(self, start_path: str) -> str:
+        rec = list(self.recommended_start_kit or [])
+        budget = self._start_kit_budget()
+        items = ", ".join(rec) if rec else "(none)"
+        return (
+            f"starting_kit_items={budget} but start {start_path} needs "
+            f"{len(rec)} Starting Item(s) ({items}); raise Starting Items to at "
+            f"least {len(rec)} or change starting location"
+        )
+
+    def _roll_start_kit(self) -> None:
+        """Pick the starting kit, relocating if this start cannot be opened.
+
+        YAML ``starting_kit_items`` caps how many majors may be precollected.
+        When the budget is too low for the chosen start but a full Start Kit
+        would work, log clearly (and FillError for a specific start).
+        """
+        self._assign_start_kit()
+        if self._kit_is_ok():
+            return
+
+        original = self.logic.starting_node
+        original_path = "/".join(original)
+        recommended = list(self.recommended_start_kit)
+        budget = self._start_kit_budget()
+        recommended_ok = self._kit_ok_with(recommended)
+        underbudget = (
+            recommended_ok
+            and budget < len(recommended)
+            and not self._kit_ok_with(self.start_kit)
+        )
+
+        if underbudget:
+            msg = self._underbudget_message(original_path)
+            print(f"[Metroid Bread Player {self.player}] {msg}")
+            # Specific YAML start: do not silently relocate — surface the budget miss.
+            if self._starting_location_key() not in ("default", "random_save_station"):
+                raise FillError(msg)
+
+        original_kit = list(self.start_kit)
+        original_rec = list(self.recommended_start_kit)
+        candidates = list(load_starting_locations())
+        self.random.shuffle(candidates)
+        for info in candidates:
+            if info.node_id == original or not self._start_is_viable(info.node_id):
+                continue
+            self.logic.set_starting_node(info.node_id)
+            self._assign_start_kit()
+            if self._kit_is_ok():
+                print(
+                    f"[Metroid Bread Player {self.player}] starting location "
+                    f"{original_path} has too little in logic to fill from; "
+                    f"moved to {info.path}"
+                )
+                return
+            if (
+                self._kit_ok_with(self.recommended_start_kit)
+                and self._start_kit_budget() < len(self.recommended_start_kit)
+            ):
+                print(
+                    f"[Metroid Bread Player {self.player}] skipped start "
+                    f"{info.path}: {self._underbudget_message(info.path)}"
+                )
+
+        # Last resort: default Artaria Intro usually expands from an empty kit.
+        fallback = get_default()
+        if fallback.node_id != original and self._start_is_viable(fallback.node_id):
+            self.logic.set_starting_node(fallback.node_id)
+            self._assign_start_kit()
+            if self._kit_is_ok():
+                print(
+                    f"[Metroid Bread Player {self.player}] starting location "
+                    f"{original_path} cannot expand sphere 0; "
+                    f"fell back to {fallback.path}"
+                )
+                return
+
+        self.logic.set_starting_node(original)
+        self.start_kit = original_kit
+        self.recommended_start_kit = original_rec
+        if underbudget and self._starting_location_key() == "random_save_station":
+            # Random exhausted alternatives; still under-budget on original.
+            raise FillError(self._underbudget_message(original_path))
+
     def _has_uncleared_logic_locations(self) -> bool:
-        """True if any AP pickup/event node stays out of logic with full inventory."""
+        """True if any AP pickup/event stays out of logic with full inventory."""
         # Lazy import: Events↔Items circular import if pulled at module load.
+        from collections import defaultdict
+
         from .Events import event_locations
 
         nodes = self.logic.get_reachable_nodes(
@@ -440,14 +567,13 @@ class MetroidBreadWorld(World):
             node = self.logic.pickup_nodes.get(name)
             if node is not None and node not in nodes:
                 return True
-        # Canonical event locations (one AP loc per event item) must also be
-        # reachable under accessibility:full.
-        seen_event_items = set()
+        # One event_item may have several nodes (e.g. normal vs Ledge Warp).
+        # Full only needs some path to each event item — not every alternate.
+        by_item: dict = defaultdict(list)
         for ev in event_locations:
-            if ev.event_item in seen_event_items:
-                continue
-            seen_event_items.add(ev.event_item)
-            if (ev.game_region, ev.area, ev.node) not in nodes:
+            by_item[ev.event_item].append((ev.game_region, ev.area, ev.node))
+        for locs in by_item.values():
+            if not any(loc in nodes for loc in locs):
                 return True
         return False
 
@@ -463,51 +589,6 @@ class MetroidBreadWorld(World):
             f"are disabled)"
         )
 
-    def _roll_start_kit(self) -> None:
-        """Pick the starting kit, relocating if this start cannot be opened.
-
-        A handful of save rooms — Burenia's south room is the worst, sitting
-        underwater behind a four-item gate — need more handed to the player
-        than is reasonable. Moving the start is much better than shipping a
-        seed the fill cannot complete.
-        """
-        self.start_kit = StartKit.build_start_kit(self)
-        if self._kit_is_ok():
-            return
-
-        original = self.logic.starting_node
-        original_kit = self.start_kit
-        candidates = list(load_starting_locations())
-        self.random.shuffle(candidates)
-        for info in candidates:
-            if info.node_id == original or not self._start_is_viable(info.node_id):
-                continue
-            self.logic.set_starting_node(info.node_id)
-            self.start_kit = StartKit.build_start_kit(self)
-            if self._kit_is_ok():
-                print(
-                    f"[Metroid Bread Player {self.player}] starting location "
-                    f"{'/'.join(original)} has too little in logic to fill from; "
-                    f"moved to {info.path}"
-                )
-                return
-
-        # Last resort: default Artaria Intro usually expands from an empty kit.
-        fallback = get_default()
-        if fallback.node_id != original and self._start_is_viable(fallback.node_id):
-            self.logic.set_starting_node(fallback.node_id)
-            self.start_kit = StartKit.build_start_kit(self)
-            if self._kit_is_ok():
-                print(
-                    f"[Metroid Bread Player {self.player}] starting location "
-                    f"{'/'.join(original)} cannot expand sphere 0; "
-                    f"fell back to {fallback.path}"
-                )
-                return
-
-        self.logic.set_starting_node(original)
-        self.start_kit = original_kit
-
     def _reset_logic_graph(self, kit: list) -> None:
         """Rebuild a vanilla logic graph at the current start (clear rando)."""
         node = self.logic.starting_node
@@ -516,6 +597,8 @@ class MetroidBreadWorld(World):
         self.door_assignments = {}
         self.door_patches = []
         self.door_shuffled_keys = []
+        self.door_fill_assist_keys = []
+        self.door_protected_keys = []
         self.transport_matching = {}
         self.elevator_patches = []
         self.start_kit = list(kit)
@@ -523,28 +606,40 @@ class MetroidBreadWorld(World):
     def _roll_door_and_transport_rando(self) -> None:
         """Apply one door-lock / transport shuffle onto the current vanilla graph.
 
-        Individual Doors: pre-fill unlocks ~60% of eligible docks (Power Beam);
-        real locks are assigned in ``post_fill`` via reach-gated selection.
+        Individual Doors: classify docks → fill-assist unlocks + reroute unlocks;
+        interesting locks are assigned in ``post_fill`` on the reroute set only.
         """
         self.door_assignments = {}
         self.door_patches = []
         self.door_shuffled_keys = []
+        self.door_fill_assist_keys = []
+        self.door_protected_keys = []
         self.transport_matching = {}
         self.elevator_patches = []
 
         if self.options.door_lock_rando.value == 1:
-            assignments, shuffled = DoorRandoAssigner.pre_fill_roll(
+            active = set(self.active_location_names())
+            result = DoorRandoAssigner.pre_fill_roll(
                 self.logic,
                 self.random,
                 doors_to_change=self.options.doors_to_change.value,
                 change_doors_to=self.options.change_doors_to.value,
                 start_counts=StartKit.kit_counts(self.start_kit),
+                active=active,
             )
-            self.door_assignments = assignments
-            self.door_shuffled_keys = list(shuffled)
+            self.door_assignments = dict(result.assignments)
+            self.door_shuffled_keys = list(result.reroute_keys)
+            self.door_fill_assist_keys = list(result.fill_assist_keys)
+            self.door_protected_keys = list(result.protected_keys)
             DoorRando.apply_assignments(self.logic.parser, self.door_assignments)
             self.door_patches = DoorRando.assignments_to_door_patches(
                 self.door_assignments
+            )
+            print(
+                f"[Metroid Bread Player {self.player}] door pre-fill: "
+                f"assist={len(self.door_fill_assist_keys)} "
+                f"reroute={len(self.door_shuffled_keys)} "
+                f"protected={len(self.door_protected_keys)}"
             )
 
         if self.options.transport_rando.value == 1:
@@ -563,10 +658,14 @@ class MetroidBreadWorld(World):
         matching = dict(self.transport_matching or {})
         doors = dict(self.door_assignments or {})
         shuffled = list(self.door_shuffled_keys or [])
+        assist = list(self.door_fill_assist_keys or [])
+        protected = list(self.door_protected_keys or [])
         self._reset_logic_graph(vanilla_kit)
         self.transport_matching = matching
         self.door_assignments = doors
         self.door_shuffled_keys = shuffled
+        self.door_fill_assist_keys = assist
+        self.door_protected_keys = protected
         if matching:
             transports = TransportRando.collect_transports(self.logic.parser)
             TransportRando.apply_matching(self.logic.parser, transports, matching)
@@ -581,7 +680,7 @@ class MetroidBreadWorld(World):
         else:
             self.door_patches = []
         self.logic.rebuild_graph()
-        self.start_kit = StartKit.build_start_kit(self, base_kit=vanilla_kit)
+        self._assign_start_kit(base_kit=vanilla_kit)
 
     def _graph_state_acceptable(self) -> Optional[FillError]:
         """None when start kit + preflight are OK; otherwise the failure reason."""
@@ -611,7 +710,7 @@ class MetroidBreadWorld(World):
             if not (self.door_assignments or self.transport_matching):
                 return False, last_preflight
             self.logic.rebuild_graph()
-            self.start_kit = StartKit.build_start_kit(self, base_kit=vanilla_kit)
+            self._assign_start_kit(base_kit=vanilla_kit)
             err = self._graph_state_acceptable()
             if err is None:
                 if attempt > 0:
@@ -644,6 +743,9 @@ class MetroidBreadWorld(World):
         protected = DoorRando.start_frontier_keys(
             self.logic, self.logic.inventory_from_counts(StartKit.kit_counts(vanilla_kit))
         )
+        # Never soften fill-assist unlocks or protected frontier docks.
+        protected |= set(self.door_protected_keys or [])
+        protected |= set(self.door_fill_assist_keys or [])
 
         for pass_i in range(_DOOR_SOFTEN_PASSES):
             # Score with start-kit inventory so early checks open for fill.
@@ -669,7 +771,11 @@ class MetroidBreadWorld(World):
                     goal_node=_GOAL_NODE,
                     protected=protected,
                 )
-            keys = DoorRando.pick_doors_to_soften(scored, top_k=_DOOR_SOFTEN_TOP_K)
+            keys = DoorRando.pick_doors_to_soften(
+                scored,
+                top_k=_DOOR_SOFTEN_TOP_K,
+                assignments=self.door_assignments,
+            )
             if not keys:
                 return False
             changed = DoorRando.soften_assignments(self.door_assignments, keys)
@@ -680,7 +786,9 @@ class MetroidBreadWorld(World):
             print(
                 f"[Metroid Bread Player {self.player}] door soften pass "
                 f"{pass_i + 1}/{_DOOR_SOFTEN_PASSES}: opened {len(changed)} "
-                f"door(s) toward denser checks"
+                f"door(s) toward denser checks "
+                f"(assist={len(self.door_fill_assist_keys or [])} "
+                f"reroute={len(self.door_shuffled_keys or [])} still tracked)"
                 f"{'' if err is None else f' (still failing: {err})'}"
             )
             if err is None:
@@ -708,6 +816,14 @@ class MetroidBreadWorld(World):
                 if not self.door_assignments or attempt >= _DOOR_SOFTEN_PASSES:
                     break
                 active = set(self.active_location_names())
+                protected = DoorRando.start_frontier_keys(
+                    self.logic,
+                    self.logic.inventory_from_counts(
+                        StartKit.kit_counts(vanilla_kit)
+                    ),
+                )
+                protected |= set(self.door_protected_keys or [])
+                protected |= set(self.door_fill_assist_keys or [])
                 scored = DoorRando.score_doors_by_new_checks(
                     self.logic,
                     self.door_assignments,
@@ -718,15 +834,12 @@ class MetroidBreadWorld(World):
                     active_names=active,
                     inventory_counts=self._full_inventory_counts(),
                     goal_node=_GOAL_NODE,
-                    protected=DoorRando.start_frontier_keys(
-                        self.logic,
-                        self.logic.inventory_from_counts(
-                            StartKit.kit_counts(vanilla_kit)
-                        ),
-                    ),
+                    protected=protected,
                 )
                 keys = DoorRando.pick_doors_to_soften(
-                    scored, top_k=_DOOR_SOFTEN_TOP_K
+                    scored,
+                    top_k=_DOOR_SOFTEN_TOP_K,
+                    assignments=self.door_assignments,
                 )
                 if not DoorRando.soften_assignments(self.door_assignments, keys):
                     break
@@ -1080,6 +1193,18 @@ class MetroidBreadWorld(World):
                 f"{fs_upgrades_in_pool}, kept {upgrades_kept}"
             )
 
+        # Hub Map Tracker: total items available to this player (shuffled + kit).
+        tracker_pool: Dict[str, int] = {}
+        for item in itempool:
+            tracker_pool[item.name] = tracker_pool.get(item.name, 0) + 1
+        for kit_name in self.start_kit:
+            tracker_pool[kit_name] = tracker_pool.get(kit_name, 0) + 1
+        if self.options.start_with_pulse_radar:
+            tracker_pool["Pulse Radar"] = tracker_pool.get("Pulse Radar", 0) + 1
+        self.patch_extras["tracker_item_pool"] = {
+            name: count for name, count in tracker_pool.items() if count > 0
+        }
+
         self.multiworld.itempool += itempool
 
     def active_location_names(self) -> List[str]:
@@ -1128,21 +1253,32 @@ class MetroidBreadWorld(World):
 
     def post_fill(self) -> None:
         """Assign reach-gated door locks (Individual Doors), then clearance check."""
-        if (
-            self.options.door_lock_rando.value == 1
-            and self.door_shuffled_keys
+        if self.options.door_lock_rando.value == 1 and (
+            self.door_shuffled_keys or self.door_fill_assist_keys
         ):
             self.door_assignments = DoorRandoAssigner.post_fill_assign(
                 self,
                 self.door_shuffled_keys,
                 self.random,
                 change_doors_to=self.options.change_doors_to.value,
+                fill_assist_keys=self.door_fill_assist_keys,
             )
             DoorRando.apply_assignments(self.logic.parser, self.door_assignments)
             self.door_patches = DoorRando.assignments_to_door_patches(
                 self.door_assignments
             )
             self.logic.rebuild_graph()
+            openish = sum(
+                1
+                for w in (self.door_assignments or {}).values()
+                if w in ("Power Beam Door", "Access Open")
+            )
+            print(
+                f"[Metroid Bread Player {self.player}] door post-fill: "
+                f"{len(self.door_shuffled_keys or [])} reroute lock(s), "
+                f"{len(self.door_fill_assist_keys or [])} assist unlock(s), "
+                f"{openish} still Power Beam/Open among assigned"
+            )
             if self.patch_extras is not None:
                 self.patch_extras["door_patches"] = self.door_patches
                 self.patch_extras["door_assignments"] = [
@@ -1150,6 +1286,14 @@ class MetroidBreadWorld(World):
                     for (scenario, actor), weakness in sorted(
                         (self.door_assignments or {}).items()
                     )
+                ]
+                self.patch_extras["door_fill_assist"] = [
+                    {"scenario": s, "actor": a}
+                    for (s, a) in (self.door_fill_assist_keys or [])
+                ]
+                self.patch_extras["door_reroute"] = [
+                    {"scenario": s, "actor": a}
+                    for (s, a) in (self.door_shuffled_keys or [])
                 ]
         victory_clearance.assert_victory_implies_full_clearance(self)
 
@@ -1325,6 +1469,9 @@ class MetroidBreadWorld(World):
         # Trick / ammo preset for the client tracker (must match generation logic).
         logic_options = collect_logic_options_from_options(self.options)
         extras["logic_options"] = dict(logic_options)
+        tracker_pool = extras.get("tracker_item_pool")
+        if not isinstance(tracker_pool, dict):
+            tracker_pool = {}
         slot_data = {
             "death_link": self.options.death_link.value,
             "game_goal": int(self.options.game_goal.value),
@@ -1339,6 +1486,8 @@ class MetroidBreadWorld(World):
             "door_lock_rando": int(self.options.door_lock_rando.value),
             "transport_rando": int(self.options.transport_rando.value),
             "logic_options": dict(logic_options),
+            # Exact seed pool for Hub Map Tracker icon filtering (also in patch_extras).
+            "tracker_item_pool": dict(tracker_pool),
             # Full patch payload so clients can rebuild the mod without a local spoiler.
             "patch_extras": extras,
         }
