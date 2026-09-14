@@ -1,0 +1,1253 @@
+{
+  "game": "Metroid Dread",
+  "tabs": [
+    {
+      "name": "Artaria",
+      "image": "images/1.png",
+      "location_size": 32,
+      "markers": [
+        {
+          "x": 1929,
+          "y": 396,
+          "locations": [
+            "Artaria: David Jaffe Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 2176,
+          "y": 528,
+          "locations": [
+            "Artaria: Corpius"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1712,
+          "y": 366,
+          "locations": [
+            "Artaria: Arbitrary Enky Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 984,
+          "y": 925,
+          "locations": [
+            "Artaria: Charge Beam Access"
+          ],
+          "size": 20
+        },
+        {
+          "x": 903,
+          "y": 955,
+          "locations": [
+            "Artaria: Charge Beam Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1661,
+          "y": 948,
+          "locations": [
+            "Artaria: Charge Tutorial"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1706,
+          "y": 722,
+          "locations": [
+            "Artaria: E.M.M.I.-02SM"
+          ],
+          "size": 20
+        },
+        {
+          "x": 2204,
+          "y": 404,
+          "locations": [
+            "Artaria: East Lava Missile Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1369,
+          "y": 376,
+          "locations": [
+            "Artaria: EMMI Zone Exit North"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1707,
+          "y": 284,
+          "locations": [
+            "Artaria: Grapple Beam Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1041,
+          "y": 473,
+          "locations": [
+            "Artaria: EMMI Zone Exit Northwest"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1598,
+          "y": 545,
+          "locations": [
+            "Artaria: EMMI Zone First Entrance"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1144,
+          "y": 454,
+          "locations": [
+            "Artaria: EMMI Zone Hub"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1343,
+          "y": 628,
+          "locations": [
+            "Artaria: EMMI Zone Spinner"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1067,
+          "y": 834,
+          "locations": [
+            "Artaria: Energy Recharge Station South"
+          ],
+          "size": 20
+        },
+        {
+          "x": 2573,
+          "y": 363,
+          "locations": [
+            "Artaria: Hot Cataris Shortcut"
+          ],
+          "size": 20
+        },
+        {
+          "x": 2040,
+          "y": 600,
+          "locations": [
+            "Artaria: Proto EMMI Introduction"
+          ],
+          "size": 20
+        },
+        {
+          "x": 329,
+          "y": 610,
+          "locations": [
+            "Artaria: Screw Attack Room - Missile Tank, Top"
+          ],
+          "size": 20
+        },
+        {
+          "x": 326,
+          "y": 733,
+          "locations": [
+            "Artaria: Screw Attack Room - Missile Tank, Underwater"
+          ],
+          "size": 20
+        },
+        {
+          "x": 351,
+          "y": 667,
+          "locations": [
+            "Artaria: Screw Attack Room - Screw Attack"
+          ],
+          "size": 20
+        },
+        {
+          "x": 828,
+          "y": 74,
+          "locations": [
+            "Artaria: Varia Suit Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 949,
+          "y": 175,
+          "locations": [
+            "Artaria: Varia Suit Tutorial North"
+          ],
+          "size": 20
+        },
+        {
+          "x": 828,
+          "y": 515,
+          "locations": [
+            "Artaria: Teleport to Cataris - Missile Tank, Underwater"
+          ],
+          "size": 20
+        },
+        {
+          "x": 770,
+          "y": 337,
+          "locations": [
+            "Artaria: Teleport to Cataris - Missile Tank, Supers-locked"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1975,
+          "y": 429,
+          "locations": [
+            "Artaria: Invisible Corpius Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 479,
+          "y": 681,
+          "locations": [
+            "Artaria: Freezer"
+          ],
+          "size": 20
+        },
+        {
+          "x": 65,
+          "y": 609,
+          "locations": [
+            "Artaria: Transport to Burenia"
+          ],
+          "size": 20
+        },
+        {
+          "x": 697,
+          "y": 851,
+          "locations": [
+            "Artaria: Speed Hallway - Energy Part"
+          ],
+          "size": 20
+        },
+        {
+          "x": 849,
+          "y": 837,
+          "locations": [
+            "Artaria: Speed Hallway - Missile+ Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1816,
+          "y": 671,
+          "locations": [
+            "Artaria: Melee Tutorial Room - Missile Tank 1"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1934,
+          "y": 621,
+          "locations": [
+            "Artaria: Melee Tutorial Room - Missile Tank 2"
+          ],
+          "size": 20
+        },
+        {
+          "x": 2158,
+          "y": 460,
+          "locations": [
+            "Artaria: Thermal Device"
+          ],
+          "size": 20
+        },
+        {
+          "x": 580,
+          "y": 463,
+          "locations": [
+            "Artaria: Waterfall - Energy Part"
+          ],
+          "size": 20
+        },
+        {
+          "x": 627,
+          "y": 541,
+          "locations": [
+            "Artaria: Waterfall - Missile Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 557,
+          "y": 94,
+          "locations": [
+            "Artaria: Shutter Platform Puzzle"
+          ],
+          "size": 20
+        }
+      ]
+    },
+    {
+      "name": "Burenia",
+      "image": "images/2.png",
+      "location_size": 32,
+      "markers": [
+        {
+          "x": 591,
+          "y": 505,
+          "locations": [
+            "Burenia: Burenia Hub to Dairon - Energy Part"
+          ],
+          "size": 20
+        },
+        {
+          "x": 526,
+          "y": 731,
+          "locations": [
+            "Burenia: Burenia Hub to Dairon - Missile Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 422,
+          "y": 205,
+          "locations": [
+            "Burenia: Drogyga"
+          ],
+          "size": 20
+        },
+        {
+          "x": 615,
+          "y": 916,
+          "locations": [
+            "Burenia: Early Gravity Speedboost Room 1 - Energy Part"
+          ],
+          "size": 20
+        },
+        {
+          "x": 600,
+          "y": 1068,
+          "locations": [
+            "Burenia: Early Gravity Speedboost Room 1 - Missile+ Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 215,
+          "y": 928,
+          "locations": [
+            "Burenia: Energy Recharge South"
+          ],
+          "size": 20
+        },
+        {
+          "x": 460,
+          "y": 733,
+          "locations": [
+            "Burenia: Flash Shift Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 586,
+          "y": 1158,
+          "locations": [
+            "Burenia: Gravity Suit Room - Gravity Suit"
+          ],
+          "size": 20
+        },
+        {
+          "x": 614,
+          "y": 1237,
+          "locations": [
+            "Burenia: Gravity Suit Room - Power Bomb Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 556,
+          "y": 819,
+          "locations": [
+            "Burenia: Gravity Suit Tower - Missile Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 738,
+          "y": 1025,
+          "locations": [
+            "Burenia: Gravity Suit Tower - Missile+ Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 311,
+          "y": 848,
+          "locations": [
+            "Burenia: Main Hub Tower Middle - Missile Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 264,
+          "y": 927,
+          "locations": [
+            "Burenia: Main Hub Tower Middle - Missile+ Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 376,
+          "y": 666,
+          "locations": [
+            "Burenia: Main Hub Tower Top - Energy Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 379,
+          "y": 542,
+          "locations": [
+            "Burenia: Main Hub Tower Top - Missile Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 414,
+          "y": 1116,
+          "locations": [
+            "Burenia: Storm Missile Gate Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 133,
+          "y": 317,
+          "locations": [
+            "Burenia: Teleport to Ferenia"
+          ],
+          "size": 20
+        },
+        {
+          "x": 967,
+          "y": 1010,
+          "locations": [
+            "Burenia: Transport to Artaria"
+          ],
+          "size": 20
+        },
+        {
+          "x": 481,
+          "y": 304,
+          "locations": [
+            "Burenia: Underneath Drogyga"
+          ],
+          "size": 20
+        },
+        {
+          "x": 417,
+          "y": 363,
+          "locations": [
+            "Burenia: Upper Burenia Hub"
+          ],
+          "size": 20
+        }
+      ]
+    },
+    {
+      "name": "Cataris",
+      "image": "images/3.png",
+      "location_size": 32,
+      "markers": [
+        {
+          "x": 1010,
+          "y": 728,
+          "locations": [
+            "Cataris: Above Z-57 Fight - Missile Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1105,
+          "y": 38,
+          "locations": [
+            "Cataris: Dairon Transport Access"
+          ],
+          "size": 20
+        },
+        {
+          "x": 435,
+          "y": 726,
+          "locations": [
+            "Cataris: Diffusion Beam Room - Diffusion Beam"
+          ],
+          "size": 20
+        },
+        {
+          "x": 483,
+          "y": 759,
+          "locations": [
+            "Cataris: Diffusion Beam Room - Power Bomb Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1430,
+          "y": 171,
+          "locations": [
+            "Cataris: Double Obsydomithon Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 569,
+          "y": 217,
+          "locations": [
+            "Cataris: E.M.M.I.-03MB"
+          ],
+          "size": 20
+        },
+        {
+          "x": 502,
+          "y": 359,
+          "locations": [
+            "Cataris: EMMI Zone Exits West"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1169,
+          "y": 358,
+          "locations": [
+            "Cataris: EMMI Zone Hidden Missile Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 725,
+          "y": 407,
+          "locations": [
+            "Cataris: EMMI Zone Item Tunnel"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1063,
+          "y": 797,
+          "locations": [
+            "Cataris: Experiment Z-57"
+          ],
+          "size": 20
+        },
+        {
+          "x": 290,
+          "y": 736,
+          "locations": [
+            "Cataris: Kraid"
+          ],
+          "size": 20
+        },
+        {
+          "x": 414,
+          "y": 669,
+          "locations": [
+            "Cataris: Kraid Eyedoor Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1626,
+          "y": 403,
+          "locations": [
+            "Cataris: Lava Button East Access"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1751,
+          "y": 283,
+          "locations": [
+            "Cataris: Teleport to Artaria (Blue) - Missile Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1571,
+          "y": 168,
+          "locations": [
+            "Cataris: Teleport to Artaria (Blue) - Power Bomb Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 213,
+          "y": 468,
+          "locations": [
+            "Cataris: Teleport to Artaria (Red)"
+          ],
+          "size": 20
+        },
+        {
+          "x": 537,
+          "y": 525,
+          "locations": [
+            "Cataris: Teleport to Dairon"
+          ],
+          "size": 20
+        },
+        {
+          "x": 391,
+          "y": 412,
+          "locations": [
+            "Cataris: Teleport to Ghavoran - Missile Tank - Bottom"
+          ],
+          "size": 20
+        },
+        {
+          "x": 331,
+          "y": 278,
+          "locations": [
+            "Cataris: Teleport to Ghavoran - Missile Tank - Top"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1211,
+          "y": 222,
+          "locations": [
+            "Cataris: Thermal Device Room North - Energy Part"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1260,
+          "y": 203,
+          "locations": [
+            "Cataris: Thermal Device Room North - Energy Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1359,
+          "y": 789,
+          "locations": [
+            "Cataris: Transport to Artaria"
+          ],
+          "size": 20
+        },
+        {
+          "x": 837,
+          "y": 711,
+          "locations": [
+            "Cataris: Underlava Puzzle Room 2"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1287,
+          "y": 595,
+          "locations": [
+            "Cataris: Z-57 Heat Room East"
+          ],
+          "size": 20
+        },
+        {
+          "x": 892,
+          "y": 561,
+          "locations": [
+            "Cataris: Z-57 Heat Room West (Right)"
+          ],
+          "size": 20
+        }
+      ]
+    },
+    {
+      "name": "Dairon",
+      "image": "images/4.png",
+      "location_size": 32,
+      "markers": [
+        {
+          "x": 1734,
+          "y": 270,
+          "locations": [
+            "Dairon: Big Hub"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1032,
+          "y": 140,
+          "locations": [
+            "Dairon: Bomb Room - Bomb"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1041,
+          "y": 171,
+          "locations": [
+            "Dairon: Bomb Room - Missile Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 627,
+          "y": 716,
+          "locations": [
+            "Dairon: Central Unit Access - Energy Part"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1082,
+          "y": 260,
+          "locations": [
+            "Dairon: Cross Bomb Puzzle Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 704,
+          "y": 675,
+          "locations": [
+            "Dairon: E.M.M.I.-04SB"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1454,
+          "y": 495,
+          "locations": [
+            "Dairon: Early Grapple Access"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1771,
+          "y": 555,
+          "locations": [
+            "Dairon: Early Grapple Room - Missile Tank Speedboost"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1634,
+          "y": 479,
+          "locations": [
+            "Dairon: Early Grapple Room - Missile Tank Tunnel"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1193,
+          "y": 219,
+          "locations": [
+            "Dairon: EMMI Zone Exit North"
+          ],
+          "size": 20
+        },
+        {
+          "x": 804,
+          "y": 450,
+          "locations": [
+            "Dairon: EMMI Zone Exit Northwest"
+          ],
+          "size": 20
+        },
+        {
+          "x": 587,
+          "y": 142,
+          "locations": [
+            "Dairon: Energy Recharge Station West"
+          ],
+          "size": 20
+        },
+        {
+          "x": 651,
+          "y": 356,
+          "locations": [
+            "Dairon: Freezer - Missile Tank - Lower"
+          ],
+          "size": 20
+        },
+        {
+          "x": 631,
+          "y": 220,
+          "locations": [
+            "Dairon: Freezer - Missile Tank - Upper"
+          ],
+          "size": 20
+        },
+        {
+          "x": 606,
+          "y": 485,
+          "locations": [
+            "Dairon: Hidden Grapple Shortcut Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1044,
+          "y": 601,
+          "locations": [
+            "Dairon: Lake Puzzle Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 537,
+          "y": 479,
+          "locations": [
+            "Dairon: Save Station West Tunnels"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1046,
+          "y": 357,
+          "locations": [
+            "Dairon: Shinespark Tutorial"
+          ],
+          "size": 20
+        },
+        {
+          "x": 829,
+          "y": 589,
+          "locations": [
+            "Dairon: Storm Missile Gate Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 2016,
+          "y": 115,
+          "locations": [
+            "Dairon: Teleport to Artaria"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1810,
+          "y": 491,
+          "locations": [
+            "Dairon: Transport to Artaria"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1478,
+          "y": 327,
+          "locations": [
+            "Dairon: Wide Beam Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1329,
+          "y": 224,
+          "locations": [
+            "Dairon: Yellow EMMI Introduction"
+          ],
+          "size": 20
+        }
+      ]
+    },
+    {
+      "name": "Elun",
+      "image": "images/5.png",
+      "location_size": 32,
+      "markers": [
+        {
+          "x": 905,
+          "y": 115,
+          "locations": [
+            "Elun: Ammo Recharge Station"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1073,
+          "y": 264,
+          "locations": [
+            "Elun: Fan Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1109,
+          "y": 42,
+          "locations": [
+            "Elun: Horizontal Bomb Maze"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1022,
+          "y": 260,
+          "locations": [
+            "Elun: Plasma Beam Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1192,
+          "y": 171,
+          "locations": [
+            "Elun: Vertical Bomb Maze"
+          ],
+          "size": 20
+        }
+      ]
+    },
+    {
+      "name": "Ferenia",
+      "image": "images/6.png",
+      "location_size": 32,
+      "markers": [
+        {
+          "x": 1326,
+          "y": 283,
+          "locations": [
+            "Ferenia: Cold Room (Storm Missile Gate)"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1848,
+          "y": 191,
+          "locations": [
+            "Ferenia: E.M.M.I.-06WB"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1235,
+          "y": 331,
+          "locations": [
+            "Ferenia: Energy Recharge Station Secret"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1662,
+          "y": 574,
+          "locations": [
+            "Ferenia: Escue"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1781,
+          "y": 482,
+          "locations": [
+            "Ferenia: Escue Eyedoor Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 722,
+          "y": 644,
+          "locations": [
+            "Ferenia: Fan Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1649,
+          "y": 531,
+          "locations": [
+            "Ferenia: Path to Escue"
+          ],
+          "size": 20
+        },
+        {
+          "x": 485,
+          "y": 306,
+          "locations": [
+            "Ferenia: Pitfall Puzzle Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 946,
+          "y": 613,
+          "locations": [
+            "Ferenia: Purple EMMI Introduction"
+          ],
+          "size": 20
+        },
+        {
+          "x": 592,
+          "y": 412,
+          "locations": [
+            "Ferenia: Separate Tunnels Room - Missile Tank - Left"
+          ],
+          "size": 20
+        },
+        {
+          "x": 655,
+          "y": 422,
+          "locations": [
+            "Ferenia: Separate Tunnels Room - Missile Tank - Right"
+          ],
+          "size": 20
+        },
+        {
+          "x": 703,
+          "y": 314,
+          "locations": [
+            "Ferenia: Space Jump Room - Missile Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 607,
+          "y": 175,
+          "locations": [
+            "Ferenia: Space Jump Room - Missile+ Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 666,
+          "y": 277,
+          "locations": [
+            "Ferenia: Space Jump Room - Space Jump"
+          ],
+          "size": 20
+        },
+        {
+          "x": 492,
+          "y": 497,
+          "locations": [
+            "Ferenia: Speedboost Slopes Maze"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1208,
+          "y": 678,
+          "locations": [
+            "Ferenia: Total Recharge Station"
+          ],
+          "size": 20
+        },
+        {
+          "x": 954,
+          "y": 305,
+          "locations": [
+            "Ferenia: Twin Robot Arena"
+          ],
+          "size": 20
+        }
+      ]
+    },
+    {
+      "name": "Ghavoran",
+      "image": "images/7.png",
+      "location_size": 32,
+      "markers": [
+        {
+          "x": 901,
+          "y": 104,
+          "locations": [
+            "Ghavoran: Above Pulse Radar"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1264,
+          "y": 168,
+          "locations": [
+            "Ghavoran: Cross Bomb Tutorial"
+          ],
+          "size": 20
+        },
+        {
+          "x": 760,
+          "y": 649,
+          "locations": [
+            "Ghavoran: Dairon Transport Access"
+          ],
+          "size": 20
+        },
+        {
+          "x": 372,
+          "y": 199,
+          "locations": [
+            "Ghavoran: E.M.M.I.-05IM"
+          ],
+          "size": 20
+        },
+        {
+          "x": 691,
+          "y": 515,
+          "locations": [
+            "Ghavoran: Elun Transport Access"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1111,
+          "y": 164,
+          "locations": [
+            "Ghavoran: Golzuna"
+          ],
+          "size": 20
+        },
+        {
+          "x": 961,
+          "y": 57,
+          "locations": [
+            "Ghavoran: Golzuna Tower - Energy Part"
+          ],
+          "size": 20
+        },
+        {
+          "x": 958,
+          "y": 208,
+          "locations": [
+            "Ghavoran: Golzuna Tower - Missile Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 237,
+          "y": 619,
+          "locations": [
+            "Ghavoran: Left Entrance"
+          ],
+          "size": 20
+        },
+        {
+          "x": 665,
+          "y": 425,
+          "locations": [
+            "Ghavoran: Map Station Access Secret"
+          ],
+          "size": 20
+        },
+        {
+          "x": 861,
+          "y": 155,
+          "locations": [
+            "Ghavoran: Pulse Radar Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 378,
+          "y": 680,
+          "locations": [
+            "Ghavoran: Right Entrance"
+          ],
+          "size": 20
+        },
+        {
+          "x": 844,
+          "y": 364,
+          "locations": [
+            "Ghavoran: Spin Boost Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 703,
+          "y": 356,
+          "locations": [
+            "Ghavoran: Spin Boost Tower - Energy Part"
+          ],
+          "size": 20
+        },
+        {
+          "x": 802,
+          "y": 181,
+          "locations": [
+            "Ghavoran: Spin Boost Tower - Energy Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 749,
+          "y": 62,
+          "locations": [
+            "Ghavoran: Spin Boost Tower - Power Bomb Tank"
+          ],
+          "size": 20
+        },
+        {
+          "x": 537,
+          "y": 658,
+          "locations": [
+            "Ghavoran: Super Missile Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 616,
+          "y": 587,
+          "locations": [
+            "Ghavoran: Super Missile Room Access"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1007,
+          "y": 288,
+          "locations": [
+            "Ghavoran: Teleport to Burenia"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1035,
+          "y": 307,
+          "locations": [
+            "Ghavoran: Total Recharge Station North"
+          ],
+          "size": 20
+        }
+      ]
+    },
+    {
+      "name": "Hanubia",
+      "image": "images/8.png",
+      "location_size": 32,
+      "markers": [
+        {
+          "x": 1315,
+          "y": 523,
+          "locations": [
+            "Hanubia: E.M.M.I.-07PB"
+          ],
+          "size": 20
+        },
+        {
+          "x": 916,
+          "y": 529,
+          "locations": [
+            "Hanubia: Ferenia Shortcut"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1065,
+          "y": 452,
+          "locations": [
+            "Hanubia: Speedboost Puzzle Room"
+          ],
+          "size": 20
+        },
+        {
+          "x": 1020,
+          "y": 346,
+          "locations": [
+            "Hanubia: Total Recharge Station North"
+          ],
+          "size": 20
+        }
+      ]
+    }
+  ]
+}

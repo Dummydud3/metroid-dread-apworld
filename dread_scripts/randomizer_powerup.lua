@@ -43,6 +43,9 @@ function RandomizerPowerup.MarkLocationCollected(locationIdentifier)
     if playerSection ~= nil then
         Blackboard.SetProp(playerSection, propName, "b", true)
     end
+    if ApLoadingTips and type(ApLoadingTips.NotifyCheckCollected) == "function" then
+        pcall(ApLoadingTips.NotifyCheckCollected, locationIdentifier)
+    end
     local pickupIndex = nil
     if RL and RL.BossPickupIndexByLocation then
         pickupIndex = RL.BossPickupIndexByLocation[locationIdentifier]
@@ -70,16 +73,49 @@ function RandomizerPowerup.IncrementInventoryIndex()
     Blackboard.SetProp(playerSection, propName, "f", currentIndex)
 end
 
--- Stub for missing Randovania functions to prevent crashes
+-- Safe DNA HUD update when ODR custom_scenario is not present (fallback build).
 if not Scenario then Scenario = {} end
 if not Scenario.UpdateHudDnaCount then
     function Scenario.UpdateHudDnaCount()
-        -- Stub for Archipelago (DNA counter not used)
+        if not Init or not Init.iNumRequiredArtifacts or Init.iNumRequiredArtifacts <= 0 then
+            return
+        end
+        local label = Scenario.DnaCountLabel
+        if label == nil then
+            return
+        end
+        if Exists and not Exists(label) then
+            return
+        end
+        local currentDnaCount = 0
+        for i = 1, Init.iNumRequiredArtifacts do
+            if RandomizerPowerup.GetItemAmount("ITEM_RANDO_ARTIFACT_" .. i) > 0 then
+                currentDnaCount = currentDnaCount + 1
+            end
+        end
+        local requiredDnaCount = Init.iNumRequiredArtifacts
+        local dnaText = ("%d / %d"):format(currentDnaCount, requiredDnaCount)
+        local haveAllDna = currentDnaCount >= requiredDnaCount
+        if GUI and GUI.SetProperties then
+            GUI.SetProperties(label, {
+                ColorR = "1.0",
+                ColorG = haveAllDna and "0.5" or "1.0",
+                ColorB = haveAllDna and "0.5" or "1.0",
+            })
+        end
+        if GUI and GUI.SetLabelText then
+            GUI.SetLabelText(label, dnaText)
+        end
+        if label.ForceRedraw then
+            label:ForceRedraw()
+        end
     end
 end
 if not Game.UpdateHudDnaCount then
     function Game.UpdateHudDnaCount()
-        -- Stub for Archipelago (DNA counter not used)
+        if Scenario and Scenario.UpdateHudDnaCount then
+            Scenario.UpdateHudDnaCount()
+        end
     end
 end
 
@@ -268,6 +304,16 @@ function RandomizerPowerup.IncreaseAmmo(resource)
     RandomizerPowerup.IncreaseItemAmount(current_id, resource.quantity, resource.item_id)
 end
 
+local function _ap_safe_update_hud_dna()
+    if not Scenario or type(Scenario.UpdateHudDnaCount) ~= "function" then
+        return
+    end
+    local ok, err = pcall(Scenario.UpdateHudDnaCount)
+    if not ok then
+        Game.LogWarn(0, "UpdateHudDnaCount failed: " .. tostring(err))
+    end
+end
+
 function RandomizerPowerup.GrantNextArtifact()
     -- Grant the first unowned ITEM_RANDO_ARTIFACT_N (N <= required DNA).
     -- Used for AP server /give DNA when artifact slot is not fixed upfront.
@@ -282,9 +328,7 @@ function RandomizerPowerup.GrantNextArtifact()
             RandomizerPowerup.IncreaseItemAmount(artifact_id, 1)
             local resource = {item_id = artifact_id, quantity = 1}
             RandomizerPowerup.CheckArtifacts(resource)
-            if Scenario and Scenario.UpdateHudDnaCount then
-                Scenario.UpdateHudDnaCount()
-            end
+            _ap_safe_update_hud_dna()
             return resource
         end
     end
@@ -299,14 +343,11 @@ function RandomizerPowerup.CheckArtifacts(resource)
 
     if resource.item_id:find("ITEM_RANDO_ARTIFACT", 1, true) then
         if GUI and GUI.AddEmmyMissionLogEntry then
-            GUI.AddEmmyMissionLogEntry("#MLOG_" .. resource.item_id)
+            pcall(GUI.AddEmmyMissionLogEntry, "#MLOG_" .. resource.item_id)
         end
     end
 
-    -- Use stub instead of missing function
-    if Scenario and Scenario.UpdateHudDnaCount then
-        Scenario.UpdateHudDnaCount()
-    end
+    _ap_safe_update_hud_dna()
 
     -- check for all artifact items, which are numbered. if all are collected, grant metroidnization
     for i=1, Init.iNumRequiredArtifacts do
@@ -485,7 +526,8 @@ function RandomizerPowerBomb.OnPickedUp(actor, progression)
     RandomizerPowerup.OnPickedUp(actor, progression)
 end
 
--- Flash Shift: Require Main OFF → first chain unlock also grants Ghost Aura.
+-- Flash Shift: Require Main OFF → first chain unlock also grants Ghost Aura
+-- and keeps the upgrade's chain grant so Flash Shift is usable (iChainDashMax).
 -- Require Main ON → upgrades only stack chains (AP_FLASH_SHIFT_REQUIRES_MAIN).
 AP_FLASH_SHIFT_REQUIRES_MAIN = AP_FLASH_SHIFT_REQUIRES_MAIN or false
 
@@ -496,20 +538,29 @@ local function ap_flash_shift_requires_main()
     return AP_FLASH_SHIFT_REQUIRES_MAIN and true or false
 end
 
+local function ap_unlock_flash_shift_from_upgrade()
+    if RandomizerPowerup.HasItem("ITEM_GHOST_AURA") then
+        return false
+    end
+    if ap_flash_shift_requires_main() then
+        return false
+    end
+    RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
+    Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
+    if RandomizerPowerup.DisableInput then
+        RandomizerPowerup.DisableInput()
+    end
+    return true
+end
+
 if not RandomizerPowerup._APFlashUpgradeHooked then
     RandomizerPowerup._APFlashUpgradeHooked = true
     local _APIncreaseItemAmount = RandomizerPowerup.IncreaseItemAmount
     function RandomizerPowerup.IncreaseItemAmount(item_id, quantity, capacity)
         if item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and quantity and quantity > 0 then
-            -- Progressive first unlock: ability only (0 chains). Flag covers the case
-            -- where OnPickedUp already set Ghost Aura before IncreaseItemAmount runs.
-            if RandomizerPowerup._APFlashFirstUnlock then
-                quantity = 0
-            elseif not RandomizerPowerup.HasItem("ITEM_GHOST_AURA") and not ap_flash_shift_requires_main() then
-                RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
-                Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
-                quantity = 0
-            end
+            -- Local pickups use RandomizerPowerup (ODR has no SPECIFIC_CLASSES
+            -- entry for chain upgrades). Unlock Ghost; still grant chains.
+            ap_unlock_flash_shift_from_upgrade()
         end
         return _APIncreaseItemAmount(item_id, quantity, capacity)
     end
@@ -524,23 +575,12 @@ setmetatable(RandomizerFlashShiftUpgrade, {__index = RandomizerPowerup})
 function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
     progression = progression or {{{item_id = "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", quantity = 1}}}
     local first = not RandomizerPowerup.HasItem("ITEM_GHOST_AURA")
-    RandomizerPowerup._APFlashFirstUnlock = false
     if first and not ap_flash_shift_requires_main() then
-        -- Strip chains before granting Ghost so a nested IncreaseItemAmount cannot
-        -- stack included_ammo / upgrade qty onto the unlock pickup (was: 3 flashes).
-        for _, resource_list in ipairs(progression) do
-            for _, resource in ipairs(resource_list) do
-                if resource.item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" then
-                    resource.quantity = 0
-                end
-            end
-        end
-        RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
-        RandomizerPowerup._APFlashFirstUnlock = true
-        Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
+        ap_unlock_flash_shift_from_upgrade()
+    elseif first and ap_flash_shift_requires_main() then
+        Game.LogWarn(0, "Flash Shift Upgrade stacked (waiting for main Flash Shift)")
     end
     RandomizerPowerup.OnPickedUp(actor, progression)
-    RandomizerPowerup._APFlashFirstUnlock = false
 end
 
 function RandomizerFlashShift.OnPickedUp(actor, progression)

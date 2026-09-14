@@ -12,6 +12,47 @@ local function ap_all_bosses_gate()
     return AP_ALL_BOSSES_GATE and true or false
 end
 
+-- HUD DNA refresh must never abort a grant. ODR's UpdateHudDnaCount throws when
+-- DnaCountLabel is nil (UI not ready / label missing); that used to fail the
+-- remote DNA pcall so ReceivedPickups never advanced and the AP item queue stalled.
+local function ap_ensure_hud_dna_wrapped()
+    if not Scenario or type(Scenario.UpdateHudDnaCount) ~= "function" then
+        return
+    end
+    if Scenario._APHudDnaWrapped then
+        return
+    end
+    Scenario._APHudDnaWrapped = true
+    local _ap_orig_update_hud_dna = Scenario.UpdateHudDnaCount
+    function Scenario.UpdateHudDnaCount()
+        local label = Scenario.DnaCountLabel
+        if label == nil then
+            return
+        end
+        if Exists and not Exists(label) then
+            return
+        end
+        if not Init or not Init.iNumRequiredArtifacts or Init.iNumRequiredArtifacts <= 0 then
+            return
+        end
+        return _ap_orig_update_hud_dna()
+    end
+end
+
+local function ap_update_hud_dna()
+    ap_ensure_hud_dna_wrapped()
+    if not Scenario or type(Scenario.UpdateHudDnaCount) ~= "function" then
+        return
+    end
+    local ok, err = pcall(Scenario.UpdateHudDnaCount)
+    if not ok then
+        Game.LogWarn(0, "UpdateHudDnaCount failed: " .. tostring(err))
+        if RL and RL.SendApLog then
+            RL.SendApLog("AP_DNA_HUD_FAIL: " .. tostring(err))
+        end
+    end
+end
+
 function RandomizerPowerup.CheckArtifacts(resource)
     if not resource then return end
     if not Init or Init.iNumRequiredArtifacts == 0 then return end
@@ -19,13 +60,11 @@ function RandomizerPowerup.CheckArtifacts(resource)
 
     if resource.item_id:find("ITEM_RANDO_ARTIFACT", 1, true) then
         if GUI and GUI.AddEmmyMissionLogEntry then
-            GUI.AddEmmyMissionLogEntry("#MLOG_" .. resource.item_id)
+            pcall(GUI.AddEmmyMissionLogEntry, "#MLOG_" .. resource.item_id)
         end
     end
 
-    if Scenario and Scenario.UpdateHudDnaCount then
-        Scenario.UpdateHudDnaCount()
-    end
+    ap_update_hud_dna()
 
     for i = 1, Init.iNumRequiredArtifacts do
         if RandomizerPowerup.GetItemAmount("ITEM_RANDO_ARTIFACT_" .. i) == 0 then
@@ -58,9 +97,7 @@ function RandomizerPowerup.GrantNextArtifact()
             RandomizerPowerup.IncreaseItemAmount(artifact_id, 1)
             local resource = {item_id = artifact_id, quantity = 1}
             RandomizerPowerup.CheckArtifacts(resource)
-            if Scenario and Scenario.UpdateHudDnaCount then
-                Scenario.UpdateHudDnaCount()
-            end
+            ap_update_hud_dna()
             return resource
         end
     end
@@ -74,6 +111,9 @@ function RandomizerPowerup.MarkLocationCollected(locationIdentifier)
     Game.LogWarn(0, propName)
     if playerSection ~= nil then
         Blackboard.SetProp(playerSection, propName, "b", true)
+    end
+    if ApLoadingTips and type(ApLoadingTips.NotifyCheckCollected) == "function" then
+        pcall(ApLoadingTips.NotifyCheckCollected, locationIdentifier)
     end
 
     -- Boss/EMMI wrappers call this with scenario_callback keys (actor is nil in OnPickedUp).
@@ -108,6 +148,9 @@ end
 
 -- Progressive Flash Shift Upgrade: unlock Ghost Aura on first pickup when
 -- Require Main Item is OFF. When Require Main is ON, upgrades only add chains.
+-- First unlock also keeps the upgrade's chain grant (upgrade_amount) so
+-- iChainDashMax is non-zero and Flash Shift is actually usable. Stripping
+-- chains to 0 left Ghost Aura owned with iChainDashMax=0 → no usable flashes.
 -- AP_FLASH_SHIFT_REQUIRES_MAIN is set by finalize_mod / client from seed options.
 AP_FLASH_SHIFT_REQUIRES_MAIN = AP_FLASH_SHIFT_REQUIRES_MAIN or false
 
@@ -118,19 +161,31 @@ local function ap_flash_shift_requires_main()
     return AP_FLASH_SHIFT_REQUIRES_MAIN and true or false
 end
 
--- Mirror of randomizer_powerup.lua Flash Shift Upgrade (progressive first = ability only).
+local function ap_unlock_flash_shift_from_upgrade()
+    if RandomizerPowerup.HasItem("ITEM_GHOST_AURA") then
+        return false
+    end
+    if ap_flash_shift_requires_main() then
+        return false
+    end
+    RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
+    Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
+    -- Ability items need an input refresh or the new move can stay dead until reload.
+    if RandomizerPowerup.DisableInput then
+        RandomizerPowerup.DisableInput()
+    end
+    return true
+end
+
+-- Mirror of randomizer_powerup.lua Flash Shift Upgrade (progressive first = ability + chains).
 if not RandomizerPowerup._APFlashUpgradeHooked then
     RandomizerPowerup._APFlashUpgradeHooked = true
     local _APIncreaseItemAmount = RandomizerPowerup.IncreaseItemAmount
     function RandomizerPowerup.IncreaseItemAmount(item_id, quantity, capacity)
         if item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and quantity and quantity > 0 then
-            if RandomizerPowerup._APFlashFirstUnlock then
-                quantity = 0
-            elseif not RandomizerPowerup.HasItem("ITEM_GHOST_AURA") and not ap_flash_shift_requires_main() then
-                RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
-                Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
-                quantity = 0
-            end
+            -- Local pickups use RandomizerPowerup (ODR has no SPECIFIC_CLASSES
+            -- entry for chain upgrades). Unlock Ghost here; still grant chains.
+            ap_unlock_flash_shift_from_upgrade()
         end
         return _APIncreaseItemAmount(item_id, quantity, capacity)
     end
@@ -141,23 +196,12 @@ setmetatable(RandomizerFlashShiftUpgrade, {__index = RandomizerPowerup})
 function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
     progression = progression or {{{item_id = "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", quantity = 1}}}
     local first = not RandomizerPowerup.HasItem("ITEM_GHOST_AURA")
-    RandomizerPowerup._APFlashFirstUnlock = false
     if first and not ap_flash_shift_requires_main() then
-        for _, resource_list in ipairs(progression) do
-            for _, resource in ipairs(resource_list) do
-                if resource.item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" then
-                    resource.quantity = 0
-                end
-            end
-        end
-        RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
-        RandomizerPowerup._APFlashFirstUnlock = true
-        Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
+        ap_unlock_flash_shift_from_upgrade()
     elseif first and ap_flash_shift_requires_main() then
         Game.LogWarn(0, "Flash Shift Upgrade stacked (waiting for main Flash Shift)")
     end
     RandomizerPowerup.OnPickedUp(actor, progression)
-    RandomizerPowerup._APFlashFirstUnlock = false
 end
 
 -- Main Flash Shift: do not strip chains when inventory still has 0

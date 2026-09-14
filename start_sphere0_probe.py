@@ -898,7 +898,32 @@ def main() -> int:
         return 1
     if not isinstance(req, dict):
         req = {}
-    result = evaluate_probe(req)
+    try:
+        result = evaluate_probe(req)
+    except ModuleNotFoundError as exc:
+        missing = getattr(exc, "name", None) or str(exc)
+        result = {
+            "ok": False,
+            "severity": "error",
+            "title": "Python package missing",
+            "message": (
+                f"Sphere-0 probe could not import {missing!r}. "
+                "Open Metroid Bread Hub → Connect once so client deps install "
+                f"(pathspec, etc.), then retry.\n\n{exc}"
+            ),
+            "fix": "Hub Connect installs deps into _metroid_bread_venv (Linux) "
+            "or %LOCALAPPDATA%\\MetroidBread\\venv (Windows).",
+            "fix_alt": "Or: python -m pip install 'pathspec>=0.12.1'",
+        }
+    except Exception as exc:
+        result = {
+            "ok": False,
+            "severity": "error",
+            "title": "Sphere-0 probe crashed",
+            "message": f"{type(exc).__name__}: {exc}",
+            "fix": "Update the Metroid Bread Hub package and retry.",
+            "fix_alt": "",
+        }
     # ASCII-only JSON: Hub on Windows often uses a non-UTF8 console encoding;
     # ensure_ascii=False truncated mid-message on UnicodeEncodeError.
     json.dump(result, sys.stdout, ensure_ascii=True)

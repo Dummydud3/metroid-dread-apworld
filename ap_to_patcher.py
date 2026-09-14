@@ -1739,17 +1739,24 @@ def apply_company_title_screen(
 
 
 def normalize_ap_seed_id(value: Optional[str]) -> str:
-    """Canonical seed id for client↔game compare (title / RoomInfo / Init.sApSeedId)."""
+    """Canonical seed id for client↔game compare (title / RoomInfo / Init.sApSeedId).
+
+    Strict on purpose: crossed Lua EXEC replies (DeathLink polls, map status,
+    etc.) must never look like a seed, or Hub falsely kicks players mid-game.
+    """
     raw = (value or "").strip()
-    # Pipe-delimited payloads are never AP seeds (e.g. MapIconBankStatus).
-    if not raw or "|" in raw:
+    if not raw:
         return ""
-    display = format_display_seed_id(raw)
-    if display:
-        return display
-    # Do not fall back to arbitrary strings — that poisoned mismatch checks.
-    if re.fullmatch(r"\d{10,}", raw):
-        return raw
+    # Crossed EXEC / status payloads — never seeds.
+    if "|" in raw or "," in raw or "=" in raw or " " in raw:
+        return ""
+    # RoomInfo / Init.sApSeedId: long digit strings (optional SEED_/AP_ prefix).
+    match = re.fullmatch(r"(?:SEED_|AP_)?(\d{10,})", raw)
+    if match:
+        return match.group(1)
+    # Some patches bake a short layout-UUID fragment instead of AP digits.
+    if re.fullmatch(r"[0-9A-Fa-f]{8}", raw):
+        return raw.upper()
     return ""
 
 

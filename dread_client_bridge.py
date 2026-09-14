@@ -382,14 +382,58 @@ def resolve_debug_item_name(
     return None, suggestions
 
 
+def _lua_ensure_grant_next_artifact() -> str:
+    """
+    Inline GrantNextArtifact when romfs still has stock ODR powerup (no AP
+    overrides). Safe to run repeatedly; skips if the function already exists.
+    """
+    return (
+        "if not RandomizerPowerup then error('RandomizerPowerup missing') end; "
+        "if type(RandomizerPowerup.GrantNextArtifact) ~= 'function' then "
+        "  local function ap_hud_dna() "
+        "    if Scenario and type(Scenario.UpdateHudDnaCount) == 'function' then "
+        "      pcall(Scenario.UpdateHudDnaCount) "
+        "    end "
+        "  end; "
+        "  function RandomizerPowerup.GrantNextArtifact() "
+        "    if not Init or not Init.iNumRequiredArtifacts or Init.iNumRequiredArtifacts == 0 then "
+        "      Game.LogWarn(0, 'GrantNextArtifact: DNA gate disabled (iNumRequiredArtifacts=0)'); "
+        "      return nil "
+        "    end; "
+        "    for i = 1, Init.iNumRequiredArtifacts do "
+        "      local artifact_id = 'ITEM_RANDO_ARTIFACT_' .. i; "
+        "      if RandomizerPowerup.GetItemAmount(artifact_id) == 0 then "
+        "        Game.LogWarn(0, 'GrantNextArtifact: granting ' .. artifact_id); "
+        "        RandomizerPowerup.IncreaseItemAmount(artifact_id, 1); "
+        "        local resource = {item_id = artifact_id, quantity = 1}; "
+        "        if type(RandomizerPowerup.CheckArtifacts) == 'function' then "
+        "          pcall(RandomizerPowerup.CheckArtifacts, resource) "
+        "        end; "
+        "        ap_hud_dna(); "
+        "        return resource "
+        "      end "
+        "    end; "
+        "    Game.LogWarn(0, 'GrantNextArtifact: all required artifacts already owned'); "
+        "    return nil "
+        "  end; "
+        "  if RL and RL.SendApLog then "
+        "    RL.SendApLog('AP_DNA: installed runtime GrantNextArtifact fallback') "
+        "  end "
+        "end; "
+    )
+
+
 def format_dna_debug_give_lua(item_name: str) -> str:
     """Local /give Metroid DNA — grants next ITEM_RANDO_ARTIFACT_N in-game."""
     safe_name = item_name.replace("\\", "\\\\").replace('"', '\\"')
     return (
         "do "
-        "local ok, err = pcall(function() "
+        + _lua_ensure_grant_next_artifact()
+        + "local ok, err = pcall(function() "
         "  local granted = RandomizerPowerup.GrantNextArtifact(); "
-        "  if granted == nil then error('all required artifacts already owned') end "
+        "  if granted == nil then "
+        "    error('all required artifacts already owned (or DNA gate disabled)') "
+        "  end "
         "end); "
         "if ok then "
         f'if RL.SendApLog then RL.SendApLog("AP_GIVE: granted {safe_name}") end; '
@@ -411,15 +455,16 @@ def format_dna_receive_lua(message: str, received_pickups: int, inventory_index:
     Uses RandomizerPowerup.GrantNextArtifact (ODR CheckArtifacts / HUD / Itorash
     gate) instead of a fixed ITEM_RANDO_ARTIFACT_N progression table.
 
-    Only advances ReceivedPickups when GrantNextArtifact is present and the
-    pcall succeeds (nil grant = already complete, still advance). Missing
-    GrantNextArtifact must not eat the sync slot — that was the remote DNA
-    HUD bug on ODR-based patches that never installed the fallback script.
+    Always advances ReceivedPickups after a grant attempt so a soft-fail (HUD
+    refresh error, etc.) cannot leave the client stuck in grant cooldown with
+    the rest of the item queue blocked. If GrantNextArtifact is missing from
+    romfs (stock ODR powerup), installs a runtime fallback first.
     """
     safe_message = message.replace("\\", "\\\\").replace('"', '\\"')
     return (
         "do "
-        f'local msg = "{safe_message}"; '
+        + _lua_ensure_grant_next_artifact()
+        + f'local msg = "{safe_message}"; '
         f"local idx = {int(received_pickups)}; "
         f"local inv = {int(inventory_index)}; "
         "if RL and RL.ReceivedPickups and RL.InventoryIndex "
@@ -427,25 +472,20 @@ def format_dna_receive_lua(message: str, received_pickups: int, inventory_index:
         "and not RL.PendingPickup then "
         "  local granted = nil; "
         "  local ok, err = pcall(function() "
-        "    if not RandomizerPowerup "
-        "or type(RandomizerPowerup.GrantNextArtifact) ~= 'function' then "
-        "      error('GrantNextArtifact missing (re-patch AP overrides)') "
-        "    end "
         "    granted = RandomizerPowerup.GrantNextArtifact() "
         "  end); "
         "  if not ok then "
         "    Game.LogWarn(0, 'AP DNA grant failed: '..tostring(err)); "
         "    if RL.SendApLog then RL.SendApLog('AP_DNA_FAIL: '..tostring(err)) end "
-        "  else "
-        "    if granted == nil then "
-        "      Game.LogWarn(0, 'AP DNA: all artifacts already collected') "
-        "    end; "
-        '    Scenario.WriteToPlayerBlackboard("ReceivedPickups","f",idx + 1); '
-        "    if RL.SendReceivedPickups then RL.SendReceivedPickups(tostring(idx + 1)) end; "
-        "    if Scenario and Scenario.IsUserInteractionEnabled and Scenario.QueueAsyncPopup "
+        "  elseif granted == nil then "
+        "    Game.LogWarn(0, 'AP DNA: all artifacts already collected') "
+        "  end; "
+        # Always ACK: DNA grant errors must not freeze the remote item queue.
+        '  Scenario.WriteToPlayerBlackboard("ReceivedPickups","f",idx + 1); '
+        "  if RL.SendReceivedPickups then RL.SendReceivedPickups(tostring(idx + 1)) end; "
+        "  if ok and Scenario and Scenario.IsUserInteractionEnabled and Scenario.QueueAsyncPopup "
         "and Scenario.IsUserInteractionEnabled(true) then "
-        "      pcall(function() Scenario.QueueAsyncPopup(msg, 7.0) end) "
-        "    end "
+        "    pcall(function() Scenario.QueueAsyncPopup(msg, 7.0) end) "
         "  end "
         "elseif RL and RL.GetReceivedPickupsAndSend then "
         '  Game.AddSF(0.05, "RL.GetReceivedPickupsAndSend", "b", false); '
@@ -712,10 +752,11 @@ def counts_from_starting_items(
                 counts.get("Flash Shift Upgrade", 0), max(1, chains // up_amt)
             )
     else:
-        # Progressive: ghost ⇒ at least one upgrade; remaining chains ⇒ extra copies.
+        # Progressive: each upgrade grants up_amt chains (including the first,
+        # which also unlocks Ghost Aura). ghost+0-chains is a legacy edge case.
         if ghost > 0:
             counts["Flash Shift Upgrade"] = max(
-                counts.get("Flash Shift Upgrade", 0), 1 + (chains // up_amt)
+                counts.get("Flash Shift Upgrade", 0), max(1, chains // up_amt)
             )
         elif chains > 0:
             counts["Flash Shift Upgrade"] = max(
@@ -999,18 +1040,27 @@ local function ap_flash_shift_requires_main()
     end
     return AP_FLASH_SHIFT_REQUIRES_MAIN and true or false
 end
+local function ap_unlock_flash_shift_from_upgrade()
+    if RandomizerPowerup.HasItem("ITEM_GHOST_AURA") then
+        return false
+    end
+    if ap_flash_shift_requires_main() then
+        return false
+    end
+    RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
+    Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
+    if RandomizerPowerup.DisableInput then
+        RandomizerPowerup.DisableInput()
+    end
+    return true
+end
 if RandomizerPowerup and not RandomizerPowerup._APFlashUpgradeHooked then
     RandomizerPowerup._APFlashUpgradeHooked = true
     local _APIncreaseItemAmount = RandomizerPowerup.IncreaseItemAmount
     function RandomizerPowerup.IncreaseItemAmount(item_id, quantity, capacity)
         if item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and quantity and quantity > 0 then
-            if RandomizerPowerup._APFlashFirstUnlock then
-                quantity = 0
-            elseif not RandomizerPowerup.HasItem("ITEM_GHOST_AURA") and not ap_flash_shift_requires_main() then
-                RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
-                Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
-                quantity = 0
-            end
+            -- Keep chain qty; zeroing left iChainDashMax=0 and Flash Shift unusable.
+            ap_unlock_flash_shift_from_upgrade()
         end
         return _APIncreaseItemAmount(item_id, quantity, capacity)
     end
@@ -1020,21 +1070,12 @@ setmetatable(RandomizerFlashShiftUpgrade, {{__index = RandomizerPowerup}})
 function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
     progression = progression or {{{{{{item_id = "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", quantity = 1}}}}}}
     local first = not RandomizerPowerup.HasItem("ITEM_GHOST_AURA")
-    RandomizerPowerup._APFlashFirstUnlock = false
     if first and not ap_flash_shift_requires_main() then
-        for _, resource_list in ipairs(progression) do
-            for _, resource in ipairs(resource_list) do
-                if resource.item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" then
-                    resource.quantity = 0
-                end
-            end
-        end
-        RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
-        RandomizerPowerup._APFlashFirstUnlock = true
-        Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
+        ap_unlock_flash_shift_from_upgrade()
+    elseif first and ap_flash_shift_requires_main() then
+        Game.LogWarn(0, "Flash Shift Upgrade stacked (waiting for main Flash Shift)")
     end
     RandomizerPowerup.OnPickedUp(actor, progression)
-    RandomizerPowerup._APFlashFirstUnlock = false
 end
 if not RL then RL = {{}} end
 -- Harden ODR Scenario.SetTunableValue: nil category/property (or failed
@@ -1677,14 +1718,23 @@ if not RL.DeathCheckScheduled then
 end
 -- Reload ApLoadingTips from romfs on every connect so wrap order / ForceNextTip
 -- matches the installed script (death Continue: orig ShowLoadingScreen then pin).
+-- Mark connected BEFORE Install so tip carousel uses the generic AP pool (not
+-- CONNECT CLIENT) on subsequent LoadScenario / warp / transport loads.
+RL.APConnected = true
 pcall(function()
+  Game.DoFile("system/scripts/ap_tip_pool.lua")
   Game.DoFile("system/scripts/ap_loading_tips.lua")
-  if ApLoadingTips and ApLoadingTips.Install then
-    ApLoadingTips.Install()
+  if ApLoadingTips then
+    ApLoadingTips._client_connected = true
+    if ApLoadingTips.Install then
+      ApLoadingTips.Install()
+    end
+    if ApLoadingTips.PrepareGenericCarousel then
+      pcall(ApLoadingTips.PrepareGenericCarousel, "APConnect")
+    end
   end
 end)
 RL.SendApLog("AP: DeathLink detection active (poll + OnPlayerDead hook)")
-RL.APConnected = true
 RL.Bootstrap = true
 """.strip()
     part3 = (part3_boss + "\n" + part3_rest).strip()
@@ -2457,7 +2507,9 @@ function RL.VisitAreaBounds(scenario, area)
     end
     local x1,y1,x2,y2 = bounds[1], bounds[2], bounds[3], bounds[4]
     -- Prefer VisitBoundsSafe. Do NOT call legacy OdrMap.VisitBounds (SEGV).
-    if OdrMap and OdrMap.VisitBoundsSafe then
+    -- Gate on IsVisitBoundsSafeReady only — never paint (or probe BSS status)
+    -- when the stackvt writer is not ready (HW Data Abort in VisitBoundsSafeStatus).
+    if OdrMap and OdrMap.VisitBoundsSafe and RL.NativeVisitBoundsSafeReady() then
         local ret = nil
         local ok = pcall(function()
             ret = OdrMap.VisitBoundsSafe(scenario, x1, y1, x2, y2)
@@ -2530,16 +2582,17 @@ function RL.ApplyReachableMap(by_scenario)
                 end
             end)
         end
-        local flag = "?"
+        -- Do NOT call OdrMap.VisitBoundsSafeStatus here — HW crash FA01AE0C…
+        -- Data Abort inside IsAabbVtableReady BSS probe during AP_MAP logging.
+        -- Gate/log with IsVisitBoundsSafeReady only (stackvt path).
+        local ready = "?"
         pcall(function()
-            if OdrMap and OdrMap.VisitBoundsSafeStatus then
-                flag = tostring(OdrMap.VisitBoundsSafeStatus())
-            end
+            ready = tostring(RL.NativeVisitBoundsSafeReady())
         end)
-        local sig = tostring(scen).."|"..tostring(painted).."|"..tostring(failed).."|"..flag
+        local sig = tostring(scen).."|"..tostring(painted).."|"..tostring(failed).."|"..ready
         if sig ~= RL.MapBoundsPaintLastSig then
             RL.MapBoundsPaintLastSig = sig
-            RL.SendApLog("AP_MAP: reachable bounds paint ok n="..tostring(painted).." fail="..tostring(failed).." status="..flag)
+            RL.SendApLog("AP_MAP: reachable bounds paint ok n="..tostring(painted).." fail="..tostring(failed).." ready="..ready)
         end
     end
     -- Fillmaps: optional bright supplement (flag=6). Default OFF — dim AABB only.

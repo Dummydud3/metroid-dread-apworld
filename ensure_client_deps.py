@@ -815,9 +815,14 @@ def ensure_client_deps(
     except RuntimeError as exc:
         return False, str(exc) + "\n\n" + python_missing_message(), EXIT_PYTHON_MISSING
 
+    # Machine-readable path for Hub Electron (must match the launch interpreter).
+    def _hub_python_line() -> str:
+        return f"HUB_CLIENT_PYTHON={cmd[0]}"
+
     if not missing:
         _log(f"Python client packages OK ({format_cmd(cmd)}).")
-        return True, f"Python client packages OK ({format_cmd(cmd)}).", EXIT_OK
+        _log(_hub_python_line())
+        return True, f"Python client packages OK ({format_cmd(cmd)}).\n{_hub_python_line()}", EXIT_OK
 
     where = "into local venv" if uses_local_venv() else "for Hub client"
     _log(
@@ -851,7 +856,8 @@ def ensure_client_deps(
 
     msg = f"Installed Python client packages ({format_cmd(cmd)}): " + ", ".join(missing)
     _log(msg)
-    return True, msg, EXIT_OK
+    _log(_hub_python_line())
+    return True, f"{msg}\n{_hub_python_line()}", EXIT_OK
 
 
 def ensure_client_deps_or_raise(

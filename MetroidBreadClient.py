@@ -1266,21 +1266,27 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
             "      ..' — need subsdk9 0.4.1-stackvt; try /map_smoke (fillmap cutout)')\n"
             "    return 'no-api'\n"
             "  end\n"
-            "  local status_before, status_after = '?', '?'\n"
-            "  pcall(function() if OdrMap.VisitBoundsSafeStatus then status_before = tostring(OdrMap.VisitBoundsSafeStatus()) end end)\n"
+            "  -- Prefer IsVisitBoundsSafeReady over VisitBoundsSafeStatus (BSS probe\n"
+            "  -- Data Aborted on Atmosphere HW — see crash FA01AE0C… +0xc04c).\n"
+            "  local ready_before, ready_after = '?', '?'\n"
+            "  pcall(function() if RL.NativeVisitBoundsSafeReady then ready_before = tostring(RL.NativeVisitBoundsSafeReady()) end end)\n"
             "  local before = RL.ProbeVisitedCells(scen)\n"
             "  local ret, reason = nil, nil\n"
             "  local ok, err = pcall(function()\n"
+            "    if RL.NativeVisitBoundsSafeReady and not RL.NativeVisitBoundsSafeReady() then\n"
+            "      ret, reason = false, 'not-ready'\n"
+            "      return\n"
+            "    end\n"
             "    ret, reason = OdrMap.VisitBoundsSafe(scen, x1, y1, x2, y2)\n"
             "  end)\n"
-            "  pcall(function() if OdrMap.VisitBoundsSafeStatus then status_after = tostring(OdrMap.VisitBoundsSafeStatus()) end end)\n"
+            "  pcall(function() if RL.NativeVisitBoundsSafeReady then ready_after = tostring(RL.NativeVisitBoundsSafeReady()) end end)\n"
             "  local after = RL.ProbeVisitedCells(scen)\n"
             "  pcall(function() if minimap and minimap.SetProfileDataDirty then minimap.SetProfileDataDirty() end end)\n"
             "  local delta = '?'\n"
             "  if before ~= nil and after ~= nil then delta = tostring(after - before) end\n"
             "  if not ok then\n"
             "    RL.SendApLog('AP_MAP: bounds-smoke FAIL area='..tostring(area)..' err='..tostring(err)\n"
-            "      ..' status_before='..status_before..' status_after='..status_after..' ver='..ver\n"
+            "      ..' ready_before='..ready_before..' ready_after='..ready_after..' ver='..ver\n"
             "      ..' — native error; reopen pause map / retry INGAME')\n"
             "    return 'fail'\n"
             "  end\n"
@@ -1291,9 +1297,9 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
             "    ..' aabb=('..tostring(x1)..','..tostring(y1)..')-('..tostring(x2)..','..tostring(y2)..')'\n"
             "    ..' ret='..tostring(ret)..' reason='..tostring(reason)\n"
             "    ..' visited='..tostring(before)..'->'..tostring(after)..' d='..delta\n"
-            "    ..' status_before='..status_before..' status_after='..status_after..' ver='..ver)\n"
+            "    ..' ready_before='..ready_before..' ready_after='..ready_after..' ver='..ver)\n"
             "  if verdict == 'soft-fail' then\n"
-            "    RL.SendApLog('AP_MAP: bounds-smoke tip — soft-fail is NOT latched; check stackvt=1 in status.'\n"
+            "    RL.SendApLog('AP_MAP: bounds-smoke tip — soft-fail is NOT latched; need IsVisitBoundsSafeReady.'\n"
             "      ..' Retry INGAME or /map_smoke (fillmap cutout)')\n"
             "  end\n"
             "  return verdict\n"
@@ -2157,6 +2163,53 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
         except Exception as e:
             self.output(f"Death cause error: {e}")
 
+    def _cmd_explain_location(self, *parts: str):
+        """Explain items/tricks used to reach a check. Usage: /explain_location <id> [request_id]"""
+        if not parts:
+            if not self.ctx.electron_ui:
+                self.output("Usage: /explain_location <location_id> [request_id]")
+            else:
+                self.ctx.emit_ui(
+                    "visualizer_explain",
+                    request_id="",
+                    error="Usage: /explain_location <location_id> [request_id]",
+                    location="",
+                    in_logic=False,
+                    items=[],
+                    tricks=[],
+                    events=[],
+                    alternatives=[],
+                    via=[],
+                )
+            return
+        tokens = [str(p) for p in parts if str(p).strip()]
+        request_id = ""
+        if len(tokens) >= 2 and tokens[0].isdigit():
+            loc_key = tokens[0]
+            request_id = tokens[1]
+        else:
+            loc_key = " ".join(tokens)
+        payload = self.ctx.explain_visualizer_location(loc_key, request_id=request_id)
+        if self.ctx.electron_ui:
+            self.ctx.emit_ui("visualizer_explain", **payload)
+            return
+        if payload.get("error"):
+            self.output(str(payload["error"]))
+            return
+        name = payload.get("location") or loc_key
+        if payload.get("in_logic"):
+            items = ", ".join(payload.get("items") or []) or "none"
+            tricks = ", ".join(payload.get("tricks") or []) or "none"
+            self.output(f"{name}: in logic. Items: {items}. Tricks: {tricks}.")
+            return
+        items = ", ".join(payload.get("items") or []) or "none"
+        tricks = ", ".join(payload.get("tricks") or []) or "none"
+        events = ", ".join(payload.get("events") or []) or "none"
+        self.output(
+            f"{name}: not in logic. Next hop items: {items}. "
+            f"Tricks: {tricks}. Events: {events}."
+        )
+
 
 class MetroidBreadContext(CommonContext):
     command_processor = MetroidBreadClientCommandProcessor
@@ -2179,6 +2232,8 @@ class MetroidBreadContext(CommonContext):
         # RomFS-baked AP seed digits (Init.sApSeedId); compared to RoomInfo.seed_name.
         self.game_ap_seed_id: str = ""
         self._seed_mismatch_triggered: bool = False
+        # One RomFS seed compare per Dread TCP session (reset only on disconnect).
+        self._seed_checked_this_connection: bool = False
 
         # Mercury-style sync state (from game push packets)
         self.inventory_index: Optional[int] = None
@@ -2228,6 +2283,10 @@ class MetroidBreadContext(CommonContext):
         self._tracker_logic_error: Optional[str] = None
         self._in_logic_cache_key: Optional[tuple] = None
         self._in_logic_location_ids: List[int] = []
+        self._visualizer_cells_key: Optional[tuple] = None
+        self._visualizer_cells: Dict[str, List[int]] = {}
+        self._visualizer_areas: Dict[str, List[str]] = {}
+        self._visualizer_spots: Dict[str, List[dict]] = {}
         self._tracker_log_sig: Optional[tuple] = None
         self._tracker_ui_refresh_task: Optional[asyncio.Task] = None
         self._tracker_ui_debounce_s = 0.75
@@ -2690,6 +2749,9 @@ class MetroidBreadContext(CommonContext):
                 "energy_per_tank": 100,
                 "starting_power_bombs": 0,
                 "power_bomb_tank_ammo": 1,
+                "starting_missiles": 15,
+                "missile_tank_ammo": 2,
+                "missile_plus_tank_ammo": 10,
             }
 
             class _TrackerOpt:
@@ -2883,6 +2945,121 @@ class MetroidBreadContext(CommonContext):
             if self.electron_ui:
                 print(f"[tracker-logic] ERROR {exc}", flush=True)
             return list(self._in_logic_location_ids)
+
+    def _location_ref(self, raw: str):
+        """Resolve a visualizer location id or AP name to (name, id)."""
+        text = str(raw or "").strip()
+        from worlds.metroid_bread.Locations import location_table
+
+        if text.isdigit():
+            loc_id = int(text)
+            for name, data in location_table.items():
+                if data.id == loc_id:
+                    return name, loc_id
+            return None, loc_id
+        if text in location_table:
+            data = location_table[text]
+            return text, data.id
+        return None, None
+
+    def explain_visualizer_location(self, raw: str, request_id: str = "") -> dict:
+        """Hub visualizer: items / enabled tricks for one check."""
+        payload = {
+            "request_id": str(request_id or ""),
+            "location": "",
+            "location_id": None,
+            "in_logic": False,
+            "items": [],
+            "tricks": [],
+            "events": [],
+            "alternatives": [],
+            "via": [],
+            "error": "",
+        }
+        name, loc_id = self._location_ref(raw)
+        if name is None:
+            payload["error"] = f"Unknown location: {raw}"
+            payload["location_id"] = loc_id
+            return payload
+        payload["location"] = name
+        payload["location_id"] = loc_id
+        logic = self._ensure_tracker_logic()
+        if logic is None:
+            payload["error"] = self._tracker_logic_error or "Tracker logic is not ready."
+            return payload
+        try:
+            from worlds.metroid_bread.tracker_gate_events import (
+                TRACKER_EXCLUDE_AUTO_EVENTS,
+            )
+
+            explained = logic.explain_location(
+                name,
+                self._tracker_item_counts(),
+                exclude_auto_events=TRACKER_EXCLUDE_AUTO_EVENTS,
+            )
+            payload.update(explained)
+            payload["request_id"] = str(request_id or "")
+            payload["location_id"] = loc_id
+            return payload
+        except Exception as exc:
+            logger.warning("Visualizer explain failed: %s", exc)
+            payload["error"] = str(exc)
+            return payload
+
+    def _visualizer_map_paint(
+        self,
+    ) -> Tuple[Dict[str, List[str]], Dict[str, List[int]], Dict[str, List[dict]]]:
+        """Reachable camera names + node spots for terrain-island paint."""
+        logic = self._ensure_tracker_logic()
+        if logic is None:
+            return {}, {}, {}
+        counts = self._tracker_item_counts()
+        cache_key = (logic.starting_node, tuple(sorted(counts.items())))
+        if cache_key == self._visualizer_cells_key:
+            return self._visualizer_areas, self._visualizer_cells, self._visualizer_spots
+        try:
+            from worlds.metroid_bread.tracker_gate_events import (
+                TRACKER_EXCLUDE_AUTO_EVENTS,
+            )
+            from worlds.metroid_bread.visualizer_world import (
+                reachable_area_names,
+                reachable_node_spots,
+            )
+
+            areas = reachable_area_names(
+                logic,
+                counts,
+                exclude_auto_events=TRACKER_EXCLUDE_AUTO_EVENTS,
+            )
+            spots = reachable_node_spots(
+                logic,
+                counts,
+                exclude_auto_events=TRACKER_EXCLUDE_AUTO_EVENTS,
+            )
+            self._visualizer_cells_key = cache_key
+            self._visualizer_areas = areas
+            self._visualizer_cells = {}
+            self._visualizer_spots = spots
+            return areas, self._visualizer_cells, spots
+        except Exception as exc:
+            logger.debug("Visualizer map paint failed: %s", exc)
+            return (
+                dict(self._visualizer_areas),
+                dict(self._visualizer_cells),
+                dict(self._visualizer_spots),
+            )
+
+    def _visualizer_reachable_cells(self) -> Dict[str, List[int]]:
+        _areas, cells, _spots = self._visualizer_map_paint()
+        return cells
+
+    def _visualizer_reachable_areas(self) -> Dict[str, List[str]]:
+        areas, _cells, _spots = self._visualizer_map_paint()
+        return areas
+
+    def _visualizer_reachable_spots(self) -> Dict[str, List[dict]]:
+        _areas, _cells, spots = self._visualizer_map_paint()
+        return spots
 
     def _boss_check_location_ids(self) -> Dict[str, int]:
         try:
@@ -3895,6 +4072,9 @@ class MetroidBreadContext(CommonContext):
             "logic_error": self._tracker_logic_error or "",
             "logic_item_count": len(counts),
             "logic_start": start,
+            "reachable_cells": self._visualizer_reachable_cells() if self.electron_ui else {},
+            "reachable_areas": self._visualizer_reachable_areas() if self.electron_ui else {},
+            "reachable_spots": self._visualizer_reachable_spots() if self.electron_ui else {},
             "bosses": self._tracker_boss_status() if self.electron_ui else [],
             "game_goal": int(getattr(self, "_slot_game_goal", 0) or 0),
             "game_beaten": bool(self._game_beaten_flag or self.finished_game),
@@ -4171,6 +4351,10 @@ class MetroidBreadContext(CommonContext):
             self._tracker_logic = None
             self._tracker_logic_error = None
             self._in_logic_cache_key = None
+            self._visualizer_cells_key = None
+            self._visualizer_cells = {}
+            self._visualizer_areas = {}
+            self._visualizer_spots = {}
             self._tracker_log_sig = None
             self.emit_ui("ap_connected", **self.ui_status_payload())
             self.emit_ui_status()
@@ -4181,11 +4365,12 @@ class MetroidBreadContext(CommonContext):
             # Server checked_locations → collected map labels (after keys load / scout).
             self._schedule_map_icon_labels_push(force=True)
             self._schedule_all_bosses_itorash_gate()
-            # AP seed now known — compare against patched RomFS if Dread is linked.
-            asyncio.create_task(
-                self._check_seed_mismatch(reason="ap_connected"),
-                name="SeedMismatchApConnected",
-            )
+            # AP seed now known — one compare if Dread is already linked this session.
+            if self.game_connected and not self._seed_checked_this_connection:
+                asyncio.create_task(
+                    self._check_seed_mismatch(reason="ap_connected"),
+                    name="SeedMismatchApConnected",
+                )
         elif cmd == "ReceivedItems":
             # Game sync is driven by items_received + ReceivedPickups index.
             self.emit_ui_status()
@@ -4213,10 +4398,11 @@ class MetroidBreadContext(CommonContext):
                 password_required=bool(args.get("password")),
                 **self.ui_status_payload(),
             )
-            asyncio.create_task(
-                self._check_seed_mismatch(reason="room_info"),
-                name="SeedMismatchRoomInfo",
-            )
+            if self.game_connected and not self._seed_checked_this_connection:
+                asyncio.create_task(
+                    self._check_seed_mismatch(reason="room_info"),
+                    name="SeedMismatchRoomInfo",
+                )
         elif cmd == "DataPackage":
             self._refresh_item_id_to_name()
         elif cmd == "LocationInfo":
@@ -5198,54 +5384,75 @@ class MetroidBreadContext(CommonContext):
             "or ((Init and Init.sApSeedId) or ''))"
         )
         try:
-            resp = await self.run_lua_code(lua, wait_response=True, timeout=5.0)
-        except Exception as exc:
-            logger.debug("AP seed id read failed: %s", exc)
-            return self.game_ap_seed_id or ""
-        raw = ""
-        if resp:
-            raw = resp.decode("utf-8", errors="replace").strip()
-        if raw.lower() in ("nil", "none", "null"):
-            raw = ""
-        # Reject crossed Lua replies (e.g. MapIconBankStatus → "0.1.17-…|true|ok").
-        try:
             from ap_to_patcher import normalize_ap_seed_id
-
-            raw = normalize_ap_seed_id(raw)
         except Exception:
-            if "|" in raw or "label-flag" in raw:
-                logger.debug("Ignoring non-seed Lua payload for Init.sApSeedId: %r", raw)
+            def normalize_ap_seed_id(value: Optional[str]) -> str:
+                text = (value or "").strip()
+                if not text or "|" in text or "," in text:
+                    return ""
+                m = re.fullmatch(r"(?:SEED_|AP_)?(\d{10,})", text)
+                return m.group(1) if m else ""
+
+        # Retry once: a timed-out DeathLink poll can steal the first EXEC reply
+        # (payload like "INGAME,100.0,100.0,0,0,0,true,nil").
+        last_raw = ""
+        for attempt in range(2):
+            try:
+                resp = await self.run_lua_code(lua, wait_response=True, timeout=5.0)
+            except Exception as exc:
+                logger.debug("AP seed id read failed (attempt %s): %s", attempt + 1, exc)
+                return self.game_ap_seed_id or ""
+            raw = ""
+            if resp:
+                raw = resp.decode("utf-8", errors="replace").strip()
+            if raw.lower() in ("nil", "none", "null"):
                 raw = ""
-        self.game_ap_seed_id = raw
-        return raw
+            last_raw = raw
+            normalized = normalize_ap_seed_id(raw)
+            if normalized:
+                self.game_ap_seed_id = normalized
+                return normalized
+            if raw:
+                logger.debug(
+                    "Ignoring non-seed Lua payload for Init.sApSeedId: %r", raw
+                )
+        # Keep prior good cache; do not poison with crossed EXEC junk.
+        if last_raw and not normalize_ap_seed_id(last_raw):
+            return self.game_ap_seed_id or ""
+        self.game_ap_seed_id = ""
+        return ""
 
     async def _check_seed_mismatch(self, *, reason: str = "") -> bool:
         """
         Compare Archipelago RoomInfo.seed_name to RomFS Init.sApSeedId.
 
+        Runs at most once per Dread TCP session (reset on disconnect only).
         On mismatch: Hub log + ODR-style fatal popup + return to main menu.
         Returns True when a mismatch was handled. Soft-skips when either side
         is unknown (old mods without Init.sApSeedId, or AP not connected yet).
         """
-        if self._seed_mismatch_triggered:
+        if self._seed_mismatch_triggered or self._seed_checked_this_connection:
             return False
         if not self.game_connected or self._socket is None:
             return False
         ap_seed = getattr(self, "seed_name", None) or ""
         if not str(ap_seed).strip():
+            # Wait for RoomInfo / Connected — do not consume the once-per-session slot.
             return False
 
-        # Always re-read: a poisoned cache (stale EXEC reply) caused false mismatches.
+        # One read attempt for this connection (refresh already retries crossed EXEC).
         game_seed = await self._refresh_game_ap_seed_id()
+        self._seed_checked_this_connection = True
 
         try:
             from ap_to_patcher import normalize_ap_seed_id, seeds_match
         except Exception:
             def normalize_ap_seed_id(value: Optional[str]) -> str:
                 text = (value or "").strip()
-                if not text or "|" in text:
+                if not text or "|" in text or "," in text:
                     return ""
-                return text
+                m = re.fullmatch(r"(?:SEED_|AP_)?(\d{10,})", text)
+                return m.group(1) if m else ""
 
             def seeds_match(client_seed: Optional[str], game_seed: Optional[str]) -> bool:
                 a = normalize_ap_seed_id(client_seed)
@@ -5255,11 +5462,11 @@ class MetroidBreadContext(CommonContext):
                 return a == b
 
         if seeds_match(ap_seed, game_seed):
-            logger.debug(
-                "AP seed check ok (%s): ap=%r game=%r",
+            logger.info(
+                "AP seed check ok (%s): ap=%r game=%r (once this connection)",
                 reason or "?",
                 normalize_ap_seed_id(ap_seed),
-                normalize_ap_seed_id(game_seed),
+                normalize_ap_seed_id(game_seed) or "(unset)",
             )
             return False
 
@@ -5629,6 +5836,7 @@ class MetroidBreadContext(CommonContext):
         self.current_scenario = None
         self.game_ap_seed_id = ""
         self._seed_mismatch_triggered = False
+        self._seed_checked_this_connection = False
         self._lua_stale_exec_responses = 0
 
         if self.death_poll_task:
@@ -5925,8 +6133,7 @@ class MetroidBreadContext(CommonContext):
             self.game_reported_locations.clear()
             self._game_beaten_boss_keys.clear()
             self._game_story_keys.clear()
-            # Allow a fresh mismatch popup if they load another save after returning.
-            self._seed_mismatch_triggered = False
+            # Seed id is RomFS-baked for the patch — do not recheck on title return.
             logger.debug("Returned to main menu; reset sync state")
         elif classified == "TRANSITION":
             # Between title and in-game (or other non-world modes).
@@ -5940,12 +6147,14 @@ class MetroidBreadContext(CommonContext):
             if newly_beaten:
                 logger.info("Boss spawn/progress marked beaten: %s", sorted(newly_beaten))
                 self._in_logic_cache_key = None
+                self._visualizer_cells_key = None
                 self._schedule_tracker_ui_refresh()
                 self._schedule_all_bosses_itorash_gate()
                 self._schedule_reachable_map_push(force=True)
             if newly_story:
                 logger.info("Story gate confirmed: %s", sorted(newly_story))
                 self._in_logic_cache_key = None
+                self._visualizer_cells_key = None
                 self._schedule_tracker_ui_refresh()
                 self._schedule_reachable_map_push(force=True)
             left_menu = prev_mode == "MAINMENU" or prev_scenario == "MAINMENU"
@@ -5958,10 +6167,7 @@ class MetroidBreadContext(CommonContext):
                         f"(prev_scenario={prev_scenario!r} prev_mode={prev_mode})"
                     ),
                 )
-                asyncio.create_task(
-                    self._check_seed_mismatch(reason="enter_ingame"),
-                    name="SeedMismatchEnterIngame",
-                )
+                # Seed check is once per Dread connection — not on every enter-world.
             # RL.UpdateRDVClient / scenario load: re-push reachability so the new
             # area's map paints without waiting for another inventory tick.
             # force=True: MAINMENU→INGAME must paint even if sig matches a prior

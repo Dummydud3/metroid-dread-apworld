@@ -24,6 +24,7 @@ const missingWs = explainClientExit(
 );
 assert.ok(missingWs.includes("websockets"), missingWs);
 assert.ok(/requirements-client\.txt/i.test(missingWs), missingWs);
+assert.ok(/MetroidBread|metroid_bread_venv|local venv/i.test(missingWs), missingWs);
 
 // World-scan noise (bsdiff4) must not mask pkg_resources hang.
 const pkgHang = explainClientExit(

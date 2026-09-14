@@ -617,6 +617,10 @@
     if (toggle) {
       toggle.checked = state.debugLogs;
     }
+    const visualizerBtn = $("btn-visualizer");
+    if (visualizerBtn) {
+      visualizerBtn.hidden = !state.debugLogs;
+    }
   }
 
   function appendPlainLine(text, target, level, opts) {
@@ -2389,6 +2393,11 @@
   $("btn-tracker").addEventListener("click", async () => {
     const result = await hub.openTracker();
     if (!result.ok) appendPlainLine(`[app] ${result.error || "Failed to open tracker"}`);
+  });
+  $("btn-visualizer").addEventListener("click", async () => {
+    if (!state.debugLogs) return;
+    const result = await hub.openVisualizer();
+    if (!result.ok) appendPlainLine(`[app] ${result.error || "Failed to open visualizer"}`);
   });
   $("btn-clear-log").addEventListener("click", () => {
     $("log").textContent = "";

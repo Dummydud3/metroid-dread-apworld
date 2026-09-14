@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("dreadHub", {
   getStatus: () => ipcRenderer.invoke("get-status"),
   isRunning: () => ipcRenderer.invoke("is-running"),
   openTracker: () => ipcRenderer.invoke("open-tracker"),
+  openVisualizer: () => ipcRenderer.invoke("open-visualizer"),
   getPreparedSeed: () => ipcRenderer.invoke("get-prepared-seed"),
   runPatch: (opts) => ipcRenderer.invoke("run-patch", opts),
   cancelPatch: () => ipcRenderer.invoke("cancel-patch"),
@@ -62,6 +63,7 @@ contextBridge.exposeInMainWorld("dreadHub", {
 contextBridge.exposeInMainWorld("dreadClient", {
   getConfig: () => ipcRenderer.invoke("get-config"),
   openTracker: () => ipcRenderer.invoke("open-tracker"),
+  openVisualizer: () => ipcRenderer.invoke("open-visualizer"),
   getStatus: () => ipcRenderer.invoke("get-status"),
   onStatus: (handler) => {
     const listener = (_e, payload) => handler(payload);

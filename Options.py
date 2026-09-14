@@ -559,8 +559,8 @@ class FlashShiftUpgradeCount(Range):
     optional leftovers that can be dropped when the pool is full.
     Classification is filler (chain ammo) like Missile Tanks; they do not consume
     major progression capacity. When Require Main Item is also off, the first
-    upgrade unlocks Flash Shift (progressive) and is promoted to progression;
-    later upgrades add chains only.
+    upgrade is promoted to progression and also grants Upgrade Amount chains so
+    Flash Shift is usable immediately; later upgrades add chains only.
     """
     display_name = "Flash Shift Upgrade Count"
     range_start = 1
@@ -593,8 +593,9 @@ class FlashShiftUpgradeRequiresMainItem(DefaultOnToggle):
     **On:** Flash Shift Upgrades may be collected early and stack chains, but the
     ability does not unlock until the main Flash Shift item is collected.
 
-    **Off:** the first Flash Shift Upgrade unlocks the ability (progressive major);
-    later upgrades add chains only.
+    **Off:** the first Flash Shift Upgrade unlocks the ability (progressive major)
+    and grants Flash Shift Upgrade Amount chains so Flash Shift is immediately
+    usable; later upgrades add that many chains each.
     """
     display_name = "Require Main Item"
 

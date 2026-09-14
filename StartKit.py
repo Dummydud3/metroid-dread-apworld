@@ -170,13 +170,12 @@ def odr_starting_items(
                 grants.get("ITEM_UPGRADE_FLASH_SHIFT_CHAIN", 0) + upgrade_copies * up_amt
             )
         else:
-            # Progressive: first unlocks Ghost Aura with 0 chains; rest add chains.
+            # Progressive: first unlocks Ghost Aura and grants upgrade_amount chains;
+            # each upgrade copy adds upgrade_amount (same as in-game grant).
             grants["ITEM_GHOST_AURA"] = max(grants.get("ITEM_GHOST_AURA", 0), 1)
-            extra_chains = max(0, upgrade_copies - 1) * up_amt
-            if extra_chains > 0:
-                grants["ITEM_UPGRADE_FLASH_SHIFT_CHAIN"] = (
-                    grants.get("ITEM_UPGRADE_FLASH_SHIFT_CHAIN", 0) + extra_chains
-                )
+            grants["ITEM_UPGRADE_FLASH_SHIFT_CHAIN"] = (
+                grants.get("ITEM_UPGRADE_FLASH_SHIFT_CHAIN", 0) + upgrade_copies * up_amt
+            )
     return grants
 
 

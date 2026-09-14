@@ -24,6 +24,12 @@
 -- OnLoadScenarioRequest: ForceNextTip AFTER orig (orig → SetScenarioLoadingScreen
 -- → ShowLoadingScreen). Pinning before Show made TipRefresh soft-fail with no
 -- PoolBuild; death Continue never hits SetLoadingMode to retry (0.5.9 log).
+-- ForceNextTip re-arms OdrTip ForceRefresh (SetTipCount → ArmCarouselRefresh)
+-- after the pin so warp / reload / transport loads rebuild tipGUI — the first
+-- New Game ForceRefresh otherwise leaves gForceRefreshDone set forever.
+-- Priority: Death Link / death joke tips, then CONNECT CLIENT (pre-Hub), else
+-- shuffle the active generic pool (ApTipPool + unlocked ApTipPoolSecondary)
+-- up to 5 tips. Secondary tips unlock one-per-collected-check (see ap_tip_pool.lua).
 -- /tip_force stays AddSF-scheduled dialogue + optional chrome probe.
 
 ApLoadingTips = ApLoadingTips or {
@@ -41,7 +47,20 @@ ApLoadingTips = ApLoadingTips or {
   _chrome_secs = 3.0,
   _pending_tip = nil,
   _deathlink_tip = nil, -- TITLE||BODY; re-pin on checkpoint LoadGame after game-over
+  _rng_seeded = false,
+  _checks_collected_seen = 0, -- watermark for secondary tip unlocks
+  _checks_collected_override = nil, -- optional Hub/debug override
 }
+
+-- Early-connection tip (before Hub sets RL.APConnected).
+ApLoadingTips.CONNECT_TIP = (
+  "{c6}CONNECT CLIENT{c7}||Launch Metroid Bread Client, then press Connect Game "
+  .. "while the game is open.{c0}"
+)
+
+-- Max carousel tips OdrTip can hold at once (slots 0–4).
+ApLoadingTips.GENERIC_TIP_DISPLAY = 5
+
 
 local function log(msg)
   local line = "[ApLoadingTips] " .. tostring(msg)
@@ -76,6 +95,221 @@ end
 
 local function odr_tip_live()
   return type(OdrTip) == "table" and OdrTip.Ready and true or false
+end
+
+function ApLoadingTips.ClientConnected()
+  if RL and RL.APConnected then
+    return true
+  end
+  return ApLoadingTips._client_connected == true
+end
+
+function ApLoadingTips.LoadTipPool()
+  pcall(function()
+    Game.DoFile("system/scripts/ap_tip_pool.lua")
+  end)
+  if type(ApTipPool) == "table" and #ApTipPool > 0 then
+    return ApTipPool
+  end
+  -- Fallback if romfs pool script missing (dev / old patch).
+  return {
+    ApLoadingTips.CONNECT_TIP,
+  }
+end
+
+function ApLoadingTips.LoadSecondaryTipPool()
+  pcall(function()
+    Game.DoFile("system/scripts/ap_tip_pool.lua")
+  end)
+  if type(ApTipPoolSecondary) == "table" then
+    return ApTipPoolSecondary
+  end
+  return {}
+end
+
+--- How many Location_Collected checks this save has (RL.Pickups bitfield props).
+function ApLoadingTips.CountCollectedChecks()
+  local override = tonumber(ApLoadingTips._checks_collected_override)
+  if override ~= nil and override >= 0 then
+    return math.floor(override)
+  end
+  if type(Game) ~= "table" or type(Game.GetPlayerBlackboardSectionName) ~= "function" then
+    return 0
+  end
+  if type(Blackboard) ~= "table" or type(Blackboard.GetProp) ~= "function" then
+    return 0
+  end
+  local ok_ps, ps = pcall(Game.GetPlayerBlackboardSectionName)
+  if not ok_ps or ps == nil or ps == "" then
+    return 0
+  end
+  local n = 0
+  if RL and type(RL.Pickups) == "table" then
+    for _, prop in ipairs(RL.Pickups) do
+      if type(prop) == "string" and prop ~= "" then
+        local ok, v = pcall(Blackboard.GetProp, ps, prop)
+        if ok and v then
+          n = n + 1
+        end
+      end
+    end
+  end
+  -- Keep a watermark so brief Pickups gaps after load do not shrink the pool.
+  local prev = tonumber(ApLoadingTips._checks_collected_seen) or 0
+  if n > prev then
+    ApLoadingTips._checks_collected_seen = n
+  else
+    n = prev
+  end
+  return n
+end
+
+--- Always-on tips + one secondary tip per collected check (capped by secondary size).
+function ApLoadingTips.BuildActiveGenericPool()
+  local base = ApLoadingTips.LoadTipPool()
+  local secondary = ApLoadingTips.LoadSecondaryTipPool()
+  local collected = ApLoadingTips.CountCollectedChecks()
+  local unlock = collected
+  if type(secondary) == "table" and unlock > #secondary then
+    unlock = #secondary
+  end
+  if unlock < 0 then
+    unlock = 0
+  end
+  local active = {}
+  if type(base) == "table" then
+    for i = 1, #base do
+      active[#active + 1] = base[i]
+    end
+  end
+  if type(secondary) == "table" then
+    for i = 1, unlock do
+      active[#active + 1] = secondary[i]
+    end
+  end
+  ApLoadingTips._last_active_pool_size = #active
+  ApLoadingTips._last_secondary_unlocked = unlock
+  return active
+end
+
+--- Watermark +1 when a check is marked collected (mid-session unlock without full recount).
+function ApLoadingTips.NotifyCheckCollected(locationIdentifier)
+  local prev = tonumber(ApLoadingTips._checks_collected_seen) or 0
+  -- Prefer a fresh Pickups recount when Hub mapping is live.
+  local n = ApLoadingTips.CountCollectedChecks()
+  if n <= prev then
+    n = prev + 1
+    ApLoadingTips._checks_collected_seen = n
+  end
+  if RL and type(RL.SendApLog) == "function" then
+    pcall(
+      RL.SendApLog,
+      "AP_TIP: check unlock secondary tips collected~"
+        .. tostring(n)
+        .. " loc="
+        .. tostring(locationIdentifier or "?")
+    )
+  end
+  return n
+end
+
+local function ap_seed_rng()
+  if ApLoadingTips._rng_seeded then
+    return
+  end
+  local seed = 1
+  if os and type(os.time) == "function" then
+    seed = tonumber(os.time()) or 1
+  end
+  if Game and type(Game.GetTime) == "function" then
+    local ok, t = pcall(Game.GetTime)
+    if ok and type(t) == "number" then
+      seed = seed + math.floor(t * 1000)
+    end
+  end
+  math.randomseed(seed % 2147483646 + 1)
+  -- Warm up poorly seeded RNGs.
+  math.random()
+  math.random()
+  ApLoadingTips._rng_seeded = true
+end
+
+local function ap_shuffle_copy(list)
+  local out = {}
+  for i = 1, #list do
+    out[i] = list[i]
+  end
+  for i = #out, 2, -1 do
+    local j = math.random(i)
+    out[i], out[j] = out[j], out[i]
+  end
+  return out
+end
+
+--- Priority: early connect only (Death Link / death jokes use ArmDeathLinkTip).
+function ApLoadingTips.PrepareConnectTip(reason)
+  if not odr_tip_live() or type(OdrTip.SetTipText) ~= "function" then
+    return false
+  end
+  pcall(OdrTip.SetTipText, 0, ApLoadingTips.CONNECT_TIP)
+  if type(OdrTip.SetTipCount) == "function" then
+    pcall(OdrTip.SetTipCount, 1)
+  end
+  if type(OdrTip.SetTipOrder) == "function" then
+    pcall(OdrTip.SetTipOrder, { 0, 1, 2, 3, 4 })
+  end
+  ApLoadingTips._fallback_loc = "#TIP_000_GENERAL_PARKOUR_000"
+  log("PrepareConnectTip reason=" .. tostring(reason or "?"))
+  return true
+end
+
+--- Shuffle active generic pool (base + unlocked secondary) into OdrTip slots.
+function ApLoadingTips.PrepareGenericCarousel(reason)
+  if not odr_tip_live() or type(OdrTip.SetTipText) ~= "function" then
+    return false
+  end
+  local pool = ApLoadingTips.BuildActiveGenericPool()
+  if type(pool) ~= "table" or #pool == 0 then
+    return ApLoadingTips.PrepareConnectTip(reason)
+  end
+  ap_seed_rng()
+  local shuffled = ap_shuffle_copy(pool)
+  local max_n = tonumber(ApLoadingTips.GENERIC_TIP_DISPLAY) or 5
+  if max_n < 1 then
+    max_n = 1
+  end
+  if max_n > 5 then
+    max_n = 5
+  end
+  local n = #shuffled
+  if n > max_n then
+    n = max_n
+  end
+  for i = 1, 5 do
+    if i <= n then
+      pcall(OdrTip.SetTipText, i - 1, shuffled[i])
+    end
+  end
+  if type(OdrTip.SetTipOrder) == "function" then
+    pcall(OdrTip.SetTipOrder, { 0, 1, 2, 3, 4 })
+  end
+  if type(OdrTip.SetTipCount) == "function" then
+    pcall(OdrTip.SetTipCount, n)
+  end
+  ApLoadingTips._fallback_loc = "#TIP_000_GENERAL_PARKOUR_000"
+  log(
+    "PrepareGenericCarousel reason="
+      .. tostring(reason or "?")
+      .. " showing="
+      .. tostring(n)
+      .. " active="
+      .. tostring(#pool)
+      .. " unlocked_secondary="
+      .. tostring(ApLoadingTips._last_secondary_unlocked or 0)
+      .. " collected="
+      .. tostring(ApLoadingTips.CountCollectedChecks())
+  )
+  return true
 end
 
 --- ForcedTooltip diagnosis + optional pin. With OdrTip subsdk9, readback should stick.
@@ -131,21 +365,66 @@ function ApLoadingTips.ApplyForcedTooltip(want)
   return ApLoadingTips._last_readback or ""
 end
 
+--- Re-arm OdrTip ForceRefresh without changing carousel content.
+-- OdrTip has no Lua ArmCarouselRefresh binder; SetTipCount(N) clears
+-- gForceRefreshDone and re-runs TipRefresh (0.5.12+). Call AFTER
+-- ApplyForcedTooltip so the rebuild bakes the tip just stamped.
+function ApLoadingTips.ArmCarouselRefresh(reason)
+  if not odr_tip_live() then
+    return false
+  end
+  if type(OdrTip.SetTipCount) ~= "function" then
+    return false
+  end
+  local n = 1
+  if type(OdrTip.GetTipCount) == "function" then
+    local ok_get, cur = pcall(OdrTip.GetTipCount)
+    if ok_get and type(cur) == "number" and cur >= 1 and cur <= 5 then
+      n = math.floor(cur)
+    end
+  end
+  local ok_set, set_ok = pcall(OdrTip.SetTipCount, n)
+  local armed = ok_set and set_ok and true or false
+  log(
+    "ArmCarouselRefresh reason="
+      .. tostring(reason or "?")
+      .. " count="
+      .. tostring(n)
+      .. " ok="
+      .. tostring(armed)
+  )
+  return armed
+end
+
 --- Pin tip id into OdrTip ForcedTooltip slot (no Show/Hide). Cheap; safe to call often.
 function ApLoadingTips.ForceNextTip(reason)
   if not ApLoadingTips.enabled then
     return false
   end
-  -- Re-apply DeathLink tip pin on checkpoint / scenario load so TipRefresh
-  -- after game-over A sees count=1 DEATHLINK (not a later main-menu Continue).
+  reason = reason or "ForceNextTip"
+
+  -- Priority 1: Death Link / local-death joke tip (count=1) for game-over Continue.
   if ApLoadingTips._deathlink_tip ~= nil and ApLoadingTips._deathlink_tip ~= "" then
-    pcall(ApLoadingTips.ApplyDeathLinkTipPin, reason or "ForceNextTip")
+    pcall(ApLoadingTips.ApplyDeathLinkTipPin, reason)
+  -- Priority 2: early connection / New Game before Hub bootstrap.
+  elseif not ApLoadingTips.ClientConnected() then
+    pcall(ApLoadingTips.PrepareConnectTip, reason)
+  -- Default: shuffle generic AP tips (warp / transport / normal loads).
+  else
+    pcall(ApLoadingTips.PrepareGenericCarousel, reason)
   end
+
   -- Without OdrTip, SetForcedTooltip is a stub — skip spam on Continue.
   if not odr_tip_live() and (ApLoadingTips._forced_dead or ApLoadingTips._forced_writable == false) then
     return false
   end
+  -- Stamp ForcedTooltip first (updates gForcedTip + LOADING), then re-arm
+  -- TipRefresh. Re-arming before the stamp can rebuild tipGUI with a stale tip
+  -- and leave ForceRefresh consumed (done=1) so SetForcedTooltip skips.
   local got = ApLoadingTips.ApplyForcedTooltip(nil)
+  if odr_tip_live() then
+    pcall(ApLoadingTips.ArmCarouselRefresh, reason)
+  end
   ApLoadingTips.force_count = (ApLoadingTips.force_count or 0) + 1
   if not tip_is_empty(got) then
     ApLoadingTips._armed = true
@@ -153,7 +432,7 @@ function ApLoadingTips.ForceNextTip(reason)
       "ForcedTooltip pinned '"
         .. got
         .. "' reason="
-        .. tostring(reason or "?")
+        .. tostring(reason)
         .. " n="
         .. tostring(ApLoadingTips.force_count)
     )
@@ -710,6 +989,9 @@ function ApLoadingTips.InstallRemoteTipHelper()
   RL.GetTipCount = function()
     return ApLoadingTips.GetTipCount()
   end
+  RL.ArmCarouselRefresh = function(reason)
+    return ApLoadingTips.ArmCarouselRefresh(reason or "RL")
+  end
   return true
 end
 
@@ -719,6 +1001,10 @@ function ApLoadingTips.Install()
   ApLoadingTips.did_install = true
   ApLoadingTips.wrap_count = 0
   pcall(ApLoadingTips.InstallRemoteTipHelper)
+  pcall(ApLoadingTips.LoadTipPool)
+  if RL and RL.APConnected then
+    ApLoadingTips._client_connected = true
+  end
 
   wrap_game_fn("LoadGame", "LoadGame")
   wrap_game_fn("LoadGameFromCheckpoint", "LoadGameFromCheckpoint")

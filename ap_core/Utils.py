@@ -22,7 +22,12 @@ from settings import Settings, get_settings
 from time import sleep
 from typing import BinaryIO, Coroutine, Optional, Set, Dict, Any, Union, TypeGuard
 from yaml import load, load_all, dump
-from pathspec import PathSpec, GitIgnoreSpec
+
+try:
+    from pathspec import PathSpec, GitIgnoreSpec
+except ImportError:  # pragma: no cover — Hub sphere0 may use bare system Python
+    PathSpec = None  # type: ignore[misc, assignment]
+    GitIgnoreSpec = None  # type: ignore[misc, assignment]
 
 try:
     from yaml import CLoader as UnsafeLoader, CSafeLoader as SafeLoader, CDumper as Dumper
@@ -389,6 +394,11 @@ def store_data_package_for_checksum(game: str, data: typing.Dict[str, Any]) -> N
 
 
 def read_apignore(filename: str | pathlib.Path) -> PathSpec | None:
+    if PathSpec is None or GitIgnoreSpec is None:
+        raise ModuleNotFoundError(
+            "pathspec is required for .apignore support. "
+            "Install Hub client deps (Connect once) or: pip install 'pathspec>=0.12.1'"
+        )
     try:
         with open(filename) as ignore_file:
             return GitIgnoreSpec.from_lines(ignore_file)

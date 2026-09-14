@@ -30,9 +30,10 @@ No Randovania GUI / game-session export required.
 ApWarp hotkeys (location-independent warps)
 -------------------------------------------
   finalize_mod() installs dread_scripts/ap_warp.lua (TOC + system.pkg) and patches
-  system/scripts/scenario.lc to DoFile + ApWarp.Install(). Tracks last save station
-  vs last scripted checkpoint. Close pause/options while holding ZL → last checkpoint;
-  hold ZR → last save. Fallback: ZL+DPAD_LEFT / ZR+DPAD_RIGHT.
+  system/scripts/scenario.lc to DoFile + ApWarp.Install(). Tracks last Save /
+  Network / Map station (ODR IsSaveStation set) vs last scripted checkpoint.
+  Close pause/options while holding ZL → last checkpoint; hold ZR → last station.
+  Fallback: ZL+DPAD_LEFT / ZR+DPAD_RIGHT.
 
   Any prior -- AP_HK_AUTOSAVE / ProgressKeeper bootstrap is stripped on every patch
   (that path was wiping inventory on load).
@@ -852,7 +853,7 @@ AP_WARP_BOOTSTRAP = """
 -- AP_WARP
 -- Must load AFTER ODR defines Scenario.CheckDebugInputs / CheckWarpToStart.
 -- Location-independent warps: ZL+close menu / ZL+DPAD_LEFT = last checkpoint;
--- ZR+close menu / ZR+DPAD_RIGHT = last save.
+-- ZR+close menu / ZR+DPAD_RIGHT = last Save/Network/Map station.
 Game.DoFile("system/scripts/ap_warp.lua")
 if ApWarp and ApWarp.Install then
     ApWarp.Install()
@@ -1211,11 +1212,18 @@ def _write_init_lc(romfs: Path, data: bytes, pkg) -> None:
 
 
 def install_ap_loading_tips_scripts(romfs: Path) -> None:
-    """Install ForcedTooltip tip injector + wire DoFile/Install into init.lc (+ scenario backup)."""
-    src = dread_paths.dread_scripts_dir() / "ap_loading_tips.lua"
-    if not src.is_file():
-        raise PatchError(f"missing ApLoadingTips script: {src}")
-    _register_system_script_asset(romfs, "ap_loading_tips", src.read_bytes())
+    """Install ForcedTooltip tip injector + tip pool + wire DoFile/Install into init.lc."""
+    scripts = dread_paths.dread_scripts_dir()
+    tips_src = scripts / "ap_loading_tips.lua"
+    pool_src = scripts / "ap_tip_pool.lua"
+    if not tips_src.is_file():
+        raise PatchError(f"missing ApLoadingTips script: {tips_src}")
+    _register_system_script_asset(romfs, "ap_loading_tips", tips_src.read_bytes())
+    if pool_src.is_file():
+        _register_system_script_asset(romfs, "ap_tip_pool", pool_src.read_bytes())
+        log(f"[OK] installed ap_tip_pool.lua ({pool_src.stat().st_size} bytes)")
+    else:
+        log(f"[WARN] missing tip pool script: {pool_src}")
     _patch_init_for_ap_loading_tips(romfs)
     _patch_scenario_for_ap_loading_tips(romfs)
 

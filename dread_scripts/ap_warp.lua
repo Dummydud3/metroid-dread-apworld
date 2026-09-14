@@ -5,11 +5,11 @@
 --
 -- Hotkeys (INGAME, user interaction enabled):
 --   Close pause/options while holding ZL → last checkpoint
---   Close pause/options while holding ZR → last save
+--   Close pause/options while holding ZR → last Save / Network / Map station
 --   ZL + DPAD_LEFT  → last checkpoint
---   ZR + DPAD_RIGHT → last save
+--   ZR + DPAD_RIGHT → last Save / Network / Map station
 --   ZL + ZR + DPAD_LEFT  → last checkpoint  (same style as suit-change debug)
---   ZL + ZR + DPAD_RIGHT → last save
+--   ZL + ZR + DPAD_RIGHT → last Save / Network / Map station
 --
 -- Warp uses the same LoadScenario call as ODR warp-to-start.
 -- Combos are edge-triggered (release and press again) — no sticky cooldown.
@@ -37,13 +37,16 @@ ApWarp.seen_scenario = ApWarp.seen_scenario or nil
 -- default start when handed one.
 local SAVE_PLATFORM_CHARCLASSES = {
   weightactivatedplatform_save = true,
+  weightactivatedplatform_access = true, -- Network Station plate
+  weightactivatedplatform_map = true, -- Map Station plate
 }
 
--- Usables that mean "the game was saved". ODR's Scenario.IsSaveStation also
--- accepts accesspoint and maproom because warp-to-start works at all three,
--- but those never write a save.
+-- Usables that update the ZR+DPAD_RIGHT ("last save") warp target. Matches
+-- ODR Scenario.IsSaveStation: Save, Network (Adam), and Map stations.
 local SAVE_USABLE_CHARCLASSES = {
   savestation = true,
+  accesspoint = true,
+  maproom = true,
 }
 
 local function log(msg)
@@ -81,10 +84,16 @@ local function charclass_of(name, tbl)
 end
 
 -- GetEntities only covers the loaded scenario, so spawns recorded in another
--- area need a name test. Every save plate in the game embeds the station name
--- (savestation_000_platform, PRP_CV_SaveStation002_WeightPlate).
+-- area need a name test. Save / Network / Map plates embed identifiable tokens
+-- (savestation_000_platform, accesspoint_000_platform, maproom_platform, …).
 local function name_looks_like_save(name)
-  return string.find(string.lower(name), "savestation", 1, true) ~= nil
+  local low = string.lower(name)
+  return string.find(low, "savestation", 1, true) ~= nil
+    or string.find(low, "accesspoint", 1, true) ~= nil
+    or string.find(low, "maproom", 1, true) ~= nil
+    or string.find(low, "weightactivatedplatform_save", 1, true) ~= nil
+    or string.find(low, "weightactivatedplatform_access", 1, true) ~= nil
+    or string.find(low, "weightactivatedplatform_map", 1, true) ~= nil
 end
 
 local function is_save_spawn(name)
@@ -95,9 +104,9 @@ local function is_save_spawn(name)
   return name_looks_like_save(name)
 end
 
--- Map a save station usable to the plate the engine spawns on. Suffixes are
--- inconsistent (_platform vs _WeightPlate), so prefer the SMARTOBJECT backlink
--- and fall back to a name prefix.
+-- Map a Save / Network / Map station usable to the plate the engine spawns on.
+-- Suffixes are inconsistent (_platform vs _WeightPlate), so prefer the
+-- SMARTOBJECT backlink and fall back to a name prefix.
 local function resolve_save_platform(usable_name)
   local tbl = entities()
   if not tbl then
@@ -378,5 +387,5 @@ function ApWarp.Install()
     log("WARN: Scenario.OnLoadScenarioFinished missing — checkpoint seed may lag")
   end
 
-  log("Install complete (ZL+DPAD_LEFT / ZL+ZR+DPAD_LEFT=checkpoint; ZR+DPAD_RIGHT / ZL+ZR+DPAD_RIGHT=save; ZL/ZR+close menu)")
+  log("Install complete (ZL+DPAD_LEFT=checkpoint; ZR+DPAD_RIGHT=last Save/Network/Map station; ZL/ZR+close menu)")
 end

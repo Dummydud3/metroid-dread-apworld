@@ -287,7 +287,8 @@ DREAD_ITEM_MAPPING = {
     },
     "Flash Shift Upgrade": {
         # Chains only. Progressive unlock of Ghost Aura (when Require Main is off)
-        # is handled by RandomizerFlashShiftUpgrade / AP IncreaseItemAmount hook.
+        # is handled by RandomizerFlashShiftUpgrade / AP IncreaseItemAmount hook;
+        # the first upgrade keeps its chain grant so iChainDashMax is usable.
         # Flash uses = 1 + chain_count once the ability is owned.
         "resources": [{"item_id": "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", "quantity": 1}],
         "model": "item_flashshiftupgrade",

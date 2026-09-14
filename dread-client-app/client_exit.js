@@ -70,12 +70,17 @@ function explainClientExit(code, stderrBuf) {
   ].map((m) => m[1]);
   const critical = allMods.find((name) => !worldScanNoise.has(name));
   if (critical) {
+    const isWin = process.platform === "win32";
+    const venvHint = isWin
+      ? '%LOCALAPPDATA%\\MetroidBread\\venv\\Scripts\\python.exe -m pip install -r requirements-client.txt'
+      : '"<world>/_metroid_bread_venv/bin/python" -m pip install -r requirements-client.txt';
     return (
       `Missing Python module: ${critical}\n` +
-      "Hub normally auto-installs client packages (websockets, etc.) on Connect.\n" +
-      "Try Connect again, or run:\n" +
-      "  py -3.12 -m pip install -r requirements-client.txt\n" +
-      "(from the metroid_bread world folder / _metroid_bread_runtime)"
+      "Hub installs client packages into its local venv on Connect, then must " +
+      "launch that same Python (not bare py -3.12 / managed install_only).\n" +
+      "Update the Hub, Connect again, or install into the Hub venv:\n" +
+      `  ${venvHint}\n` +
+      "(requirements-client.txt is in the metroid_bread world / _metroid_bread_runtime folder)"
     );
   }
 

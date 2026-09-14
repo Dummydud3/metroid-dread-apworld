@@ -11,12 +11,11 @@ from collections import deque
 from pathlib import Path
 from typing import AbstractSet, Dict, FrozenSet, Iterable, Optional, Set, Tuple, TYPE_CHECKING
 
-from BaseClasses import CollectionState
-
 from .logic_parser import RandovaniaLogicParser
 from .Events import EVENT_RESOURCE_TO_ITEM
 
 if TYPE_CHECKING:
+    from BaseClasses import CollectionState
     from . import MetroidBreadWorld
 
 NodeId = Tuple[str, str, str]  # region, area, node
@@ -60,6 +59,43 @@ TRICK_TO_OPTION: Dict[str, str] = {
     "CBL": "cross_bomb_launch",
     "FloorClip": "floor_clip",
     "SlopeClimb": "climb_sloped_surfaces",
+}
+
+TRICK_DISPLAY: Dict[str, str] = {
+    "Knowledge": "Knowledge",
+    "Movement": "Movement",
+    "Combat": "Combat",
+    "Pseudo": "Pseudo Wave",
+    "IBJ": "Infinite Bomb Jump",
+    "WBJ": "Water Bomb Jump",
+    "WSJ": "Water Space Jump",
+    "SWJ": "Single Wall Jump",
+    "Slide": "Slide Jump",
+    "Speedbooster": "Speed Booster Conservation",
+    "Walljump": "Wall Jump",
+    "Suitless": "Heat/Cold Runs",
+    "RGrapple": "Reverse Grapple Block",
+    "DBoost": "Damage Boost",
+    "FrozenEnemy": "Stand on Frozen Enemy",
+    "GrappleMovement": "Grapple Movement",
+    "CrossSkip": "Cross Bomb Skip",
+    "TunnelSlope": "Climb Sloped Tunnels",
+    "ShortBoost": "Short Boost",
+    "DiffusionAbuse": "Diffusion Abuse",
+    "FlashSkip": "Flash Shift Skip",
+    "DBJ": "Diagonal Bomb Jump",
+    "LedgeWarp": "Ledge Warp",
+    "CBL": "Cross Bomb Launch",
+    "FloorClip": "Floor Clip",
+    "SlopeClimb": "Climb Sloped Surfaces",
+}
+
+TRICK_LEVEL_LABELS: Dict[int, str] = {
+    1: "Beginner",
+    2: "Intermediate",
+    3: "Advanced",
+    4: "Expert",
+    5: "Ludicrous",
 }
 
 # Individual AP names implied by progressive counts
@@ -168,6 +204,7 @@ class DreadLogic:
         self._reachable_cache: Dict[FrozenSet[str], Set[NodeId]] = {}
         # node -> list of (target, requirement)
         self._adj: Dict[NodeId, list] = {}
+        self._rev_adj: Optional[Dict[NodeId, list]] = None
         self._build_adjacency()
 
         # Event nodes grant logical event items during BFS (RDV-style).
@@ -200,6 +237,7 @@ class DreadLogic:
     def rebuild_graph(self) -> None:
         """Call after DoorRando / TransportRando mutate the parser graph."""
         self._adj.clear()
+        self._rev_adj = None
         self._build_adjacency()
         self._reachable_cache.clear()
 
@@ -530,11 +568,25 @@ class DreadLogic:
 
     # ----- reachability -----
 
-    def _bfs_once(self, inventory: FrozenSet[str], start: NodeId) -> Set[NodeId]:
-        reachable: Set[NodeId] = set()
-        queue: deque[NodeId] = deque()
-        queue.append(start)
-        reachable.add(start)
+    def _bfs_once(
+        self,
+        inventory: FrozenSet[str],
+        start: NodeId | AbstractSet[NodeId],
+    ) -> Set[NodeId]:
+        """Expand from one node or a seed set (multi-source).
+
+        Multi-source is required when auto-collecting events: some rooms use
+        ``negate`` on the same event that you collect inside (Chain Reaction
+        Device). Restarting BFS from world spawn after granting that event
+        permanently softlocks the room in logic — entry needs the event *off*,
+        but the climb needs it *on* after you already walked in.
+        """
+        if isinstance(start, (set, frozenset, list, deque)):
+            seeds: Iterable[NodeId] = start
+        else:
+            seeds = (start,)  # type: ignore[assignment]
+        reachable: Set[NodeId] = set(seeds)
+        queue: deque[NodeId] = deque(reachable)
         while queue:
             current = queue.popleft()
             for target, requirement in self._adj.get(current, ()):
@@ -557,6 +609,9 @@ class DreadLogic:
         ``exclude_auto_events``: event item names that must already be in
         ``inventory`` to count (Hub tracker uses this so Quiet Robe / X release
         are not invented from reachability alone). Generation leaves this empty.
+
+        When events are collected, expansion continues from the already-reachable
+        set (not only from spawn) so before/after event gates stay consistent.
         """
         start = start or self.starting_node
         exclude = frozenset(exclude_auto_events or ())
@@ -569,9 +624,11 @@ class DreadLogic:
             return self._bfs_once(inventory, start)
 
         inv: Set[str] = set(inventory)
-        reachable: Set[NodeId] = set()
+        reachable: Set[NodeId] = {start}
         for _ in range(len(self._event_items) + 2):
-            reachable = self._bfs_once(frozenset(inv), start)
+            # Expand from every node already reached so collecting a room event
+            # does not require re-entering through a "event not yet done" door.
+            reachable = self._bfs_once(frozenset(inv), reachable)
             gained = False
             for node, event_item in self._event_items.items():
                 if event_item in exclude:
@@ -605,3 +662,459 @@ class DreadLogic:
 
     def clear_cache(self) -> None:
         self._reachable_cache.clear()
+
+    # ----- visualizer / path explanation -----
+
+    def node_for_location(self, location_name: str) -> Optional[NodeId]:
+        node = self.pickup_nodes.get(location_name)
+        if node is not None:
+            return node
+        parts = location_name.split(" - ", 2)
+        if len(parts) == 3:
+            candidate = (parts[0], parts[1], parts[2])
+            if candidate in self._adj:
+                return candidate
+        return None
+
+    def _reverse_adj(self) -> Dict[NodeId, list]:
+        if self._rev_adj is not None:
+            return self._rev_adj
+        rev: Dict[NodeId, list] = {}
+        for src, edges in self._adj.items():
+            for tgt, req in edges:
+                rev.setdefault(tgt, []).append((src, req))
+        self._rev_adj = rev
+        return rev
+
+    def _item_fact_label(self, rname: str, amount: int) -> Optional[str]:
+        if rname.startswith("Artifact"):
+            return "Metroid DNA" if amount <= 1 else f"Metroid DNA (×{amount})"
+        if rname not in ITEM_SHORT_TO_AP:
+            return None
+        ap = ITEM_SHORT_TO_AP[rname]
+        if ap is None:
+            return None
+        if ap == "__missile_ammo__":
+            return "Missiles" if amount <= 1 else f"Missiles (×{amount})"
+        if ap == "__pb_ammo__":
+            return "Power Bombs" if amount <= 1 else f"Power Bombs (×{amount})"
+        if ap == "__energy__":
+            return f"Energy ({amount})"
+        if ap == "Flash Shift Upgrade":
+            return "Flash Shift Upgrade" if amount <= 1 else f"Flash Shift chains (×{amount})"
+        if ap == "Metroid DNA":
+            return "Metroid DNA" if amount <= 1 else f"Metroid DNA (×{amount})"
+        return ap
+
+    def _trick_fact_label(self, rname: str, amount: int) -> str:
+        name = TRICK_DISPLAY.get(rname, rname)
+        level = TRICK_LEVEL_LABELS.get(int(amount), str(amount))
+        return f"{name} ({level})"
+
+    def _event_fact_label(self, rname: str) -> Optional[str]:
+        item = EVENT_RESOURCE_TO_ITEM.get(rname)
+        if not item:
+            return None
+        if item.startswith("Event - "):
+            return item[8:]
+        return item
+
+    def _add_unique(self, bucket: list, seen: Set[str], label: Optional[str]) -> None:
+        if not label or label in seen:
+            return
+        seen.add(label)
+        bucket.append(label)
+
+    def _collect_damage_used(
+        self,
+        name: str,
+        amount: int,
+        inventory: FrozenSet[str],
+        items: list,
+        tricks: list,
+        seen_items: Set[str],
+        seen_tricks: Set[str],
+    ) -> None:
+        has_varia = "Varia Suit" in inventory
+        has_grav = "Gravity Suit" in inventory
+        suitless = self.trick_level("Suitless")
+        if name == "Heat":
+            if has_varia:
+                self._add_unique(items, seen_items, "Varia Suit")
+            elif has_grav:
+                self._add_unique(items, seen_items, "Gravity Suit")
+            elif suitless >= 1:
+                self._add_unique(tricks, seen_tricks, self._trick_fact_label("Suitless", 1))
+            return
+        if name in ("Cold", "Lava"):
+            if has_grav:
+                self._add_unique(items, seen_items, "Gravity Suit")
+            elif suitless >= 2:
+                self._add_unique(tricks, seen_tricks, self._trick_fact_label("Suitless", 2))
+            return
+        if name == "Damage":
+            if self.trick_level("Combat") >= 1:
+                self._add_unique(tricks, seen_tricks, self._trick_fact_label("Combat", 1))
+            else:
+                self._add_unique(items, seen_items, self._item_fact_label("Energy", amount))
+            return
+        if name == "OOB" and self.trick_level("FloorClip") >= 1:
+            self._add_unique(tricks, seen_tricks, self._trick_fact_label("FloorClip", 1))
+
+    def _collect_damage_missing(
+        self,
+        name: str,
+        amount: int,
+        inventory: FrozenSet[str],
+        items: list,
+        tricks: list,
+        events: list,
+        seen_items: Set[str],
+        seen_tricks: Set[str],
+        seen_events: Set[str],
+    ) -> None:
+        if self._damage_ok(name, amount, inventory):
+            return
+        has_varia = "Varia Suit" in inventory
+        has_grav = "Gravity Suit" in inventory
+        suitless = self.trick_level("Suitless")
+        if name == "Heat":
+            if not has_varia and not has_grav:
+                self._add_unique(items, seen_items, "Varia Suit")
+            if suitless >= 1:
+                self._add_unique(tricks, seen_tricks, self._trick_fact_label("Suitless", max(1, suitless)))
+            return
+        if name in ("Cold", "Lava"):
+            if not has_grav:
+                self._add_unique(items, seen_items, "Gravity Suit")
+            if suitless >= 2:
+                self._add_unique(tricks, seen_tricks, self._trick_fact_label("Suitless", 2))
+            return
+        if name == "Damage":
+            self._add_unique(items, seen_items, self._item_fact_label("Energy", amount))
+            if self.trick_level("Combat") >= 1:
+                self._add_unique(tricks, seen_tricks, self._trick_fact_label("Combat", 1))
+            return
+        if name == "OOB" and self.trick_level("FloorClip") >= 1:
+            self._add_unique(tricks, seen_tricks, self._trick_fact_label("FloorClip", 1))
+
+    def _collect_used_facts(
+        self,
+        req,
+        inventory: FrozenSet[str],
+        items: list,
+        tricks: list,
+        seen_items: Set[str],
+        seen_tricks: Set[str],
+    ) -> None:
+        if not req or not isinstance(req, dict):
+            return
+        if not self.evaluate_requirement(req, inventory):
+            return
+        req_type = req.get("type")
+        if req_type in (None, "trivial", "impossible"):
+            return
+        if req_type == "template":
+            tname = req.get("data")
+            tmpl = self.parser.templates.get(tname)
+            if not tmpl:
+                return
+            inner = tmpl.get("requirement") if isinstance(tmpl, dict) else tmpl
+            self._collect_used_facts(inner, inventory, items, tricks, seen_items, seen_tricks)
+            return
+        if req_type == "and":
+            for child in (req.get("data") or {}).get("items") or []:
+                self._collect_used_facts(child, inventory, items, tricks, seen_items, seen_tricks)
+            return
+        if req_type == "or":
+            children = (req.get("data") or {}).get("items") or []
+            satisfied = [c for c in children if self.evaluate_requirement(c, inventory)]
+            if not satisfied:
+                return
+
+            def _or_score(child) -> Tuple[int, int]:
+                ci: list = []
+                ct: list = []
+                self._collect_used_facts(child, inventory, ci, ct, set(), set())
+                return (len(ct), len(ci))
+
+            best = min(satisfied, key=_or_score)
+            self._collect_used_facts(best, inventory, items, tricks, seen_items, seen_tricks)
+            return
+        if req_type != "resource":
+            return
+        data = req.get("data") or {}
+        if bool(data.get("negate", False)):
+            return
+        rtype = data.get("type")
+        rname = data.get("name")
+        amount = int(data.get("amount", 1) or 1)
+        if rtype == "items":
+            self._add_unique(items, seen_items, self._item_fact_label(rname, amount))
+        elif rtype == "tricks":
+            if self.trick_level(rname) >= amount:
+                self._add_unique(tricks, seen_tricks, self._trick_fact_label(rname, amount))
+        elif rtype == "damage":
+            self._collect_damage_used(
+                rname, amount, inventory, items, tricks, seen_items, seen_tricks
+            )
+
+    def _empty_need_group(self) -> Dict[str, list]:
+        return {"items": [], "tricks": [], "events": []}
+
+    def _merge_need_groups(self, left: Dict[str, list], right: Dict[str, list]) -> Dict[str, list]:
+        out = self._empty_need_group()
+        for key in ("items", "tricks", "events"):
+            seen: Set[str] = set()
+            for label in list(left.get(key) or []) + list(right.get(key) or []):
+                self._add_unique(out[key], seen, label)
+        return out
+
+    def _group_nonempty(self, group: Dict[str, list]) -> bool:
+        return bool(group.get("items") or group.get("tricks") or group.get("events"))
+
+    def _missing_groups(self, req, inventory: FrozenSet[str]) -> list:
+        if not req or not isinstance(req, dict):
+            return []
+        if self.evaluate_requirement(req, inventory):
+            return []
+        req_type = req.get("type")
+        if req_type == "impossible":
+            return [{"items": [], "tricks": [], "events": ["Impossible in this seed"]}]
+        if req_type == "template":
+            tname = req.get("data")
+            tmpl = self.parser.templates.get(tname)
+            if not tmpl:
+                return []
+            inner = tmpl.get("requirement") if isinstance(tmpl, dict) else tmpl
+            return self._missing_groups(inner, inventory)
+        if req_type == "and":
+            groups = [self._empty_need_group()]
+            for child in (req.get("data") or {}).get("items") or []:
+                child_groups = self._missing_groups(child, inventory)
+                if not child_groups:
+                    continue
+                groups = [self._merge_need_groups(g, cg) for g in groups for cg in child_groups]
+            return [g for g in groups if self._group_nonempty(g)]
+        if req_type == "or":
+            groups = []
+            for child in (req.get("data") or {}).get("items") or []:
+                groups.extend(self._missing_groups(child, inventory))
+            return [g for g in groups if self._group_nonempty(g)]
+        if req_type != "resource":
+            return []
+        data = req.get("data") or {}
+        if bool(data.get("negate", False)):
+            return []
+        rtype = data.get("type")
+        rname = data.get("name")
+        amount = int(data.get("amount", 1) or 1)
+        items: list = []
+        tricks: list = []
+        events: list = []
+        seen_items: Set[str] = set()
+        seen_tricks: Set[str] = set()
+        seen_events: Set[str] = set()
+        if rtype == "items":
+            if not self._resource_ok(rtype, rname, amount, inventory):
+                self._add_unique(items, seen_items, self._item_fact_label(rname, amount))
+        elif rtype == "tricks":
+            have = self.trick_level(rname)
+            if have >= 1 and have < amount:
+                self._add_unique(tricks, seen_tricks, self._trick_fact_label(rname, amount))
+        elif rtype == "events":
+            if not self._resource_ok(rtype, rname, amount, inventory):
+                self._add_unique(events, seen_events, self._event_fact_label(rname))
+        elif rtype == "damage":
+            self._collect_damage_missing(
+                rname,
+                amount,
+                inventory,
+                items,
+                tricks,
+                events,
+                seen_items,
+                seen_tricks,
+                seen_events,
+            )
+        group = {"items": items, "tricks": tricks, "events": events}
+        return [group] if self._group_nonempty(group) else []
+
+    def _bfs_explain(
+        self,
+        inventory: FrozenSet[str],
+        start: NodeId,
+        exclude_auto_events: Optional[AbstractSet[str]] = None,
+    ) -> Tuple[Set[NodeId], Dict[NodeId, NodeId], Dict[NodeId, object], Dict[NodeId, FrozenSet[str]]]:
+        exclude = frozenset(exclude_auto_events or ())
+        inv: Set[str] = set(inventory)
+        reachable: Set[NodeId] = {start}
+        parent: Dict[NodeId, NodeId] = {}
+        edge_req: Dict[NodeId, object] = {}
+        inv_at: Dict[NodeId, FrozenSet[str]] = {start: frozenset(inv)}
+
+        def expand(current_inv: FrozenSet[str]) -> None:
+            queue: deque[NodeId] = deque(reachable)
+            while queue:
+                current = queue.popleft()
+                for target, requirement in self._adj.get(current, ()):
+                    if target in reachable:
+                        continue
+                    if self.evaluate_requirement(requirement, current_inv):
+                        reachable.add(target)
+                        parent[target] = current
+                        edge_req[target] = requirement
+                        inv_at[target] = current_inv
+                        queue.append(target)
+
+        for _ in range(len(self._event_items) + 2):
+            expand(frozenset(inv))
+            gained = False
+            for node, event_item in self._event_items.items():
+                if event_item in exclude:
+                    continue
+                if node in reachable and event_item not in inv:
+                    inv.add(event_item)
+                    gained = True
+            if not gained:
+                break
+        return reachable, parent, edge_req, inv_at
+
+    def _path_nodes(self, target: NodeId, parent: Dict[NodeId, NodeId], start: NodeId) -> Optional[list]:
+        if target != start and target not in parent:
+            return None
+        path = [target]
+        seen: Set[NodeId] = {target}
+        while path[-1] in parent:
+            prev = parent[path[-1]]
+            if prev in seen:
+                break
+            seen.add(prev)
+            path.append(prev)
+        path.reverse()
+        if path[0] != start:
+            return None
+        return path
+
+    def _first_blocker_req(
+        self,
+        target: NodeId,
+        reachable: Set[NodeId],
+        inventory: FrozenSet[str],
+    ):
+        if target in reachable:
+            return None
+        rev = self._reverse_adj()
+        seen: Set[NodeId] = {target}
+        queue: deque[NodeId] = deque([target])
+        hop: Dict[NodeId, Tuple[NodeId, object]] = {}
+        frontier = None
+        while queue:
+            node = queue.popleft()
+            for pred, req in rev.get(node, ()):
+                if pred in seen:
+                    continue
+                seen.add(pred)
+                hop[pred] = (node, req)
+                if pred in reachable:
+                    frontier = pred
+                    queue.clear()
+                    break
+                queue.append(pred)
+        if frontier is None:
+            return None
+        cur = frontier
+        guard = 0
+        while cur != target and guard < 4096:
+            guard += 1
+            nxt, req = hop[cur]
+            if not self.evaluate_requirement(req, inventory):
+                return req
+            cur = nxt
+        return None
+
+    def _via_areas(self, path: list) -> list:
+        via: list = []
+        seen: Set[str] = set()
+        for region, area, _node in path:
+            label = f"{region} - {area}"
+            if label in seen:
+                continue
+            seen.add(label)
+            via.append(label)
+        return via
+
+    def explain_location(
+        self,
+        location_name: str,
+        counts: Dict[str, int],
+        *,
+        exclude_auto_events: Optional[AbstractSet[str]] = None,
+    ) -> dict:
+        """Items / enabled tricks used (or blocking) a check for the visualizer."""
+        node = self.node_for_location(location_name)
+        if node is None:
+            return {
+                "location": location_name,
+                "in_logic": False,
+                "items": [],
+                "tricks": [],
+                "events": [],
+                "alternatives": [],
+                "via": [],
+                "error": f"Unknown location: {location_name}",
+            }
+
+        inv = self.inventory_from_counts(counts)
+        reachable, parent, edge_req, inv_at = self._bfs_explain(
+            inv, self.starting_node, exclude_auto_events=exclude_auto_events
+        )
+        in_logic = node in reachable
+        items: list = []
+        tricks: list = []
+        events: list = []
+        alternatives: list = []
+        via: list = []
+
+        if in_logic:
+            path = self._path_nodes(node, parent, self.starting_node) or [self.starting_node]
+            via = self._via_areas(path)
+            seen_items: Set[str] = set()
+            seen_tricks: Set[str] = set()
+            for step in path[1:]:
+                req = edge_req.get(step)
+                step_inv = inv_at.get(step, inv)
+                if req:
+                    self._collect_used_facts(
+                        req, step_inv, items, tricks, seen_items, seen_tricks
+                    )
+        else:
+            blocker = self._first_blocker_req(node, reachable, inv)
+            groups = self._missing_groups(blocker, inv) if blocker else []
+            alternatives = groups
+            if len(groups) == 1:
+                items = list(groups[0].get("items") or [])
+                tricks = list(groups[0].get("tricks") or [])
+                events = list(groups[0].get("events") or [])
+            elif len(groups) > 1:
+                seen_items = set()
+                seen_tricks = set()
+                seen_events = set()
+                for group in groups:
+                    for label in group.get("items") or []:
+                        self._add_unique(items, seen_items, label)
+                    for label in group.get("tricks") or []:
+                        self._add_unique(tricks, seen_tricks, label)
+                    for label in group.get("events") or []:
+                        self._add_unique(events, seen_events, label)
+
+        return {
+            "location": location_name,
+            "in_logic": in_logic,
+            "items": items,
+            "tricks": tricks,
+            "events": events,
+            "alternatives": alternatives,
+            "via": via,
+            "error": "",
+        }

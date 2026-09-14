@@ -627,7 +627,8 @@ button.ghost {
 }
 
 .view[hidden],
-.stage[hidden] {
+.stage[hidden],
+button[hidden] {
   display: none !important;
 }
 

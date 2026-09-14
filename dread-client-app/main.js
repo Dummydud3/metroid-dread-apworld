@@ -250,6 +250,7 @@ function pythonSpawnEnv(extra = {}) {
 
 let mainWindow = null;
 let trackerWindow = null;
+let visualizerWindow = null;
 let clientProcess = null;
 let patchProcess = null;
 let latestStatus = null;
@@ -277,6 +278,9 @@ function createWindow() {
     stopClient();
     if (trackerWindow && !trackerWindow.isDestroyed()) {
       trackerWindow.close();
+    }
+    if (visualizerWindow && !visualizerWindow.isDestroyed()) {
+      visualizerWindow.close();
     }
   });
 }
@@ -441,6 +445,9 @@ function saveConfig(partial) {
     cfg.ryujinx_output_path = cfg.output_path;
   }
   writeJsonFile(CONFIG_PATH, cfg);
+  if (!cfg.debug_logs) {
+    closeVisualizerWindow();
+  }
 
   // Keep patcher config in sync for CLI / legacy tools.
   try {
@@ -482,30 +489,39 @@ function findPythonLauncher() {
 
   const versionOkShared =
     "import sys; raise SystemExit(0 if (3,11,9) <= sys.version_info < (3,14) else 1)";
+  const hasWebsockets = "import websockets";
+  const hasOdr = "import open_dread_rando";
+  const hasPathspec = "import pathspec";
+
+  const probeCandidate = (candidate, code) =>
+    spawnSync(candidate.cmd, [...(candidate.prefixArgs || []), "-c", code], {
+      timeout: 30000,
+      windowsHide: process.platform === "win32",
+    }).status === 0;
 
   if (process.platform !== "win32") {
-    const versionOk = versionOkShared;
-    const probeUnix = (candidate, code) =>
-      spawnSync(candidate.cmd, [...candidate.prefixArgs, "-c", code], {
-        timeout: 30000,
-      }).status === 0;
-
     // Linux Hub client deps live in a local venv (never systemwide pip).
     // Prefer venv over DREAD_HUB_PYTHON (which may point at managed install_only).
     const venvPython = path.join(WORLD_DIR, "_metroid_bread_venv", "bin", "python");
     if (process.platform === "linux" && fs.existsSync(venvPython)) {
       const venvLauncher = { cmd: venvPython, prefixArgs: [] };
-      if (probeUnix(venvLauncher, versionOk)) {
+      if (probeCandidate(venvLauncher, versionOkShared)) {
         cachedPythonLauncher = venvLauncher;
         return cachedPythonLauncher;
       }
     }
 
-    // Managed portable CPython from Hub Setup Wizard / hub_launcher.
+    // Managed portable CPython — prefer one that already has client packages.
+    // Bare managed install is still usable as a bootstrap base for ensure_client_deps
+    // when the Hub venv does not exist yet (Connect then launches the venv).
     const dreadHubPython = (process.env.DREAD_HUB_PYTHON || "").trim();
     if (dreadHubPython && fs.existsSync(dreadHubPython)) {
       const managed = { cmd: dreadHubPython, prefixArgs: [] };
-      if (probeUnix(managed, versionOk) || probeUnix(managed, "import open_dread_rando")) {
+      if (
+        probeCandidate(managed, hasWebsockets) ||
+        probeCandidate(managed, hasOdr) ||
+        probeCandidate(managed, versionOkShared)
+      ) {
         cachedPythonLauncher = managed;
         return cachedPythonLauncher;
       }
@@ -519,30 +535,17 @@ function findPythonLauncher() {
       { cmd: "python", prefixArgs: [] },
     ];
     const foundUnix =
-      unixCandidates.find((c) => probeUnix(c, "import open_dread_rando")) ||
-      unixCandidates.find((c) => probeUnix(c, versionOk));
+      unixCandidates.find((c) => probeCandidate(c, hasWebsockets)) ||
+      unixCandidates.find((c) => probeCandidate(c, hasOdr)) ||
+      unixCandidates.find((c) => probeCandidate(c, hasPathspec)) ||
+      unixCandidates.find((c) => probeCandidate(c, versionOkShared));
     cachedPythonLauncher = foundUnix || null;
     return cachedPythonLauncher;
   }
 
-  // Windows: managed portable CPython from Hub Setup Wizard / hub_launcher.
-  const dreadHubPython = (process.env.DREAD_HUB_PYTHON || "").trim();
-  if (dreadHubPython && fs.existsSync(dreadHubPython)) {
-    const managed = { cmd: dreadHubPython, prefixArgs: [] };
-    const probeManaged = (code) =>
-      spawnSync(managed.cmd, [...managed.prefixArgs, "-c", code], {
-        timeout: 30000,
-        windowsHide: true,
-      }).status === 0;
-    if (probeManaged(versionOkShared) || probeManaged("import open_dread_rando")) {
-      cachedPythonLauncher = managed;
-      return cachedPythonLauncher;
-    }
-  }
-
-  // Windows Hub client deps install into %LOCALAPPDATA%\MetroidBread\venv
-  // (see ensure_client_deps.py). Prefer that interpreter so Connect does not
-  // spawn bare `py -3.12` without websockets/yaml after deps succeed.
+  // Windows Hub client deps install into %LOCALAPPDATA%\MetroidBread\venv.
+  // Prefer that venv BEFORE DREAD_HUB_PYTHON — managed/portable CPython is only
+  // used as a venv *base*; launching it directly skips websockets/yaml installs.
   const winVenvPython = path.join(
     process.env.LOCALAPPDATA || "",
     "MetroidBread",
@@ -552,43 +555,40 @@ function findPythonLauncher() {
   );
   if (winVenvPython && fs.existsSync(winVenvPython)) {
     const venvLauncher = { cmd: winVenvPython, prefixArgs: [] };
-    const probeVenv = (code) =>
-      spawnSync(venvLauncher.cmd, [...venvLauncher.prefixArgs, "-c", code], {
-        timeout: 30000,
-        windowsHide: true,
-      }).status === 0;
-    if (
-      probeVenv("import websockets") ||
-      probeVenv(versionOkShared) ||
-      probeVenv("import open_dread_rando")
-    ) {
+    if (probeCandidate(venvLauncher, versionOkShared)) {
       cachedPythonLauncher = venvLauncher;
       return cachedPythonLauncher;
     }
   }
 
-  // The patcher imports mercury-engine-data-structures in-process, so prefer an
-  // interpreter that already has open-dread-rando over the newest one installed.
+  const dreadHubPython = (process.env.DREAD_HUB_PYTHON || "").trim();
+  if (dreadHubPython && fs.existsSync(dreadHubPython)) {
+    const managed = { cmd: dreadHubPython, prefixArgs: [] };
+    // Prefer packaged managed Python; allow bare version match only as bootstrap
+    // for ensure_client_deps (startClient launches HUB_CLIENT_PYTHON / venv after).
+    if (
+      probeCandidate(managed, hasWebsockets) ||
+      probeCandidate(managed, hasOdr) ||
+      probeCandidate(managed, versionOkShared)
+    ) {
+      cachedPythonLauncher = managed;
+      return cachedPythonLauncher;
+    }
+  }
+
+  // Prefer an interpreter that already has client deps over a bare version match.
   const candidates = [
     { cmd: "py", prefixArgs: ["-3.11"] },
     { cmd: "py", prefixArgs: ["-3.12"] },
     { cmd: "py", prefixArgs: ["-3.13"] },
     { cmd: "python", prefixArgs: [] },
   ];
-  const probe = (candidate, code) =>
-    spawnSync(candidate.cmd, [...candidate.prefixArgs, "-c", code], {
-      timeout: 30000,
-      windowsHide: true,
-    }).status === 0;
 
   const found =
-    candidates.find((c) => probe(c, "import open_dread_rando")) ||
-    candidates.find((c) =>
-      probe(
-        c,
-        "import sys; raise SystemExit(0 if (3,11,9) <= sys.version_info < (3,14) else 1)"
-      )
-    );
+    candidates.find((c) => probeCandidate(c, hasWebsockets)) ||
+    candidates.find((c) => probeCandidate(c, hasOdr)) ||
+    candidates.find((c) => probeCandidate(c, hasPathspec)) ||
+    candidates.find((c) => probeCandidate(c, versionOkShared));
   // Do NOT fall back to py -3.11 when nothing probes clean — that yields a bare
   // launcher exit (classic 103 / pymanager 0xA0000006) with no useful UI hint.
   if (!found) {
@@ -596,6 +596,15 @@ function findPythonLauncher() {
   }
   cachedPythonLauncher = found;
   return cachedPythonLauncher;
+}
+
+/** Parse HUB_CLIENT_PYTHON=... from ensure_client_deps.py stdout. */
+function parseHubClientPython(text) {
+  const m = String(text || "").match(/^HUB_CLIENT_PYTHON=(.+)$/m);
+  if (!m) return null;
+  const p = m[1].trim().replace(/^["']|["']$/g, "");
+  if (!p || !fs.existsSync(p)) return null;
+  return { cmd: p, prefixArgs: [] };
 }
 
 /**
@@ -663,7 +672,11 @@ function ensureClientDeps(launcher) {
   if (process.platform === "linux" || process.platform === "win32") {
     cachedPythonLauncher = null;
   }
-  return { ok: true, message: combined };
+  const ensuredPy = parseHubClientPython(combined);
+  if (ensuredPy) {
+    cachedPythonLauncher = ensuredPy;
+  }
+  return { ok: true, message: combined, python: ensuredPy || null };
 }
 
 function findRyujinxPath() {
@@ -780,6 +793,9 @@ function trackerPayloadFromStatus(st) {
     slot: "",
     scenario: "",
     tracker_item_pool: null,
+    reachable_cells: {},
+    reachable_areas: {},
+    reachable_spots: {},
   };
   if (!st || typeof st !== "object") return base;
   const pool =
@@ -801,12 +817,28 @@ function trackerPayloadFromStatus(st) {
       ? st.in_logic_location_ids.length
       : Number(st.in_logic_count) || 0,
     tracker_item_pool: pool,
+    reachable_cells:
+      st.reachable_cells && typeof st.reachable_cells === "object"
+        ? st.reachable_cells
+        : {},
+    reachable_areas:
+      st.reachable_areas && typeof st.reachable_areas === "object"
+        ? st.reachable_areas
+        : {},
+    reachable_spots:
+      st.reachable_spots && typeof st.reachable_spots === "object"
+        ? st.reachable_spots
+        : {},
   };
 }
 
 function sendTrackerUpdate() {
+  const payload = trackerPayloadFromStatus(latestStatus);
   if (trackerWindow && !trackerWindow.isDestroyed()) {
-    trackerWindow.webContents.send("tracker-update", trackerPayloadFromStatus(latestStatus));
+    trackerWindow.webContents.send("tracker-update", payload);
+  }
+  if (visualizerWindow && !visualizerWindow.isDestroyed()) {
+    visualizerWindow.webContents.send("tracker-update", payload);
   }
 }
 
@@ -838,6 +870,49 @@ function openTrackerWindow() {
     trackerWindow = null;
   });
   trackerWindow.webContents.on("did-finish-load", () => {
+    sendTrackerUpdate();
+  });
+  return { ok: true };
+}
+
+function closeVisualizerWindow() {
+  if (visualizerWindow && !visualizerWindow.isDestroyed()) {
+    visualizerWindow.close();
+  }
+}
+
+function openVisualizerWindow() {
+  if (!loadConfig().debug_logs) {
+    closeVisualizerWindow();
+    return { ok: false, error: "Visualizer is debug-only. Enable Debug logs first." };
+  }
+  if (visualizerWindow && !visualizerWindow.isDestroyed()) {
+    visualizerWindow.focus();
+    sendTrackerUpdate();
+    return { ok: true };
+  }
+
+  visualizerWindow = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    minWidth: 900,
+    minHeight: 600,
+    backgroundColor: "#071016",
+    title: "Metroid Bread Visualizer",
+    parent: mainWindow || undefined,
+    webPreferences: {
+      preload: path.join(__dirname, "visualizer", "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  visualizerWindow.loadFile(path.join(__dirname, "visualizer", "index.html"));
+  visualizerWindow.on("closed", () => {
+    visualizerWindow = null;
+  });
+  visualizerWindow.webContents.on("did-finish-load", () => {
     sendTrackerUpdate();
   });
   return { ok: true };
@@ -920,12 +995,30 @@ async function openLogsFolder() {
   return { ok: true, path: dir };
 }
 
+const explainWaiters = new Map();
+
+function resolveExplainWaiter(event) {
+  const rid = event && event.request_id != null ? String(event.request_id) : "";
+  const waiter = rid ? explainWaiters.get(rid) : null;
+  if (!waiter) return;
+  clearTimeout(waiter.timeout);
+  explainWaiters.delete(rid);
+  waiter.resolve(event);
+}
+
 function handleStdoutLine(line) {
   if (line.startsWith(UI_PREFIX)) {
     try {
       const event = JSON.parse(line.slice(UI_PREFIX.length));
       if (event.type === "print_json") {
         sendToRenderer("client-status", event);
+        return;
+      }
+      if (event.type === "visualizer_explain") {
+        if (visualizerWindow && !visualizerWindow.isDestroyed()) {
+          visualizerWindow.webContents.send("visualizer-explain", event);
+        }
+        resolveExplainWaiter(event);
         return;
       }
       latestStatus = event.type === "status" ? event : { ...latestStatus, ...event };
@@ -968,6 +1061,15 @@ function stopClient() {
   clientProcess = null;
   latestStatus = null;
   preparedSeed = null;
+  for (const [rid, waiter] of explainWaiters.entries()) {
+    clearTimeout(waiter.timeout);
+    waiter.resolve({
+      ok: false,
+      error: "Client stopped.",
+      request_id: rid,
+    });
+  }
+  explainWaiters.clear();
   sendToRenderer("client-status", {
     type: "status",
     ap_connected: false,
@@ -1092,9 +1194,11 @@ function startClient(opts) {
     appendLog("stdout", `[app] ${deps.message.replace(/\n/g, "\n[app] ")}\n`);
   }
 
-  // Re-resolve after ensure so Linux/Windows launch with the Hub venv python.
-  const launchPy = findPythonLauncher() || launcher;
+  // Must launch the same interpreter ensure_client_deps just provisioned
+  // (MetroidBread venv). Do not fall back to bare DREAD_HUB_PYTHON / py -3.12.
+  const launchPy = deps.python || findPythonLauncher() || launcher;
   const { cmd, prefixArgs } = launchPy;
+  appendLog("stdout", `[app] Starting client with ${formatPythonCmd(launchPy)}\n`);
   const args = [
     ...prefixArgs,
     CLIENT_SCRIPT,
@@ -1119,9 +1223,14 @@ function startClient(opts) {
 
   let stderrBuf = "";
   try {
+    const spawnEnv = pythonSpawnEnv();
+    // Keep nested Hub tools pointed at the provisioned interpreter.
+    if (!prefixArgs.length) {
+      spawnEnv.DREAD_HUB_PYTHON = cmd;
+    }
     clientProcess = spawn(cmd, args, {
       cwd: INSTALL_ROOT,
-      env: pythonSpawnEnv(),
+      env: spawnEnv,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -1198,14 +1307,16 @@ function startClient(opts) {
   return { ok: true, roomId: normalized.roomId || "" };
 }
 
-function sendCommand(text) {
+function sendCommand(text, opts = {}) {
   if (!clientProcess || !clientProcess.stdin || clientProcess.stdin.destroyed) {
     return { ok: false, error: "Client is not running." };
   }
   const line = String(text || "").trim();
   if (!line) return { ok: false, error: "Empty command." };
   clientProcess.stdin.write(line + "\n");
-  sendToRenderer("client-log", { stream: "cmd", text: line });
+  if (!opts.silent) {
+    sendToRenderer("client-log", { stream: "cmd", text: line });
+  }
   return { ok: true };
 }
 
@@ -2393,6 +2504,37 @@ ipcMain.handle("send-command", (_e, text) => sendCommand(text));
 ipcMain.handle("get-status", () => latestStatus);
 ipcMain.handle("is-running", () => Boolean(clientProcess));
 ipcMain.handle("open-tracker", () => openTrackerWindow());
+ipcMain.handle("open-visualizer", () => openVisualizerWindow());
+ipcMain.handle("explain-visualizer-location", (_e, payload) => {
+  const locId = payload && payload.id != null ? String(payload.id).trim() : "";
+  const requestId = payload && payload.requestId != null ? String(payload.requestId).trim() : "";
+  if (!locId) {
+    return { ok: false, error: "Missing location id.", request_id: requestId };
+  }
+  if (!requestId) {
+    return { ok: false, error: "Missing request id.", request_id: requestId };
+  }
+  const sent = sendCommand(`/explain_location ${locId} ${requestId}`, { silent: true });
+  if (!sent.ok) {
+    return { ok: false, error: sent.error, request_id: requestId };
+  }
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      if (explainWaiters.get(requestId)) {
+        explainWaiters.delete(requestId);
+        resolve({
+          ok: false,
+          error: "Timed out waiting for location explanation.",
+          request_id: requestId,
+        });
+      }
+    }, 8000);
+    explainWaiters.set(requestId, {
+      timeout,
+      resolve: (event) => resolve({ ok: true, ...event, request_id: requestId }),
+    });
+  });
+});
 ipcMain.handle("get-tracker-catalog", () => {
   try {
     return readJsonFile(CATALOG_PATH);

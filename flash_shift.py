@@ -4,7 +4,7 @@ Modes (see Options.py):
 - Vanilla ON: one main Flash Shift = ITEM_GHOST_AURA + included_ammo chains (RDV/ODR).
 - Vanilla OFF + Require Main ON: main unlocks ability; N upgrades add chains only.
 - Vanilla OFF + Require Main OFF: progressive upgrades — first unlocks ability
-  (0 chains on first grant); later upgrades add chains.
+  and grants upgrade_amount chains; later upgrades add upgrade_amount more.
 """
 
 from __future__ import annotations
@@ -140,14 +140,12 @@ def logical_ability_and_chains(
         chains = (included if flash_main else 0) + upgrades * up_amt
         return has_ability, chains
 
-    # Progressive: first upgrade unlocks ability and grants 0 chains.
+    # Progressive: first upgrade unlocks ability and grants upgrade_amount chains
+    # (must be usable in-game — Ghost + iChainDashMax=0 cannot flash).
     has_ability = upgrades >= 1 or flash_main
-    if upgrades >= 1:
-        chains = (upgrades - 1) * up_amt
-        if flash_main:
-            chains += included
-    else:
-        chains = included if flash_main else 0
+    chains = upgrades * up_amt
+    if flash_main:
+        chains += included
     return has_ability, chains
 
 
