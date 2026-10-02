@@ -25,9 +25,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM Electron 33 historically failed to install its binary on Node 24.16+ / 26.x
-REM (extract-zip / yauzl hang — electron/electron#51619). package.json now
-REM overrides yauzl to ^3.3.1 so Node 26 works. Only refuse Node below 18.
+rem Electron 33 historically failed to install its binary on Node 24.16+ / 26.x
 for /f "usebackq delims=" %%A in (`node -p "process.versions.node.split('.')[0]" 2^>nul`) do set "NODE_MAJOR=%%A"
 if not defined NODE_MAJOR set "NODE_MAJOR=0"
 if %NODE_MAJOR% LSS 18 (
@@ -45,8 +43,7 @@ if %NODE_MAJOR% LSS 18 (
   exit /b 25
 )
 
-REM Ensure system Python has websockets / CommonClient deps before Hub spawns it.
-REM ensure_client_deps.py finds the same 3.11–3.13 interpreter Hub will use.
+rem Ensure system Python has websockets / CommonClient deps before Hub spawns it.
 set "ENSURE_SCRIPT=%~dp0..\ensure_client_deps.py"
 set "WORLD_DIR=%~dp0.."
 if not exist "%ENSURE_SCRIPT%" goto :npm_deps

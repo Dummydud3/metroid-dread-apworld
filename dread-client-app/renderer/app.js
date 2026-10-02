@@ -59,6 +59,7 @@
     ["show_dna_in_hud", "Show DNA In HUD", true],
     ["nerf_power_bombs", "Nerf Power Bombs", false],
     ["x_starts_released", "X Starts Released", false],
+    ["station_map_warp", "Pause Map Station Warp", false],
   ];
 
   const COSMETIC_ENV = [
@@ -86,6 +87,24 @@
         ["unmodified", "Unmodified"],
         ["consistent_low", "Consistent Low"],
         ["consistent_high", "Consistent High"],
+      ],
+    ],
+    [
+      "warp_requirement",
+      "Pause Map Warp Requirement",
+      "visited",
+      [
+        ["visible", "Visible"],
+        ["visited", "Visited"],
+      ],
+    ],
+    [
+      "warp_reach",
+      "Pause Map Warp Reach",
+      "global",
+      [
+        ["local", "Local"],
+        ["global", "Global"],
       ],
     ],
   ];
@@ -135,7 +154,6 @@
   ];
 
   // Align with Options.py valid_keys (RDV change_from / Phase-2 change_to).
-  // Never offer Sensor / Phase Shift / Access Permanently Closed as targets.
   const DOORS_TO_CHANGE_KEYS = [
     "Access Open",
     "Charge Beam Door",
@@ -516,7 +534,6 @@
       lab.appendChild(span);
       const hintKey = `${key}::${val}`;
       // Only per-value hints (setKey::Value). Skip set-level fallback so groups
-      // like disabled_lights can omit bubbles on each region checkbox.
       if (yamlHintText(hintKey)) {
         lab.appendChild(makeInfoButton(hintKey, val));
       }
@@ -570,7 +587,6 @@
       mainLog.hidden = stage === "patch";
     }
     // Connect/patch: keep Log minimized so the form stays primary.
-    // Post-connect Play stage: open the log by default.
     if (stage !== "patch") {
       setMainLogExpanded(stage === "client");
     }
@@ -646,7 +662,6 @@
     }
     scrollLogIfPinned(el, pin);
     // Persist renderer-originated main Log lines (RoomInfo / connect UI).
-    // Lines from main-process client-log are already teed to the hub file.
     if (persist && (!target || target === $("log")) && hub.appendHubLog) {
       hub.appendHubLog(cleaned.endsWith("\n") ? cleaned : `${cleaned}\n`).catch(() => {});
     }
@@ -762,7 +777,6 @@
     }
 
     // Same downstream state the AP-server path fills in via onApConnected(),
-    // so runPatch() and the Patch stage behave identically either way.
     state.singleplayer = true;
     state.spoilerPath = result.spoilerPath || "";
     state.zipPath = result.zipPath || "";
@@ -837,7 +851,6 @@
   }
 
   // Prevent Electron's default "navigate to dropped file" behavior anywhere
-  // outside the dropzone itself.
   window.addEventListener("dragover", (e) => e.preventDefault());
   window.addEventListener("drop", (e) => e.preventDefault());
 
@@ -903,17 +916,26 @@
       appendSelect(doors, "door_lock_rando", "Door Lock Randomizer", DOOR_LOCK, {
         selectId: "yaml-door-lock",
       });
+      appendCheck(doors, "randovania_door_rando", "Randovania Door Rando Algorithm", {
+        id: "yaml-rdv-door",
+        span: true,
+      });
       appendSelect(doors, "transport_rando", "Transport Randomizer", TRANSPORT);
     }
     appendOptionSet($("yaml-doors-to-change"), "doors_to_change", DOORS_TO_CHANGE_KEYS, DEFAULT_DOORS_TO_CHANGE);
     appendOptionSet($("yaml-change-doors-to"), "change_doors_to", CHANGE_DOORS_TO_KEYS, DEFAULT_CHANGE_DOORS_TO);
 
     const syncDoorSets = () => {
-      const on = $("yaml-door-lock")?.value === "individual_doors";
+      const rdv = document.querySelector('[data-yaml="randovania_door_rando"]');
+      const on =
+        $("yaml-door-lock")?.value === "individual_doors" || Boolean(rdv && rdv.checked);
       const wrap = $("yaml-door-sets");
       if (wrap) wrap.hidden = !on;
     };
     $("yaml-door-lock")?.addEventListener("change", syncDoorSets);
+    document
+      .querySelector('[data-yaml="randovania_door_rando"]')
+      ?.addEventListener("change", syncDoorSets);
     doors && (doors._syncDoorSets = syncDoorSets);
 
     const startFlags = $("yaml-start-flags");
@@ -994,7 +1016,6 @@
         const reqWrap = requireEl?.closest("label");
         if (reqWrap) reqWrap.style.opacity = vanilla ? "0.45" : "";
         // Vanilla Flash Shift always ships with 2 included dashes (locked).
-        // Otherwise included ammo is only used when Require Main Item is on.
         const includedWrap = $("yaml-flash-included-wrap");
         const includedInp = includedWrap?.querySelector("input");
         if (vanilla) {
@@ -1012,6 +1033,12 @@
       $("yaml-flash-vanilla")?.addEventListener("change", syncFlashDeps);
       $("yaml-flash-require")?.addEventListener("change", syncFlashDeps);
       flash._syncFlashDeps = syncFlashDeps;
+    }
+
+    const logicFlags = $("yaml-logic-flags");
+    if (logicFlags) {
+      logicFlags.innerHTML = "";
+      appendCheck(logicFlags, "dangerous_logic", "Dangerous Logic");
     }
 
     const cosmetics = $("yaml-cosmetics");
@@ -1033,6 +1060,20 @@
         appendSelect(cosChoice, key, label, options);
       }
     }
+
+    const syncWarpModeFields = () => {
+      const on = Boolean(document.querySelector('[data-yaml="station_map_warp"]')?.checked);
+      for (const key of ["warp_requirement", "warp_reach"]) {
+        const el = document.querySelector(`[data-yaml="${key}"]`);
+        if (!el) continue;
+        el.disabled = !on;
+        const wrap = el.closest("label");
+        if (wrap) wrap.style.opacity = on ? "" : "0.45";
+      }
+    };
+    document.querySelector('[data-yaml="station_map_warp"]')?.addEventListener("change", syncWarpModeFields);
+    syncWarpModeFields();
+    buildYamlForm._syncWarpModeFields = syncWarpModeFields;
 
     appendOptionSet($("yaml-disabled-lights"), "disabled_lights", LIGHT_REGIONS, new Set());
 
@@ -1095,7 +1136,9 @@
     if (key === FLASH_SHIFT.vanillaKey) return FLASH_SHIFT.vanillaDefault;
     if (key === FLASH_SHIFT.requireMainKey) return FLASH_SHIFT.requireMainDefault;
     if (key === "death_link") return false;
+    if (key === "randovania_door_rando") return false;
     if (key === "reverse_grapple_block") return false;
+    if (key === "dangerous_logic") return false;
     return null;
   }
 
@@ -1166,6 +1209,7 @@
     if (dnaRoot && dnaRoot._syncDnaDeps) dnaRoot._syncDnaDeps();
     const goalRoot = $("yaml-goal");
     if (goalRoot && goalRoot._syncGameGoalAccessibility) goalRoot._syncGameGoalAccessibility();
+    if (typeof buildYamlForm._syncWarpModeFields === "function") buildYamlForm._syncWarpModeFields();
 
     state.yamlLoadedDread = { ...dread };
   }
@@ -1239,6 +1283,7 @@
       starting_location: dread.starting_location || "default",
       starting_kit_items: Number(dread.starting_kit_items) || 0,
       door_lock_rando: dread.door_lock_rando || "vanilla",
+      randovania_door_rando: Boolean(dread.randovania_door_rando),
       transport_rando: dread.transport_rando || "off",
       doors_to_change: Array.isArray(dread.doors_to_change)
         ? dread.doors_to_change
@@ -1264,6 +1309,7 @@
       missile_plus_tanks: numOpt("missile_plus_tanks", 10),
       power_bomb_tanks: numOpt("power_bomb_tanks", 12),
       nerf_power_bombs: Boolean(dread.nerf_power_bombs),
+      dangerous_logic: Boolean(dread.dangerous_logic),
       constant_heat_damage: numOpt("constant_heat_damage", 20),
       constant_cold_damage: numOpt("constant_cold_damage", 20),
       accessibility: String(dread.accessibility || "items").toLowerCase(),
@@ -1305,7 +1351,6 @@
 
   function startKitHighlightKeys(result) {
     // Only paint Starting location / Starting Items when that field caused the
-    // sphere-0 failure — not for accessibility / energy / other conflicts.
     if (!result) return [];
     const title = String(result.title || "");
     const keys = [];
@@ -1396,7 +1441,6 @@
   function scheduleYamlValidation({ immediate = false } = {}) {
     if (!hub.probeYamlStartSphere0) return;
     // Invalidate any in-flight probe / pending debounce immediately so edits
-    // stay responsive and stale results never paint.
     if (yamlProbeTimer) {
       clearTimeout(yamlProbeTimer);
       yamlProbeTimer = null;
@@ -1880,7 +1924,6 @@
 
     const result = await hub.startClient({
       // Bare host:port (or URI) — Hub/CommonClient use ws:// first like Text Client.
-      // dread-ip is only for Remote Lua after patch; never used as the AP server.
       server,
       slot,
       password: gate.password,
@@ -2394,11 +2437,14 @@
     const result = await hub.openTracker();
     if (!result.ok) appendPlainLine(`[app] ${result.error || "Failed to open tracker"}`);
   });
-  $("btn-visualizer").addEventListener("click", async () => {
-    if (!state.debugLogs) return;
-    const result = await hub.openVisualizer();
-    if (!result.ok) appendPlainLine(`[app] ${result.error || "Failed to open visualizer"}`);
-  });
+  const visualizerBtn = $("btn-visualizer");
+  if (visualizerBtn) {
+    visualizerBtn.addEventListener("click", async () => {
+      if (!state.debugLogs) return;
+      const result = await hub.openVisualizer();
+      if (!result.ok) appendPlainLine(`[app] ${result.error || "Failed to open visualizer"}`);
+    });
+  }
   $("btn-clear-log").addEventListener("click", () => {
     $("log").textContent = "";
   });

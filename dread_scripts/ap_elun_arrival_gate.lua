@@ -1,14 +1,4 @@
 -- ApElunArrivalGate: keep Elun's arrival seal (ev_gatesealed_second) open on load.
---
--- Vanilla only ForceOpens that gate at the end of cutscene 113 (Save Station →
--- Exterior Bridge). CheckGatesOpened restores the X-release pair only, so after
--- ApWarp (or any leave that skips persisting EVENTPROP state) re-entry lands
--- the player in Transport/Save with the second gate sealed and CS113 already
--- consumed — softlock for transport-rando early Elun.
---
--- Fix: wrap s060_quarantine.CheckGatesOpened to ForceOpen the arrival gate
--- every time. Hook Scenario.InitFromBlackboard so the wrap is in place before
--- Elun's InitFromBlackboard calls CheckGatesOpened.
 
 ApElunArrivalGate = ApElunArrivalGate or {
   did_install = false,
@@ -56,8 +46,7 @@ function ApElunArrivalGate.EnsureWrapped()
   log("wrapped CheckGatesOpened (ForceOpen ev_gatesealed_second)")
 end
 
---- After any scenario init: wrap Elun gates if that table exists, then open now
---- if actors are already spawned (Continue into Elun / late wrap).
+-- - After any scenario init: wrap Elun gates if that table exists, then open now
 function ApElunArrivalGate.OnScenarioReady()
   pcall(ApElunArrivalGate.EnsureWrapped)
   if type(s060_quarantine) == "table" and s060_quarantine._ap_arrival_gate_wrapped then
@@ -80,7 +69,6 @@ function ApElunArrivalGate.Install()
   ApElunArrivalGate.did_install = true
 
   -- Elun InitFromBlackboard calls Scenario.InitFromBlackboard *then*
-  -- CheckGatesOpened. Wrapping here means EnsureWrapped runs in between.
   local orig_init = Scenario.InitFromBlackboard
   Scenario.InitFromBlackboard = function(...)
     orig_init(...)

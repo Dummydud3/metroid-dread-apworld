@@ -258,7 +258,6 @@
       : (catalog.locations || []).filter((l) => l.region === activeRegion);
 
     // In-logic unchecked first, then other unchecked, then checked.
-    // In the ALL view, each of those groups is further split by region.
     locs = locs.slice().sort((a, b) => {
       const ac = bucketOf(a);
       const bc = bucketOf(b);

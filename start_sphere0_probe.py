@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""
-Probe StartKit / sphere-0 for Hub YAML validation.
-
-Usage (from Archipelago repo root or with PYTHONPATH set):
-  py -3.12 -m worlds.metroid_bread.start_sphere0_probe
-  # JSON request on stdin → JSON response on stdout
-
-Request keys:
-  starting_location: default | random_save_station | option_key
-  starting_kit_items: 0–5
-  tricks: {option_name: level int}
-  door_lock_rando / transport_rando: 0|1 (or string)
-    door_lock_rando=1 applies Individual Doors pre-fill unlocks (same as gen)
-    transport_rando=1 rolls a connected elevator/shuttle matching
-  doors_to_change / change_doors_to: option-set lists (door rando pools)
-  accessibility: items | full | minimal (Full runs uncleared-logic check)
-  progressive_* / include_boss_pickups / … optional overrides
-  seed: int (StartKit shuffle + door/transport rolls)
-"""
+"""Probe StartKit / sphere-0 for Hub YAML validation."""
 
 from __future__ import annotations
 
@@ -31,10 +13,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 # Flat Hub runtime extracts put this script next to world Options.py. Running as
-# a script prepends that directory to sys.path *ahead of* PYTHONPATH, so
-# `import Options` resolves to the world module instead of ap_core/Options and
-# BaseClasses dies with a circular ImportError. Fix path order before any
-# world / AP imports.
 _WORLD_DIR = Path(__file__).resolve().parent
 _AP_CORE = _WORLD_DIR / "ap_core"
 
@@ -70,7 +48,6 @@ def _bootstrap_import_path() -> Path:
         sys.path.insert(0, core_s)
 
     # Repo checkout: worlds/metroid_bread → Archipelago root (for optional tools).
-    # Flat runtime: parents[2] is ProgramData/Archipelago — harmless if unused.
     root = _WORLD_DIR.parents[2]
     root_s = str(root)
     if root_s not in sys.path:
@@ -124,8 +101,10 @@ _BOSS_EMMI_LOCATION_SUBSTR = (
 
 _OPTION_DEFAULTS: Dict[str, int] = {
     "door_lock_rando": 0,
+    "randovania_door_rando": 0,
     "transport_rando": 0,
     "nerf_power_bombs": 0,
+    "dangerous_logic": 0,
     "game_goal": 0,
     "include_boss_pickups": 1,
     "start_with_pulse_radar": 1,
@@ -248,6 +227,7 @@ def build_option_values(req: Dict[str, Any]) -> Dict[str, int]:
             values[str(key)] = _as_int(raw, 0)
     for key in (
         "door_lock_rando",
+        "randovania_door_rando",
         "transport_rando",
         "include_boss_pickups",
         "start_with_pulse_radar",
@@ -268,6 +248,7 @@ def build_option_values(req: Dict[str, Any]) -> Dict[str, int]:
         "power_bomb_tanks",
         "immediate_energy_parts",
         "nerf_power_bombs",
+        "dangerous_logic",
         "constant_heat_damage",
         "constant_cold_damage",
         "missile_tank_ammo",
@@ -293,16 +274,12 @@ def build_option_values(req: Dict[str, Any]) -> Dict[str, int]:
 
 
 def _ensure_metroid_bread_importable() -> None:
-    """
-    Register stub worlds / worlds.metroid_bread packages so we can import StartKit
-    without executing worlds/__init__.py (which loads every AP world + bsdiff4).
-    """
+    """Register stub worlds / worlds.metroid_bread packages so we can import StartKit"""
     import types
 
     # Re-assert ap_core precedence (script-dir / cwd may have been re-inserted).
     _bootstrap_import_path()
     # If world Options.py was already partially imported, drop it so BaseClasses
-    # can load AP Options from ap_core.
     opt = sys.modules.get("Options")
     if opt is not None:
         opt_file = str(getattr(opt, "__file__", "") or "").replace("\\", "/")
@@ -388,11 +365,7 @@ def probe_full_inventory_counts(world: StubWorld) -> Dict[str, int]:
 
 
 def probe_uncleared_names(world: StubWorld) -> List[str]:
-    """Pickup / event items out of logic with a full inventory.
-
-    For events, one event_item may have several nodes (normal vs glitch
-    alternate). Only report the item if *no* providing node is reachable.
-    """
+    """Pickup / event items out of logic with a full inventory."""
     from collections import defaultdict
 
     _ensure_metroid_bread_importable()
@@ -421,12 +394,7 @@ def probe_has_uncleared_logic(world: StubWorld) -> bool:
 
 
 def accessibility_full_conflict(world: StubWorld) -> Dict[str, Any]:
-    """
-    Error when Accessibility Full cannot keep every check in logic.
-
-    Highlights Accessibility plus the minimum trick raises that would clear
-    the missing checks (when tricks alone can fix it).
-    """
+    """Error when Accessibility Full cannot keep every check in logic."""
     from worlds.metroid_bread.start_sphere0_tricks import (
         find_min_tricks_for_full_accessibility,
         format_trick_alt,
@@ -480,13 +448,7 @@ def apply_door_lock_shuffle(
     change_doors_to: Any,
     start_counts: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
-    """
-    Apply Individual Doors *pre-fill* (gen-equivalent early graph).
-
-    Classifies docks into fill-assist unlocks + reroute unlocks. Interesting
-    lock types are assigned post-fill in generation; the probe only needs the
-    opened graph for sphere-0 kit sizing.
-    """
+    """Apply Individual Doors *pre-fill* (gen-equivalent early graph)."""
     _ensure_metroid_bread_importable()
     from worlds.metroid_bread import DoorRando, DoorRandoAssigner
 
@@ -531,12 +493,7 @@ def apply_door_lock_shuffle(
 
 
 def apply_transport_shuffle(world, *, attempts: int = 40) -> Dict[str, Any]:
-    """
-    Roll a connected transport matching onto ``world.logic`` (gen-equivalent).
-
-    Returns metadata: matching size / whether the graph was rewritten.
-    No-op when transport_rando is off. Mutates the parser graph in place.
-    """
+    """Roll a connected transport matching onto ``world.logic`` (gen-equivalent)."""
     _ensure_metroid_bread_importable()
     from worlds.metroid_bread import TransportRando
 
@@ -601,6 +558,7 @@ def evaluate_probe(req: Dict[str, Any]) -> Dict[str, Any]:
     budget = max(0, min(StartKit.MAX_START_KIT, values.get("starting_kit_items", 0)))
     start_key = str(req.get("starting_location") or "default").strip()
     doors_on = values.get("door_lock_rando", 0) == 1
+    rdv_doors_on = values.get("randovania_door_rando", 0) == 1
     transports_on = values.get("transport_rando", 0) == 1
     # Both door pre-fill unlocks and transport shuffle are simulated below.
     doors_unvalidated = False
@@ -621,7 +579,32 @@ def evaluate_probe(req: Dict[str, Any]) -> Dict[str, Any]:
     transport_meta: Dict[str, Any] = {"applied": False, "pairs": 0}
     graph_notes: List[str] = []
 
-    if doors_on:
+    if rdv_doors_on:
+        from worlds.metroid_bread import RdvDoorRando
+
+        change_from = req.get("doors_to_change") or []
+        pre = RdvDoorRando.pre_fill(
+            world.logic,
+            doors_to_change=change_from,
+        )
+        door_meta = {
+            "applied": bool(pre.pairs),
+            "unlocked": len(pre.unlock_nodes),
+            "assist": 0,
+            "reroute": 0,
+            "pairs": len(pre.pairs),
+        }
+        if door_meta["applied"]:
+            graph_notes.append(
+                f"Randovania door pre-fill: opened {door_meta['unlocked']} "
+                f"dock node(s) across {door_meta['pairs']} connection(s) "
+                f"(locks are chosen after items are placed)."
+            )
+        else:
+            graph_notes.append(
+                "Randovania door rando is on but no docks were eligible."
+            )
+    elif doors_on:
         # Gen: protect frontier, force-unlock fill-assist, unlock ~85% reroute set.
         frontier_kit = StartKit.build_start_kit(world, max_kit=budget)
         door_meta = apply_door_lock_shuffle(
@@ -925,7 +908,6 @@ def main() -> int:
             "fix_alt": "",
         }
     # ASCII-only JSON: Hub on Windows often uses a non-UTF8 console encoding;
-    # ensure_ascii=False truncated mid-message on UnicodeEncodeError.
     json.dump(result, sys.stdout, ensure_ascii=True)
     print()
     return 0 if result.get("ok", True) or result.get("severity") else 1

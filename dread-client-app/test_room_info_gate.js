@@ -1,9 +1,4 @@
-/**
- * Unit tests for RoomInfo password gate (no live network).
- *
- * Run from this directory:
- *   node test_room_info_gate.js
- */
+/* * */
 
 "use strict";
 

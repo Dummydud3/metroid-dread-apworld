@@ -1,15 +1,4 @@
-"""Dread pause-map terrain for the Hub visualizer.
-
-Reads each scenario BMMAP (same world XY as the logic polygons) and stores:
-
-- Navmesh outlines (occupied 100-unit minimap cells, one layer per Z)
-- Heat / water / freeze / EMMI overlays
-- Magnet rails, elevator ticks, door boxes, breakable occluders
-- Station / elevator / tram / teleport / nav / CU / boss icons
-
-Navmesh triangles are far too dense for SVG. Boundary edges of the 100-unit
-grid are chained into even-odd fill loops instead.
-"""
+"""Dread pause-map terrain for the Hub visualizer."""
 
 from __future__ import annotations
 
@@ -65,7 +54,6 @@ TOKEN_TO_REGION = {
 }
 
 # BMMAP sIconId → (kind, label). Item tanks stay off this layer — the visualizer
-# already draws AP checks for those.
 ICON_META: Dict[str, Tuple[str, str]] = {
     "UsableStationSave": ("save", "Save Station"),
     "UsableStationMap": ("map", "Map Station"),

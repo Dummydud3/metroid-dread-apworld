@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Download a managed CPython 3.12 (python-build-standalone install_only) into the
-Metroid Bread runtime tools dir for Hub client use.
-"""
+"""Download a managed CPython 3.12 (python-build-standalone install_only) into the"""
 
 from __future__ import annotations
 
@@ -134,13 +131,7 @@ def _python_prefix(python_exe: Path) -> Path:
 
 
 def find_tcl_tk_library_dirs(python_exe: Path) -> Tuple[Optional[Path], Optional[Path]]:
-    """
-    Locate ``tcl8.x`` / ``tk8.x`` dirs under a managed/official Python prefix.
-
-    PBS Windows: ``<prefix>/tcl/tcl8.6`` and ``<prefix>/tcl/tk8.6``
-    PBS Unix: ``<prefix>/lib/tcl8.6`` and ``<prefix>/lib/tk8.6``
-    Official Windows: same as PBS Windows under TargetDir.
-    """
+    """Locate ``tcl8.x`` / ``tk8.x`` dirs under a managed/official Python prefix."""
     prefix = _python_prefix(Path(python_exe))
     search_roots = (
         prefix / "tcl",
@@ -170,11 +161,7 @@ def tcl_tk_environ_for_python(
     python_exe: Path,
     base_env: Optional[Dict[str, str]] = None,
 ) -> Dict[str, str]:
-    """
-    Env dict with TCL_LIBRARY / TK_LIBRARY set when support files are found.
-
-    Must be applied before ``import tkinter`` in the target interpreter.
-    """
+    """Env dict with TCL_LIBRARY / TK_LIBRARY set when support files are found."""
     env = dict(base_env if base_env is not None else os.environ)
     tcl_dir, tk_dir = find_tcl_tk_library_dirs(python_exe)
     if tcl_dir is not None:
@@ -185,10 +172,7 @@ def tcl_tk_environ_for_python(
 
 
 def _flatten_extracted_python(extract_root: Path, dest: Path) -> Path:
-    """
-    install_only archives contain a top-level ``python/`` directory.
-    Move that to dest (replace existing).
-    """
+    """install_only archives contain a top-level ``python/`` directory."""
     src = extract_root / "python"
     if not src.is_dir():
         # Already flat or unexpected layout — use extract_root if it has a binary
@@ -253,13 +237,7 @@ def try_windows_official_silent_install(
     log: Optional[LogFn] = None,
     include_tcltk: bool = False,
 ) -> bool:
-    """
-    Alternate Windows path: official amd64 installer with TargetDir under tools/.
-    May trigger UAC; best-effort only.
-
-    Set ``include_tcltk=True`` when a caller explicitly needs Tcl/Tk (rare;
-    the Hub Setup Wizard is an HTML page and does not require it).
-    """
+    """Alternate Windows path: official amd64 installer with TargetDir under tools/."""
     if os.name != "nt":
         return False
     # Prefer a recent 3.12.x installer URL (stable CDN).
@@ -311,12 +289,7 @@ def python_cmd_tkinter_probe(
     timeout: float = 45.0,
     env: Optional[Dict[str, str]] = None,
 ) -> Tuple[bool, str]:
-    """
-    Probe whether ``cmd`` can create a tkinter root.
-
-    Sets TCL_LIBRARY/TK_LIBRARY from the target prefix when possible.
-    Returns ``(ok, detail)`` — detail is empty on success, else stderr/stdout.
-    """
+    """Probe whether ``cmd`` can create a tkinter root."""
     if not cmd:
         return False, "empty python command"
     py = Path(cmd[0])
@@ -384,17 +357,7 @@ def install_portable_python312(
     allow_official_silent: bool = True,
     require_tkinter: bool = False,
 ) -> Tuple[bool, str]:
-    """
-    Download/extract managed CPython 3.12 into dest.
-
-    When ``require_tkinter`` is True, an existing install without Tcl/Tk is
-    removed and reinstalled. The Hub Setup Wizard no longer needs this (HTML UI).
-    Probes always
-    set TCL_LIBRARY/TK_LIBRARY from the install tree. On Windows, if PBS lacks
-    a working Tk, falls back to the official installer with Include_tcltk=1.
-
-    Returns (ok, message).
-    """
+    """Download/extract managed CPython 3.12 into dest."""
     dest = Path(dest)
     existing = find_python_in_dir(dest)
     if existing is not None:

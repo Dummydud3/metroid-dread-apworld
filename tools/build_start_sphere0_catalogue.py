@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""
-Build logic_database/start_sphere0_catalogue.json
-
-For every RDV valid_starting_location, compute StartKit size / sphere-0 check
-counts with door rando off and all tricks disabled.
-
-Usage (from Archipelago repo root):
-  py -3.12 worlds/metroid_bread/tools/build_start_sphere0_catalogue.py
-"""
+"""Build logic_database/start_sphere0_catalogue.json"""
 
 from __future__ import annotations
 
@@ -72,11 +64,11 @@ _BOSS_EMMI_LOCATION_SUBSTR = (
 )
 
 # Option defaults used by StartKit / DreadLogic (non-trick). Progressive and
-# Flash Shift defaults match Options.py so the kit candidate pool matches gen.
 _OPTION_DEFAULTS: Dict[str, int] = {
     "door_lock_rando": 0,
     "transport_rando": 0,
     "nerf_power_bombs": 0,
+    "dangerous_logic": 0,
     "game_goal": 0,  # Defeat Raven Beak — no 100% active-location filter
     "include_boss_pickups": 1,  # DefaultOnToggle
     "start_with_pulse_radar": 1,  # DefaultOnToggle

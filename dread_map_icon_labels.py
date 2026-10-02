@@ -1,55 +1,4 @@
-"""
-Map-icon labels: Unknown until collect/hint, with [IN LOGIC]/[OUT OF LOGIC] prefixes.
-
-ODR MapIconEditor assigns ItemCustom{n} sequentially for actor pickups that have
-map_icon.custom_icon, in patcher.json pickups-array order (special boss/EMMI
-entries have no custom_icon and do not consume a number).
-
-CRITICAL: having custom_icon is necessary but NOT sufficient. ODR only reaches
-MapIconEditor.get_data() — the call that increments the counter — from
-pickup.py::patch_minimap_icon, and only when the pickup's map actor is present in
-that scenario's vanilla .bmmap `items` category:
-
-    if map_actor["actor"] in map_def.items:
-        icon = map_def.items.pop(map_actor["actor"])
-        icon.sIconId = editor.map_icon_editor.get_data(self.pickup)
-
-The 12 major-item spheres use a different world actor (ItemSphere_ChargeBeam,
-IT_VARIA_GEN_001, …) than their minimap `items` entry (powerup_chargebeam, …).
-ap_to_patcher sets map_icon.original_actor to that powerup_* name (from
-dread_pickup_actors.json map_icon_actor) so ODR replaces the vanilla major icon
-and consumes an ItemCustom{n}. If original_actor is wrong/missing, ODR leaves
-the pulsing world-map-visible major icon and this module must skip the slot —
-numbering a skip shifts every later pickup (wrong logic state + reveal name).
-dread_map_icon_actors.json carries the vanilla `items` lists so numbering can
-be reproduced without the base ROM.
-
-Patch-time BTXT (via ODR text_patches) bakes four keys per icon:
-  MAP_ICON_ItemCustom{n}      → [OUT OF LOGIC] Unknown Item  (default / display key)
-  MAP_ICON_ItemCustom{n}_IL   → [IN LOGIC] Unknown Item
-  MAP_ICON_ItemCustom{n}_R    → [OUT OF LOGIC] {Item}
-  MAP_ICON_ItemCustom{n}_R_IL → [IN LOGIC] {Item}
-
-Runtime: RL.ApplyMapIconVariants prefers OdrMap.SetIconInspectorLabel (retargets
-the display key → variant key, no language-bank force) but ONLY treats it as
-applied when the native GetLocalized hook is confirmed live
-(OdrText.HasLabelRedirect). That hook is currently disabled for hover-crash
-safety, so the working path today is OdrText.SetLocalized(base_key, full_text)
-— callers must pass `texts` to format_apply_map_icon_variants_chunks, not just
-`variants`, or icons stay stuck on their patch-time default text.
-
-Icon GRAPHICS follow the same revealed set as the labels. Every ItemCustom{n}
-is a separate bmmdef icon definition used by exactly one pickup, so revealing
-one location is a single write of that definition's sprite-atlas cell:
-
-    OdrMap.SetIconSprite("ItemCustom19", row, col)
-
-Unrevealed icons use UNKNOWN_SPRITE (ODR's default ?) when out of logic, and
-IN_LOGIC_UNKNOWN_SPRITE (green ? stamped next to the AP logo) when reachable.
-Revealed icons swap to the placement's item / AP-logo cell. The atlas cell for
-each location's real item is baked into the sidecar at patch time
-(entries[].sprite) from the same placement the _R label variants use.
-"""
+"""Map-icon labels: Unknown until collect/hint, with [IN LOGIC]/[OUT OF LOGIC] prefixes."""
 
 from __future__ import annotations
 
@@ -62,8 +11,6 @@ ROOT = Path(__file__).resolve().parent
 MapIconKeys = Dict[str, Any]
 
 # v3 reproduced ODR's real ItemCustom{n} numbering (v2 numbered pickups ODR skips).
-# v4 adds entries[].sprite — the atlas cell each icon reveals to.
-# v5 includes the 12 major-item spheres via map_icon.original_actor → powerup_*.
 KEYS_VERSION = 5
 
 PREFIX_IN = "[IN LOGIC]"
@@ -73,18 +20,9 @@ UNKNOWN_ITEM = "Unknown Item"
 Sprite = Tuple[int, int]
 
 # Minimap sprite-atlas cells as (row, col).
-#
-# open_dread_rando.pickups.map_icons.ALL_ICONS stores these the other way round
-# — MapIcon.coords is (col, row) and add_to_defs passes coords[1] then
-# coords[0] — so every entry here is that tuple reversed. Cross-checked against
-# the vanilla bmmdef: item_missiletank coords=(7, 0) and the shipped
-# ItemMissileTank def has uSpriteRow=0, uSpriteCol=7.
 UNKNOWN_SPRITE: Sprite = (7, 15)  # ODR "unknown" — default ? (out-of-logic / unreachable)
 GENERIC_ITEM_SPRITE: Sprite = (0, 4)  # vanilla ItemSphere; used when nothing better fits
 # Empty cells in ODR's icons.bctex that finalize_mod stamps via
-# dread_scripts/build_ap_map_icon_atlas.py → assets/icons.bctex:
-#   (5, 10) AP cluster logo — foreign / unknown revealed items
-#   (5, 11) green in-logic ? — reachable uncollected / unknown checks
 AP_LOGO_SPRITE: Sprite = (5, 10)
 IN_LOGIC_UNKNOWN_SPRITE: Sprite = (5, 11)
 
@@ -133,9 +71,6 @@ ICON_SPRITES: Dict[str, Sprite] = {
 }
 
 # patcher.json `model` values that do not name an ALL_ICONS entry. These are 3D
-# model names from dread_item_mapping, which predate (and do not track) ODR's
-# icon keys — Spider Magnet ships as "powerup_magnet" but its icon is
-# "powerup_spidermagnet". Missile Launcher and Slide have no icon of their own.
 MODEL_TO_ICON: Dict[str, str] = {
     "powerup_magnet": "powerup_spidermagnet",
     "powerup_phantom": "powerup_opticcamo",
@@ -143,11 +78,11 @@ MODEL_TO_ICON: Dict[str, str] = {
     "powerup_grapple": "powerup_grapplebeam",
     "item_multimisilletank": "item_missiletankplus",
     "powerup_missilelauncher": "item_missiletank",
+    "powerup_missile": "item_missiletank",
     "powerup_slide": "itemsphere",
 }
 
 # AP item name → icon key. Progressive items get their own atlas cell, so they
-# must not fall through to the first stage's icon.
 ITEM_TO_ICON: Dict[str, str] = {
     "Energy Tank": "item_energytank",
     "Energy Part": "item_energyfragment",
@@ -203,13 +138,7 @@ def sprite_for_model(model: Optional[str]) -> Sprite:
 
 
 def sprite_for_item(item_name: Optional[str], *, is_foreign: bool = False) -> Sprite:
-    """
-    Atlas cell for an AP item name.
-
-    Foreign / unrecognised items use the Archipelago logo cell (stamped into
-    ODR's minimap atlas at patch finalize). Known Dread names still resolve to
-    their vanilla/ODR major icons even when the sender is another world.
-    """
+    """Atlas cell for an AP item name."""
     name = (item_name or "").strip()
     if not name:
         return AP_LOGO_SPRITE if is_foreign else GENERIC_ITEM_SPRITE
@@ -274,12 +203,7 @@ def map_item_actors() -> Dict[str, frozenset]:
 
 
 def has_custom_map_icon(scenario: str, actor: str) -> bool:
-    """Does ODR assign this pickup an ItemCustom{n}?
-
-    True when the actor is a vanilla minimap item. Unknown scenarios fall back to
-    True so a missing/stale table degrades to the old (over-numbering) behaviour
-    instead of dropping every label.
-    """
+    """Does ODR assign this pickup an ItemCustom{n}?"""
     table = map_item_actors()
     known = table.get(scenario)
     if known is None:
@@ -316,20 +240,7 @@ def build_map_icon_keys_from_pickups(
     pickup_indices: Optional[Sequence[Optional[int]]] = None,
     sprite_by_pickup_index: Optional[Mapping[int, Sequence[int]]] = None,
 ) -> MapIconKeys:
-    """
-    Build sidecar mapping mirroring ODR custom_icon assignment order.
-
-    If pickup_indices is provided, it must align with pickups (None for skips).
-    Otherwise pickup_index is resolved from pickup_actor via dread_pickup_actors.json.
-
-    Pickups whose map actor has no vanilla minimap `items` entry are skipped
-    without consuming a number, exactly like ODR's patch_minimap_icon.
-
-    Each entry also carries the atlas cell its icon reveals to. Callers that
-    know the AP item name (ap_to_patcher) should pass sprite_by_pickup_index;
-    otherwise it is derived from the pickup's `model`, which is all a bare
-    patcher.json exposes.
-    """
+    """Build sidecar mapping mirroring ODR custom_icon assignment order."""
     actor_lookup = actor_to_pickup_index()
     loc_lookup = pickup_index_to_location_id()
 
@@ -433,13 +344,7 @@ def build_map_icon_keys_from_pickups(
 
 
 def _sprites_from_reveal_patches(patcher_data: Mapping[str, Any]) -> Dict[int, Sprite]:
-    """
-    custom_n → sprite, read back out of the baked MAP_ICON_ItemCustom{n}_R strings.
-
-    A patcher.json on its own only exposes each pickup's 3D `model`, which cannot
-    tell Progressive Beam from Wide Beam. The revealed label already carries the
-    AP item name, so rebuilds from patcher.json alone stay exact.
-    """
+    """custom_n → sprite, read back out of the baked MAP_ICON_ItemCustom{n}_R strings."""
     out: Dict[int, Sprite] = {}
     patches = patcher_data.get("text_patches")
     if not isinstance(patches, Mapping):
@@ -542,17 +447,7 @@ def load_or_derive_map_icon_keys(
     games_folder: Optional[Union[str, Path]] = None,
     patcher_json: Optional[Union[str, Path]] = None,
 ) -> Tuple[Optional[MapIconKeys], Optional[Path]]:
-    """
-    Load sidecar if present; else derive from patcher.json pickups order.
-
-    A sidecar written before KEYS_VERSION is ignored in favour of re-deriving from
-    patcher.json: v2 files numbered every custom_icon pickup, including the major-item
-    spheres ODR never gives an icon, so their keys are shifted and would paint labels
-    onto the wrong map icons. The stale file is still used as a last resort when no
-    patcher.json is reachable.
-
-    Returns (keys, source_path_or_None).
-    """
+    """Load sidecar if present; else derive from patcher.json pickups order."""
     found = find_map_icon_keys_file(
         mod_root=mod_root,
         spoiler_dir=spoiler_dir,
@@ -629,11 +524,7 @@ def build_map_label_text_patches(
     keys: Mapping[str, Any],
     item_name_by_custom_n: Mapping[int, str],
 ) -> Dict[str, str]:
-    """
-    Four BTXT strings per custom icon for ODR configuration['text_patches'].
-
-    item_name_by_custom_n: custom_n → human-readable item (e.g. \"Morph Ball\").
-    """
+    """Four BTXT strings per custom icon for ODR configuration['text_patches']."""
     patches: Dict[str, str] = {}
     entries = keys.get("entries") or []
     if not isinstance(entries, list):
@@ -658,11 +549,7 @@ def item_names_by_custom_n(
     keys: Mapping[str, Any],
     item_name_by_pickup_index: Mapping[int, str],
 ) -> Dict[int, str]:
-    """Re-key reveal names pickup_index → custom_n using the built sidecar.
-
-    Callers must never run their own custom_n counter: only the sidecar knows
-    which pickups ODR actually numbered.
-    """
+    """Re-key reveal names pickup_index → custom_n using the built sidecar."""
     out: Dict[int, str] = {}
     entries = keys.get("entries") or []
     if not isinstance(entries, list):
@@ -718,15 +605,7 @@ def format_apply_map_icon_variants_lua(
     variants: Mapping[str, str],
     texts: Optional[Mapping[str, str]] = None,
 ) -> str:
-    """
-    Build RL.ApplyMapIconVariants({[baseKey]={variant=..., text=...}, ...}).
-
-    Prefer OdrMap.SetIconInspectorLabel(redirect). If that API is missing (old
-    subsdk9), Lua falls back to OdrText.SetLocalized(base, text).
-
-    For large maps use format_apply_map_icon_variants_chunks — a full 137-icon
-    table is ~13KB and exceeds the Dread remote-Lua 4096 buffer (PACKET_MALFORMED).
-    """
+    """Build RL.ApplyMapIconVariants({[baseKey]={variant=..., text=...}, ...})."""
     parts: List[str] = []
     for base in sorted(variants):
         var = _lua_escape(variants[base])
@@ -748,14 +627,7 @@ def format_apply_map_icon_variants_chunks(
     buffer_size: int = 4096,
     overhead: int = 64,
 ) -> List[str]:
-    """
-    Split variant applies into PACKET_REMOTE_LUA_EXEC-safe chunks.
-
-    Uses compact redirect-only entries (no text) when possible — SetIconInspectorLabel
-    path does not need text. Falls back to including text only if texts is provided
-    AND a single redirect-only entry still needs the setloc fallback (always include
-    text when texts is provided for old-subsdk9 compatibility, but keep batches small).
-    """
+    """Split variant applies into PACKET_REMOTE_LUA_EXEC-safe chunks."""
     # RecvBuffer is BufferSize bytes total and also holds type+u32 len (5 bytes).
     max_len = max(256, int(buffer_size) - max(int(overhead), 5))
     bases = sorted(variants)
@@ -851,13 +723,7 @@ def format_apply_map_icon_sprites_chunks(
     buffer_size: int = 4096,
     overhead: int = 64,
 ) -> List[str]:
-    """
-    Split RL.ApplyMapIconSprites applies into remote-Lua-safe chunks.
-
-    Keys are icon ids ("ItemCustom19"), not BTXT keys, both because that is
-    what OdrMap.SetIconSprite wants and because dropping the MAP_ICON_ prefix
-    keeps roughly a third more icons in each 4096-byte packet.
-    """
+    """Split RL.ApplyMapIconSprites applies into remote-Lua-safe chunks."""
     max_len = max(256, int(buffer_size) - max(int(overhead), 5))
     chunks: List[str] = []
     batch: List[str] = []
@@ -894,12 +760,7 @@ def format_apply_map_icon_globals_chunks(
     buffer_size: int = 4096,
     overhead: int = 64,
 ) -> List[str]:
-    """
-    Split RL.ApplyMapIconGlobals applies (OdrMap.SetIconGlobal) into chunks.
-
-    Keys may be BTXT keys or bare icon ids; both are normalised to ItemCustomN.
-    Values are booleans — true = show on the pause/world map (bIsGlobal).
-    """
+    """Split RL.ApplyMapIconGlobals applies (OdrMap.SetIconGlobal) into chunks."""
     max_len = max(256, int(buffer_size) - max(int(overhead), 5))
     chunks: List[str] = []
     batch: List[str] = []

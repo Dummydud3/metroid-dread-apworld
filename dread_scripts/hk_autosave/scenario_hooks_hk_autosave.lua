@@ -1,9 +1,4 @@
 -- Glue to wire ProgressKeeper into an ODR-style custom_scenario bootstrap.
--- Usage (in custom_scenario.lua after other DoFiles):
---   Game.DoFile("system/scripts/progress_keeper.lua")
---   Game.DoFile("system/scripts/actor_consistency.lua")
---   Game.DoFile("system/scripts/scenario_hooks_hk_autosave.lua")
---   HkAutosave.Install()
 
 HkAutosave = HkAutosave or {}
 

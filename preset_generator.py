@@ -1,20 +1,10 @@
 #!/usr/bin/env python3
-"""
-Generate a minimal game preset for non-Dread games to include in multiworld .rdvgame files.
-This allows Randovania to display foreign item names correctly.
-"""
+"""Generate a minimal game preset for non-Dread games to include in multiworld .rdvgame files."""
 
 def create_minimal_preset(game_name, player_name):
-    """
-    Create a minimal preset structure for a non-Dread game.
-    
-    For Archipelago multiworld, we need a preset so Randovania can display
-    foreign item names. However, if the game isn't supported by Randovania,
-    we use a supported game as a placeholder (the item names still display correctly).
-    """
+    """Create a minimal preset structure for a non-Dread game."""
     
     # Map common Archipelago game names to Randovania game identifiers
-    # For unsupported games, we use a placeholder Randovania game
     GAME_NAME_MAPPING = {
         # Supported Randovania games
         "Metroid Prime": "prime1",
@@ -28,7 +18,6 @@ def create_minimal_preset(game_name, player_name):
         "Samus Returns": "samus_returns",
         
         # Unsupported games → use placeholder
-        # The actual item names (strings) will still display correctly!
         "Hollow Knight": "prime1",  # Use Prime as placeholder
         "HKPlayer": "prime1",
         "A Link to the Past": "prime1",
@@ -49,8 +38,6 @@ def create_minimal_preset(game_name, player_name):
             game_id = "prime1"  # Safe default placeholder
     
     # Create minimal preset with required configuration
-    # Note: Even though we use prime1 as game ID, the ITEM NAMES are what get displayed,
-    # so "Monomon" will still show as "Monomon" in-game!
     
     # Get minimal configuration based on game type
     configuration = get_minimal_configuration(game_id)
@@ -69,16 +56,10 @@ def create_minimal_preset(game_name, player_name):
 
 
 def get_minimal_configuration(game_id):
-    """
-    Get minimal required configuration for each game type.
-    For Prime 1, we use a complete working configuration to avoid schema issues.
-    """
+    """Get minimal required configuration for each game type."""
     
     if game_id == "prime1":
         # Load complete Prime 1 configuration shipped next to this module.
-        # Empty pickups_state is invalid: Randovania fills missing pickups with
-        # StandardPickupState(included_ammo=()), but Missile Launcher / Power Bomb
-        # require included_ammo length matching pickup.ammo (size 1).
         import os
         import json
 
@@ -139,7 +120,6 @@ def get_minimal_configuration(game_id):
 
 
 # Randovania prime1 pickups that declare ammo[] — included_ammo must match length.
-# See randovania/games/prime1/pickup_database/pickup-database.json
 PRIME1_AMMO_PICKUP_DEFAULTS = {
     "Missile Launcher": {
         "num_shuffled_pickups": 1,
@@ -173,8 +153,6 @@ def _ensure_prime_ammo_included(cfg):
 def get_minimal_prime_config():
     """Fallback minimal Prime config if complete config can't be loaded."""
     # Must include Missile Launcher / Power Bomb included_ammo (length 1 each).
-    # An empty pickups_state causes Randovania to reject the preset with:
-    #   Mismatched included_ammo array size. (Missile Launcher)
     return {
         "trick_level": {
             "minimal_logic": False,
@@ -366,9 +344,6 @@ def get_minimal_prime_config():
 
 
 # game_modifications.starting_location must be "Region/Area/Node".
-# NodeIdentifier.from_string splits on "/" and calls create(region, area, node).
-# A bare string like "Default" raises:
-#   NodeIdentifier.create() missing 2 required positional arguments: 'area' and 'node'
 DEFAULT_STARTING_LOCATIONS = {
     "prime1": "Tallon Overworld/Landing Site/Ship",
     "prime2": "Temple Grounds/Landing Site/Ship",
@@ -383,11 +358,7 @@ DEFAULT_STARTING_LOCATIONS = {
 
 
 def _starting_pickups_for_game(game_id):
-    """
-    Pickups that the placeholder preset puts in starting inventory.
-    Must be listed under starting_equipment.pickups so Randovania can
-    pull them from the generated pool when decoding game_modifications.
-    """
+    """Pickups that the placeholder preset puts in starting inventory."""
     if game_id != "prime1":
         return []
 
@@ -410,15 +381,7 @@ def _starting_pickups_for_game(game_id):
 
 
 def create_minimal_game_modification(game_id, player_index):
-    """
-    Create a minimal game_modifications entry for a non-Dread game.
-    
-    We include this so Randovania knows the game exists in the multiworld,
-    but locations stay empty since we're only patching Dread.
-    
-    Fields must match schema-40 decode expectations in
-    randovania.layout.game_patches_serializer.decode_single.
-    """
+    """Create a minimal game_modifications entry for a non-Dread game."""
     starting_location = DEFAULT_STARTING_LOCATIONS.get(
         game_id, "Tallon Overworld/Landing Site/Ship"
     )

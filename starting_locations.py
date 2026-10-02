@@ -1,9 +1,4 @@
-"""
-Valid Metroid Bread starting locations (Randovania valid_starting_location).
-
-Default spawn is Artaria Intro Room Start Point (StartPoint0).
-Random mode picks among all RDV-valid starts (save/map/nav platforms + intro).
-"""
+"""Valid Metroid Bread starting locations (Randovania valid_starting_location)."""
 
 from __future__ import annotations
 
@@ -18,7 +13,6 @@ from .logic_parser import REGION_FILES, read_database_bytes
 NodeId = Tuple[str, str, str]
 
 # Only used as a fallback path for standalone dev tooling; see
-# logic_parser.read_database_bytes for the zip-safe path used at runtime.
 LOGIC_DB = Path(__file__).parent / "logic_database"
 DEFAULT_START: NodeId = ("Artaria", "Intro Room", "Start Point")
 DEFAULT_PATCHER_REF = {"scenario": "s010_cave", "actor": "StartPoint0"}

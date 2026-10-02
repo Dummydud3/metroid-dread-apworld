@@ -1,8 +1,4 @@
 -- ProgressKeeper: Hollow Knight–style progression persistence for Metroid Dread
--- Load via Game.DoFile("system/scripts/progress_keeper.lua") from ODR custom_scenario.
---
--- Design: RespawnAnchor (bench) vs ProgressStore (inventory + BB + visits).
--- Always reinject ProgressStore AFTER checkpoint/save load (see death_counter pattern).
 
 ProgressKeeper = ProgressKeeper or {
   enabled = true,
@@ -158,7 +154,6 @@ function ProgressKeeper.CaptureNow()
       end
     end
     -- Capture Location_Collected_* via known ODR increments is incomplete;
-    -- hooked writers should call CapturePlayerProp. Best-effort: keep prior keys.
     if ProgressKeeper.store.player_props then
       for k, v in pairs(ProgressKeeper.store.player_props) do
         if type(k) == "string" and k:find("^Location_Collected_", 1) then

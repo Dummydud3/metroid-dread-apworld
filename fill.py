@@ -1,7 +1,4 @@
-"""
-Custom Fill Algorithm for Metroid Bread
-Implements forward-fill that respects game logic and prevents circular dependencies
-"""
+"""Custom Fill Algorithm for Metroid Bread"""
 
 from typing import Dict, Set, List, Tuple, Optional, FrozenSet
 from BaseClasses import MultiWorld, Item, Location, CollectionState
@@ -12,14 +9,7 @@ import random
 
 
 class MetroidBreadFillAlgorithm:
-    """
-    Custom fill algorithm that places items in accessibility order.
-    
-    Key concept: ASSUMED FILL
-    - We assume progression items can be at any reachable location
-    - We place items in order of accessibility
-    - This prevents circular dependencies
-    """
+    """Custom fill algorithm that places items in accessibility order."""
     
     def __init__(self, world):
         self.world = world
@@ -58,9 +48,7 @@ class MetroidBreadFillAlgorithm:
         filled_locations: Set[str],
         collected_items: Set[str]
     ) -> Set[str]:
-        """
-        Get all unfilled locations that are currently reachable with collected items.
-        """
+        """Get all unfilled locations that are currently reachable with collected items."""
         # Get reachable nodes from Randovania logic
         reachable_nodes = self.analyzer.get_reachable_pickups(
             self.starting_node,
@@ -81,20 +69,7 @@ class MetroidBreadFillAlgorithm:
         progression_items: List[Item],
         filler_items: List[Item]
     ) -> bool:
-        """
-        Custom fill algorithm using forward-fill / assumed fill approach.
-        
-        Algorithm:
-        1. Start with collected_items = {}
-        2. Find all currently reachable locations
-        3. Randomly place ONE progression item at a reachable location
-        4. Add that item to collected_items (assumed fill)
-        5. Re-calculate reachability
-        6. Repeat until all progression items placed
-        7. Fill remaining locations with filler items
-        
-        KEY: We place ONE item at a time and re-check reachability each time!
-        """
+        """Custom fill algorithm using forward-fill / assumed fill approach."""
         print(f"\n{'='*60}")
         print("METROID DREAD CUSTOM FILL ALGORITHM")
         print(f"{'='*60}")
@@ -177,7 +152,6 @@ class MetroidBreadFillAlgorithm:
             placement_count += 1
             
             # Check if we should advance to next sphere
-            # Advance sphere when we've placed a "key" item or every 3 items
             is_key_item = any(key in item.name for key in [
                 "Morph Ball", "Bomb", "Spider", "Beam", "Missile", 
                 "Grapple", "Phantom", "Flash", "Suit", "Space", "Spin", "Screw"
@@ -229,10 +203,7 @@ class MetroidBreadFillAlgorithm:
 
 def fill_restrictive(multiworld: MultiWorld, base_state: CollectionState, locations: List[Location],
                      items: List[Item]) -> None:
-    """
-    Archipelago's fill hook for restrictive fill.
-    This is called by the main fill algorithm for worlds that need special handling.
-    """
+    """Archipelago's fill hook for restrictive fill."""
     # This is for the Metroid Bread world - use custom fill
     if not locations:
         return

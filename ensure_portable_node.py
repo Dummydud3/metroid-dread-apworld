@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""
-Download a portable Node.js 24 toolchain into the Metroid Bread runtime tools dir.
-
-Used by the Hub Setup Wizard and hub_launcher.find_node / find_npm preference.
-"""
+"""Download a portable Node.js 24 toolchain into the Metroid Bread runtime tools dir."""
 
 from __future__ import annotations
 
@@ -58,11 +54,7 @@ def resolve_node24_archive_url(
     machine: Optional[str] = None,
     opener=None,
 ) -> Tuple[str, str]:
-    """
-    Return (url, filename) for the latest Node 24 archive for this platform.
-
-    Parses SHASUMS256.txt under latest-v24.x (no hard-coded patch version).
-    """
+    """Return (url, filename) for the latest Node 24 archive for this platform."""
     suffix = node_archive_suffix(plat, machine)
     shasums_url = NODE_DIST_LATEST_V24 + "SHASUMS256.txt"
     fetch = opener or urllib.request.urlopen
@@ -119,10 +111,7 @@ def _extract_archive(archive: Path, dest_dir: Path, *, log: Optional[LogFn] = No
 
 
 def _flatten_extracted_node(extract_root: Path, dest: Path) -> Path:
-    """
-    Node zips extract to node-v24.x.x-<plat>/ containing node.exe / bin/node.
-    Move that tree to dest (replace existing).
-    """
+    """Node zips extract to node-v24.x.x-<plat>/ containing node.exe / bin/node."""
     candidates = []
     if (extract_root / "node.exe").is_file() or (extract_root / "bin" / "node").is_file():
         candidates.append(extract_root)
@@ -231,11 +220,7 @@ def install_portable_node24(
     allow_winget_fallback: bool = True,
     allow_browser_fallback: bool = True,
 ) -> Tuple[bool, str]:
-    """
-    Download and extract Node 24 into dest.
-
-    Returns (ok, message). On failure may open browser / try winget.
-    """
+    """Download and extract Node 24 into dest."""
     dest = Path(dest)
     existing = find_node_in_dir(dest)
     if existing is not None:

@@ -1,6 +1,4 @@
-"""
-Client-side helpers for AP reachability → in-game minimap.
-"""
+"""Client-side helpers for AP reachability → in-game minimap."""
 
 from __future__ import annotations
 
@@ -41,13 +39,7 @@ def area_at_position(
     x: float,
     y: float,
 ) -> Optional[str]:
-    """
-    Resolve world (x, y) to a logic-database area name for *scenario*.
-
-    Uses AABB bounds from reachable_map_cells.json (same names as
-    ``DreadLogic.reachable_areas`` / minimap paint). When AABBs overlap,
-    prefers the smallest containing box.
-    """
+    """Resolve world (x, y) to a logic-database area name for *scenario*."""
     scen = (scenario or "").strip()
     if not scen:
         return None
@@ -79,11 +71,7 @@ def area_at_position(
 
 
 def format_apply_reachable_lua(areas: Iterable[RegionArea]) -> str:
-    """
-    Build RL.ApplyReachableMap(...) call grouping areas by scenario.
-
-    areas: iterable of (region, area_name)
-    """
+    """Build RL.ApplyReachableMap(...) call grouping areas by scenario."""
     r2s = region_to_scenario()
     by_scenario: Dict[str, List[str]] = {}
     for region, area in areas:

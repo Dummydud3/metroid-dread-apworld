@@ -1,31 +1,4 @@
-"""
-ODR text_patches experiment: rewrite AP context-4 tip carousel (TIP_000–TIP_004).
-
-With OdrTip 0.3.0+, ExeFS duplicate-registers these five keys into tip context
-class 4 (via 0xddcf14 after retail fill) and forces getter 0xddbbb8 → 4.
-Vanilla GENERAL copies of the same keys stay at context 0. Patching BTXT
-(TITLE||BODY, retail {c6}/{c7}/{c0} style) makes the pool-4 hijack obvious.
-
-OdrTip 0.5.2 seeds Metroid Bread defaults into the same five keys via GetLocalized
-(slot 0 = CONNECT CLIENT; default gTipCount=1) and controls carousel order/count
-via PoolBuild trampoline (`OdrTip.SetTipOrder` / `SetTipCount` / `/tip_order` /
-`/tip_count`; default order hardcoded sequential 0,1,2,3,4).
-(OdrTip.SetTipText / client /tip_set overwrite; ClearTipText restores defaults).
-RomFS patches remain a belt-and-suspenders fallback if the override hook is off.
-
-Enable (default ON for this experiment):
-  - leave as-is, or METROID_BREAD_CAROUSEL_TIP_PATCHES=1
-
-Disable later:
-  - set METROID_BREAD_CAROUSEL_TIP_PATCHES=0 (or false/off/no)
-  - or set CAROUSEL_TIP_TEXT_PATCHES_ENABLED = False below
-  - then re-patch (or re-run apply_carousel_tip_text_patches_to_romfs on the mod)
-
-Coexist with PHASE2 mode:
-  - rebuild OdrTip with kTipContextForceMode = EmmiPhase2 (force getter=2)
-  - point CAROUSEL_TIP_KEYS at TIP_050–052 and retitle if desired
-  - Off mode uses retail Orig() for the getter (no force)
-"""
+"""ODR text_patches experiment: rewrite AP context-4 tip carousel (TIP_000–TIP_004)."""
 
 from __future__ import annotations
 
@@ -97,12 +70,7 @@ def build_carousel_tip_text_patches() -> Dict[str, str]:
 
 
 def apply_carousel_tip_text_patches_to_romfs(romfs: Path) -> int:
-    """
-    Write carousel tip strings into romfs localization/*.txt (mercury Txt).
-
-    Returns number of key writes across all locale files that contained the keys.
-    Safe no-op when disabled or when localization is missing.
-    """
+    """Write carousel tip strings into romfs localization/*.txt (mercury Txt)."""
     if not carousel_tip_text_patches_enabled():
         return 0
     patches = build_carousel_tip_text_patches()

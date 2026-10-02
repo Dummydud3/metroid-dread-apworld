@@ -117,14 +117,7 @@ def _entries(pairs: Iterable[Tuple[str, int]]) -> List[Dict[str, Any]]:
 
 
 def find_min_trick_alt(world, budget: int) -> Optional[List[Dict[str, Any]]]:
-    """
-    Smallest trick raise(s) from the world's *current* trick levels so
-    Starting Items=``budget`` already opens sphere 0 (≥ MIN_START_LOCATIONS).
-
-    Mutates ``world.options`` temporarily; always restores the baseline.
-    Prefers one trick at the lowest level; otherwise a subtractive-greedy
-    subset of tricks raised from all-max. Returns None if impossible.
-    """
+    """Smallest trick raise(s) from the world's *current* trick levels so"""
     opts = world.options._values
     baseline = {k: int(opts.get(k, 0)) for k in TRICK_KEYS}
 
@@ -197,16 +190,7 @@ def find_min_tricks_for_full_accessibility(
     *,
     has_uncleared,
 ) -> Tuple[Optional[List[Dict[str, Any]]], bool]:
-    """
-    Smallest trick raise(s) so ``has_uncleared()`` is False (Full accessibility).
-
-    ``has_uncleared`` is a zero-arg callable that inspects the world after option
-    mutations. Mutates ``world.options`` temporarily; always restores baseline.
-
-    Returns ``(entries_or_None, solvable_with_tricks)``.
-    - solvable False: still uncleared even with every trick at Ludicrous.
-    - entries None + solvable True: already clear (caller shouldn't invoke).
-    """
+    """Smallest trick raise(s) so ``has_uncleared()`` is False (Full accessibility)."""
     opts = world.options._values
     baseline = {k: int(opts.get(k, 0)) for k in TRICK_KEYS}
 

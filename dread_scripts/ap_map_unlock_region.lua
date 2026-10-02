@@ -1,5 +1,4 @@
 -- World-map region unlock smoke (AreaBox probe + OdrMap.UnlockWorldRegion).
--- Loaded on demand via Game.DoFile — kept out of connect bootstrap (fits 4096 buffer).
 if not RL then RL = {} end
 
 RL.MapRegionToScenario = RL.MapRegionToScenario or {

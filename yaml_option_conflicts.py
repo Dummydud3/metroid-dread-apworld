@@ -1,7 +1,4 @@
-"""Static YAML option conflicts for Hub sphere-0 probe (trick vs pool/ammo).
-
-Keep thresholds in sync with dread-client-app/main.js ``yamlOptionConflicts``.
-"""
+"""Static YAML option conflicts for Hub sphere-0 probe (trick vs pool/ammo)."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, TypedDict
@@ -42,12 +39,7 @@ def max_obtainable_energy(values: Dict[str, Any]) -> int:
 
 
 def combat_boss_energy_need(combat: int) -> int:
-    """
-    Hardest Damage energy gate still required at this Combat level.
-
-    Matches Raven Beak / Gold Chozo-style RDV energy OR branches:
-    Disabled → 799; Beginner → 549; Intermediate → 299; Advanced+ → 0.
-    """
+    """Hardest Damage energy gate still required at this Combat level."""
     if combat <= 0:
         return 799
     if combat == 1:

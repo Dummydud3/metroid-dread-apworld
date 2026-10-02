@@ -1,10 +1,4 @@
-/**
- * Pre-Connect RoomInfo helpers for the Dread Hub.
- *
- * Archipelago sends RoomInfo (with boolean `password`) immediately after the
- * WebSocket opens — before any slot Connect. URI ":None@" means "no password
- * in the link", not "room has no password".
- */
+/* * */
 
 "use strict";
 
@@ -23,23 +17,7 @@ function normalizeUriPassword(password) {
   return text;
 }
 
-/**
- * Parse Text Client / Hub / launcher connect strings into bare fields.
- *
- * Accepts:
- *   - Optional `ws://` / `wss://` / `archipelago://` / `http(s)://` prefix
- *   - Optional `slot:password@host:port` (password `None`/`null` → empty)
- *   - Plain `host:port`
- *
- * @returns {{
- *   server: string,
- *   slot: string|null,
- *   password: string|null,
- *   hasUserinfo: boolean,
- *   scheme: string,
- *   room: string,
- * }}
- */
+/* * */
 function parseConnectServerString(server) {
   const result = {
     server: "",
@@ -133,16 +111,7 @@ function hostPortFromServer(server) {
   return parsed.server || "";
 }
 
-/**
- * Candidate WebSocket URLs (preferred first).
- *
- * Match CommonClient / Text Client: try plain `ws://` on the game port first,
- * then `wss://`. Forcing wss-first for archipelago.gg caused Hub timeouts when
- * TLS failed/hung while Text Client's ws:// path still worked.
- *
- * Always uses bare host:port (userinfo stripped). Explicit ws/wss in the
- * input still prefers that scheme first.
- */
+/* * */
 function buildWsCandidates(server) {
   const parsed = parseConnectServerString(server);
   const hostPort = parsed.server;
@@ -156,11 +125,7 @@ function buildWsCandidates(server) {
   return [`ws://${hostPort}`, `wss://${hostPort}`];
 }
 
-/**
- * @param {boolean} roomPasswordRequired  RoomInfo.password
- * @param {string|null|undefined} password  URI/field password (may be "None")
- * @returns {{ action: "connect"|"need_password", password: string }}
- */
+/* * */
 function decideConnectAfterRoomInfo(roomPasswordRequired, password) {
   const normalized = normalizeUriPassword(password);
   if (roomPasswordRequired && !normalized) {
@@ -187,11 +152,7 @@ function extractRoomInfo(payload) {
   return null;
 }
 
-/**
- * Electron main historically lacked a global WebSocket on older Node;
- * prefer global when present, otherwise use the `ws` package.
- * (Node 22+ / browsers), else the `ws` package.
- */
+/* * */
 function resolveWebSocketImpl(explicit) {
   if (explicit) return explicit;
   if (typeof WebSocket !== "undefined") return WebSocket;
@@ -234,12 +195,7 @@ function attachSocketHandlers(ws, { onMessage, onError, onClose }) {
   ws.onclose = onClose;
 }
 
-/**
- * Open a temporary WebSocket, read RoomInfo, close without Connect.
- *
- * @param {string} server  host:port or ws(s) URL
- * @param {{ timeoutMs?: number, WebSocketImpl?: typeof WebSocket }} [opts]
- */
+/* * */
 function probeRoomInfo(server, opts = {}) {
   const timeoutMs = opts.timeoutMs != null ? opts.timeoutMs : 8000;
   const WS = resolveWebSocketImpl(opts.WebSocketImpl);

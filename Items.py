@@ -1,7 +1,4 @@
-"""
-Metroid Bread items for Archipelago
-Adapted from Randovania's pickup database
-"""
+"""Metroid Bread items for Archipelago"""
 
 from BaseClasses import Item, ItemClassification
 from typing import Dict, NamedTuple, Optional
@@ -82,7 +79,6 @@ item_table: Dict[str, ItemData] = {
     "Missile+ Tank": ItemData(base_id + 101, ItemClassification.useful, 10),
     "Power Bomb Tank": ItemData(base_id + 102, ItemClassification.filler, 12),
     # Flash Shift Upgrade: chain ammo filler (like Missile Tank). When Require Main is
-    # off, create_items promotes the first copy to progression (ability unlock).
     "Flash Shift Upgrade": ItemData(base_id + 103, ItemClassification.filler, 5),
     
     # DNA (for DNA Hunt goal)

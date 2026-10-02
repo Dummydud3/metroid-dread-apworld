@@ -1,8 +1,4 @@
-"""
-Dread Item Mappings for Archipelago
-
-Maps Archipelago item names to Dread resources, models, and icons.
-"""
+"""Dread Item Mappings for Archipelago"""
 
 from __future__ import annotations
 
@@ -55,12 +51,7 @@ def apply_yield_overrides(
     item_data: MutableMapping[str, Any],
     yields: Optional[Mapping[str, int]] = None,
 ) -> MutableMapping[str, Any]:
-    """
-    Copy *item_data* and apply YAML ammo / energy-per-tank yields.
-
-    Used by the patcher (world pickups) and the client bridge (remote grants)
-    so ROM pickups and AP receives stay in sync with Options.py.
-    """
+    """Copy *item_data* and apply YAML ammo / energy-per-tank yields."""
     out = deepcopy(dict(item_data))
     y = dict(yields or {})
     missile = int(y.get("missile_tank_ammo", DEFAULT_MISSILE_TANK_AMMO))
@@ -80,9 +71,6 @@ def apply_yield_overrides(
         out["caption"] = f"Power Bomb Tank acquired.\nPower Bomb capacity increased by {pb}."
     elif item_name == "Energy Tank":
         # Match ODR/Randovania: grant ITEM_ENERGY_TANKS x1. RandomizerPowerup.IncreaseEnergy
-        # then applies Init.fEnergyPerTank to ITEM_MAX_LIFE + live LIFE.fMaxLife.
-        # Putting ITEM_MAX_LIFE in resources only updates the blackboard, so remote
-        # AP grants looked dead until inventory reload.
         _set_resource_qty(out["resources"], "ITEM_ENERGY_TANKS", 1)
         out["caption"] = f"Energy Tank acquired.\nEnergy capacity increased by {ept}."
     elif item_name == "Energy Part":
@@ -116,8 +104,8 @@ DREAD_ITEM_MAPPING = {
     },
     "Missile+ Tank": {
         "resources": [{"item_id": "ITEM_WEAPON_MISSILE_MAX", "quantity": 10}],
-        "model": "item_multimisilletank",
-        "icon": "item_multimisilletank",
+        "model": "item_missiletankplus",
+        "icon": "item_missiletankplus",
         "caption": "Missile+ Tank acquired.\nMissile capacity increased by 10."
     },
     
@@ -206,8 +194,8 @@ DREAD_ITEM_MAPPING = {
     },
     "Spider Magnet": {
         "resources": [{"item_id": "ITEM_MAGNET_GLOVE", "quantity": 1}],
-        "model": "powerup_magnet",
-        "icon": "powerup_magnet",
+        "model": "powerup_spidermagnet",
+        "icon": "powerup_spidermagnet",
         "caption": "Spider Magnet acquired."
     },
     "Speed Booster": {
@@ -257,7 +245,6 @@ DREAD_ITEM_MAPPING = {
     },
     "Power Bomb": {
         # Randovania starter/default: MainPB + included_ammo [2] → MAX capacity +2
-        # (not vanilla endgame 3). IncreaseAmmo also fills CURRENT from MAX.
         "resources": [
             {"item_id": "ITEM_WEAPON_POWER_BOMB", "quantity": 1},
             {"item_id": "ITEM_WEAPON_POWER_BOMB_MAX", "quantity": 2},
@@ -270,13 +257,12 @@ DREAD_ITEM_MAPPING = {
     # Visors/Abilities
     "Phantom Cloak": {
         "resources": [{"item_id": "ITEM_OPTIC_CAMOUFLAGE", "quantity": 1}],
-        "model": "powerup_phantom",
-        "icon": "powerup_phantom",
+        "model": "powerup_opticcamo",
+        "icon": "powerup_opticcamo",
         "caption": "Phantom Cloak acquired."
     },
     "Flash Shift": {
         # Vanilla / main item: Ghost Aura + included_ammo chains (default 2 = RDV/ODR).
-        # Patcher may rewrite chain quantity from flash_shift_included_ammo.
         "resources": [
             {"item_id": "ITEM_GHOST_AURA", "quantity": 1},
             {"item_id": "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", "quantity": 2},
@@ -287,9 +273,6 @@ DREAD_ITEM_MAPPING = {
     },
     "Flash Shift Upgrade": {
         # Chains only. Progressive unlock of Ghost Aura (when Require Main is off)
-        # is handled by RandomizerFlashShiftUpgrade / AP IncreaseItemAmount hook;
-        # the first upgrade keeps its chain grant so iChainDashMax is usable.
-        # Flash uses = 1 + chain_count once the ability is owned.
         "resources": [{"item_id": "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", "quantity": 1}],
         "model": "item_flashshiftupgrade",
         "icon": "item_flashshiftupgrade",
@@ -304,16 +287,15 @@ DREAD_ITEM_MAPPING = {
     },
     "Missile Launcher": {
         # No ITEM_* for launcher itself — granting missile capacity unlocks use
-        # (same as Randovania starting Missiles / ITEM_WEAPON_MISSILE_MAX).
         "resources": [{"item_id": "ITEM_WEAPON_MISSILE_MAX", "quantity": 15}],
-        "model": "powerup_missilelauncher",
-        "icon": "powerup_missilelauncher",
+        "model": "powerup_missile",
+        "icon": "powerup_missile",
         "caption": "Missile Launcher acquired."
     },
     "Missiles": {
         "resources": [{"item_id": "ITEM_WEAPON_MISSILE_MAX", "quantity": 15}],
-        "model": "powerup_missilelauncher",
-        "icon": "powerup_missilelauncher",
+        "model": "powerup_missile",
+        "icon": "powerup_missile",
         "caption": "Missile Launcher acquired."
     },
     "Pulse Radar": {
@@ -324,8 +306,8 @@ DREAD_ITEM_MAPPING = {
     },
     "Grapple Beam": {
         "resources": [{"item_id": "ITEM_WEAPON_GRAPPLE_BEAM", "quantity": 1}],
-        "model": "powerup_grapple",
-        "icon": "powerup_grapple",
+        "model": "powerup_grapplebeam",
+        "icon": "powerup_grapplebeam",
         "caption": "Grapple Beam acquired."
     },
     
@@ -415,11 +397,7 @@ DEFAULT_STARTING_LOCATION = {
 DEFAULT_STARTING_ITEMS = {}
 
 def normalize_resource_progression(resources) -> list:
-    """
-    Normalize item resources to ODR progression shape: list of stages, each stage a list of grants.
-
-    Flat single-stage mappings ``[{item_id, quantity}, ...]`` are wrapped as one stage.
-    """
+    """Normalize item resources to ODR progression shape: list of stages, each stage a list of grants."""
     if not resources:
         return []
     if isinstance(resources[0], dict):

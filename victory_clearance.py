@@ -1,19 +1,4 @@
-"""
-Victory-implies-clearance for Metroid Bread.
-
-Clearable checks are pickups reachable from the chosen start with a full
-inventory under the rolled logic (doors / transports / tricks). Raven Beak's
-access rule (see Rules.py) requires a fraction of those checks to be
-reachable with the current collection state:
-
-- Defeat Raven Beak goal: ceil(0.9 * N)  (>=90%)
-- 100% goal: all N clearable checks
-- All Bosses goal: >=90% clearance, plus every non-RB boss node in logic
-
-so the assumed fill cannot open victory on a tiny early softball.
-
-post_fill re-checks the same invariant after placement.
-"""
+"""Victory-implies-clearance for Metroid Bread."""
 
 from __future__ import annotations
 
@@ -46,7 +31,6 @@ def clearance_ratio_for_world(world: "MetroidBreadWorld") -> float:
     if goal == _GOAL_ONE_HUNDRED_PERCENT:
         return 1.0
     # All Bosses keeps the standard 90% pickup clearance; boss-node reachability
-    # is enforced separately in Rules.py via bosses.inventory_reaches_all_boss_nodes.
     return CLEARANCE_RATIO
 
 
@@ -110,11 +94,7 @@ def eventually_reachable_checks(world: "MetroidBreadWorld") -> Set[Location]:
 
 
 def collection_state_at_victory(world: "MetroidBreadWorld") -> CollectionState:
-    """
-    Sweep spheres until Raven Beak is reachable; return that collection state.
-
-    Raises FillError if Raven Beak never becomes reachable.
-    """
+    """Sweep spheres until Raven Beak is reachable; return that collection state."""
     multiworld = world.multiworld
     player = world.player
     try:
@@ -157,13 +137,7 @@ def missing_checks_at_victory(world: "MetroidBreadWorld") -> List[str]:
 
 
 def assert_victory_implies_full_clearance(world: "MetroidBreadWorld") -> None:
-    """
-    Hard generation guarantee: Raven Beak reachability implies the goal's
-    clearance ratio of clearable checks.
-
-    Raises FillError when too many clearable pickups are still locked at the
-    first collection state that can reach Raven Beak.
-    """
+    """Hard generation guarantee: Raven Beak reachability implies the goal's"""
     ratio = clearance_ratio_for_world(world)
     clearable_n = len(clearable_pickup_names(world))
     missing = missing_checks_at_victory(world)
@@ -203,10 +177,7 @@ def assert_victory_implies_full_clearance(world: "MetroidBreadWorld") -> None:
 
 
 def raven_beak_sphere_index(world: "MetroidBreadWorld") -> int:
-    """
-    0-based sphere index containing Raven Beak, or -1 if unreachable / dumped
-    into the unreachable set.
-    """
+    """0-based sphere index containing Raven Beak, or -1 if unreachable / dumped"""
     multiworld = world.multiworld
     player = world.player
     try:
@@ -244,13 +215,7 @@ def inventory_reaches_victory_and_clearance(
 
 
 def assert_graph_preflight(world: "MetroidBreadWorld") -> None:
-    """
-    Fail fast if the rolled door/transport graph cannot support a seed.
-
-    Checks (full inventory from start):
-    - Raven Beak boss node is reachable
-    - At least one clearable pickup exists
-    """
+    """Fail fast if the rolled door/transport graph cannot support a seed."""
     player_name = world.multiworld.get_player_name(world.player)
     nodes = world.logic.get_reachable_nodes(
         world.logic.inventory_from_counts(world._full_inventory_counts())
@@ -273,9 +238,7 @@ def assert_graph_preflight(world: "MetroidBreadWorld") -> None:
 
 
 def assert_location_capacity(world: "MetroidBreadWorld") -> None:
-    """
-    Fail fast when progression (+ locked DNA) cannot fit in active locations.
-    """
+    """Fail fast when progression (+ locked DNA) cannot fit in active locations."""
     player = world.player
     player_name = world.multiworld.get_player_name(player)
     active = set(world.active_location_names())

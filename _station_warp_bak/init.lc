@@ -1,0 +1,197 @@
+Game.ImportLibrary("system/scripts/init_original.lua")
+
+local initOk, errorMsg = pcall(function()
+
+RemoteLua = RemoteLua or {
+    -- defined by open-dread-rando-exlaunch
+    -- Somewhere around here: https://github.com/randovania/open-dread-rando-exlaunch/blob/main/source/program/main.cpp#L264
+    Init = function() end,
+    Update = function() end,
+    SendLog = function(message) end,
+    SendInventory = function(message) end,
+    SendIndices = function(message) end,
+    SendReceivedPickups = function(message) end,
+    SendNewGameState = function(message) end,
+    Connected = function() return true end
+}
+-- stub for UpdateRDVClient, which will be redefined by bootstrap code of randovania
+function RemoteLua.UpdateRDVClient(new_scenario)
+end
+
+RL = RemoteLua
+
+-- OdrDebug stub (real lib is defined by open-dread-rando-exlaunch)
+OdrDebug = OdrDebug or {
+    SetLoggingEnabled = function(_) end,
+}
+
+-- OdrPickups stub (real lib is defined by open-dread-rando-exlaunch)
+OdrPickups = OdrPickups or {
+    SetItemPopupsEnabled = function(_) end,
+}
+
+exclude_function_from_logging = exclude_function_from_logging or function(_) end
+push_debug_print_override = push_debug_print_override or function() end
+pop_debug_print_override = pop_debug_print_override or function() end
+
+local orig_log = Game.LogWarn
+if true then
+    Game.LogWarn(0, "Starting remote lua")
+    RL.Init()
+
+    function Game.LogWarn(_, message)
+        orig_log(_, message)
+        push_debug_print_override()
+        RL.SendLog(message)
+        pop_debug_print_override()
+    end
+end
+
+local orig_update = RL.Update
+if type(orig_update) == "function" then
+    function RL.Update()
+        exclude_function_from_logging("Update")
+        push_debug_print_override()
+        orig_update()
+        pop_debug_print_override()
+    end
+end
+
+if false then
+    OdrDebug.SetLoggingEnabled(true)
+end
+
+if false then
+    OdrPickups.SetItemPopupsEnabled(false)
+end
+
+Init.tNewGameInventory = {
+ITEM_MAX_LIFE = 99,
+ITEM_CURRENT_SPECIAL_ENERGY = 1000,
+ITEM_MAX_SPECIAL_ENERGY = 1000,
+ITEM_METROID_COUNT = 0,
+ITEM_METROID_TOTAL_COUNT = 40,
+ITEM_WEAPON_MISSILE_MAX = 15,
+ITEM_WEAPON_POWER_BOMB_MAX = 0,
+ITEM_FLOOR_SLIDE = 1,
+ITEM_RANDO_ARTIFACT_1 = 1,
+ITEM_RANDO_ARTIFACT_2 = 1,
+ITEM_RANDO_ARTIFACT_3 = 1,
+ITEM_RANDO_ARTIFACT_4 = 1,
+ITEM_RANDO_ARTIFACT_5 = 1,
+ITEM_RANDO_ARTIFACT_6 = 1,
+ITEM_RANDO_ARTIFACT_7 = 1,
+ITEM_RANDO_ARTIFACT_8 = 1,
+ITEM_RANDO_ARTIFACT_9 = 1,
+ITEM_RANDO_ARTIFACT_10 = 1,
+ITEM_RANDO_ARTIFACT_11 = 1,
+ITEM_RANDO_ARTIFACT_12 = 1,
+ITEM_SONAR = 1,
+ITEM_WEAPON_POWER_BEAM = 1,
+ITEM_WEAPON_MISSILE_LAUNCHER = 1,
+}
+
+Init.iNumRandoTextBoxes = 1
+Init.fEnergyPerTank = 100
+Init.fEnergyPerPart = 25.0
+Init.bImmediateEnergyParts = true
+Init.bHasFlashUpgrades = true
+Init.bHasSpeedUpgrades = false
+Init.bDefaultXRelease = false
+Init.bEnableExperimentBoss = true
+Init.iNumRequiredArtifacts = 0
+Init.bWarpToStart = true
+Init.bShowDnaInHud = false
+Init.bEnableDeathCounter = true
+Init.bEnableRoomIds = false
+Init.bRoomIdFadeTime = -1
+
+Game.LogWarn(0, "Inventory:")
+for k, v in pairs(Init.tNewGameInventory) do
+    Game.LogWarn(0, tostring(k) .. " = " .. tostring(v))
+end
+
+local buff = {}
+
+Init.sStartingScenario = "s010_cave"
+Init.sStartingActor = "StartPoint0"
+Init.sLayoutUUID = "72e1d9b2-cb4f-5681-b3ac-f87afbb28537"
+
+Init.tMaxGameProgressStats = {
+    NumTanksPickedUp = 149
+}
+Init.bBeatenSinceLastReboot = false
+
+local preViewedCutscenes = {
+    "CutScenePlayed[cutscenes/0001gameintro_arrivalatrium/0001gameintro_arrivalatrium.bmscu]",
+    "CutScenePlayed[cutscenes/0001gameintro_fight/0001gameintro_fight.bmscu]",
+    "CutScenePlayed[cutscenes/0001gameintro_flashbackend/0001gameintro_flashbackend.bmscu]",
+    "CutScenePlayed[cutscenes/0001gameintro_flashbackinit/0001gameintro_flashbackinit.bmscu]",
+    "CutScenePlayed[cutscenes/0001gameintro_space/0001gameintro_space.bmscu]",
+    "CutScenePlayed[cutscenes/0001gameintrolanding/0001gameintrolanding.bmscu]",
+}
+
+function Game.StartPrologue(arg1, arg2, arg3, arg4, arg5)
+    Game.LogWarn(0, string.format("Will start Game - %s / %s / %s / %s", tostring(arg1), tostring(arg2), tostring(arg3), tostring(arg4)))
+    Game.LoadScenario("c10_samus", Init.sStartingScenario, Init.sStartingActor, "", 1)
+end
+
+function Init.SaveGameAtStartingLocation()
+    Game.SaveGame("savedata", "IntroEnd", Init.sStartingActor, true)
+end
+
+Init.sThisRandoIdentifier = "AP_MULTIWORLD" .. Init.sLayoutUUID
+
+local original_Init_CreateNewGameData = Init.CreateNewGameData
+function Init.CreateNewGameData(difficulty)
+    original_Init_CreateNewGameData(difficulty)
+
+    -- Mark the intro cutscenes as already played so that the intro room doesn't try to load the cutscene data
+    for _, cutscene in ipairs(preViewedCutscenes) do
+        Blackboard.SetProp("PlayedCutscenes", cutscene, "i", 1)
+    end
+
+    local playerSection =  Game.GetPlayerBlackboardSectionName()
+
+    --[[
+        When creating a new save file, store the current identifier in the Blackboard.
+
+        The identifier will be cross-checked when loading a save (via Scenario.InitScenario), and a warning message will be shown if the
+        identifier in the Blackboard doesn't exist or doesn't match the copy stored in Init.sThisRandoIdentifier.
+
+        If the player loads a non-rando save, the identifier won't exist in the Blackboard, and if they load a save from a different seed, the
+        hash in the Blackboard will be different than the one in Init.sThisRandoIdentifier.
+    ]]
+
+    Game.LogWarn(0, string.format("Setting THIS_RANDO_IDENTIFIER Blackboard property to %q", Init.sThisRandoIdentifier))
+    Blackboard.SetProp(playerSection, "THIS_RANDO_IDENTIFIER", "s", Init.sThisRandoIdentifier)
+
+    -- Must explicitly set the "initialized" flag to false; it seems the Player Blackboard doesn't get fully wiped when making a new file
+    -- after recently playing a file in the same slot.
+
+    Game.LogWarn(0, "Resetting RANDO_GAME_INITIALIZED Blackboard property")
+    Blackboard.SetProp(playerSection, "RANDO_GAME_INITIALIZED", "b", false)
+end
+
+Game.SetForceSkipCutscenes(true)
+
+Game.LogWarn(0, "Finished modded system/init.lc")
+
+end)
+if not initOk then
+    Game.LogWarn(0, "Init failed: " .. errorMsg)
+    GUI.ShowMessage("Init failed: " .. errorMsg, true, "")
+end
+
+-- AP_LOADING_TIPS
+-- Early init hook: wrap ShowLoadingScreen so Continue / New Game get ForcedTooltip.
+pcall(function()
+  Game.DoFile("system/scripts/ap_loading_tips.lua")
+  if ApLoadingTips and ApLoadingTips.Install then
+    ApLoadingTips.Install()
+  end
+end)
+
+-- AP_SEED_ID
+-- Baked Archipelago seed digits for Hub client mismatch checks (vs RoomInfo.seed_name).
+Init.sApSeedId = "70427563355691015956"

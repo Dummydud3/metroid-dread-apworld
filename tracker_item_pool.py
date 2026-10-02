@@ -33,12 +33,7 @@ def _pick(sources: Mapping[str, Any], *keys: str, default: Any = None) -> Any:
 def synthesize_tracker_item_pool(
     sources: Optional[Mapping[str, Any]],
 ) -> Optional[Dict[str, int]]:
-    """
-    Approximate seed item pool from progressive_* / tank / DNA / FS / SB options.
-
-    Used by the Hub client when slot_data lacks ``tracker_item_pool`` (older seeds).
-    Returns None when progressive options are unavailable so the tracker shows all icons.
-    """
+    """Approximate seed item pool from progressive_* / tank / DNA / FS / SB options."""
     if not isinstance(sources, Mapping) or not sources:
         return None
 

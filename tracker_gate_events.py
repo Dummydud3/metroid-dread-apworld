@@ -1,11 +1,4 @@
-"""
-Tracker-only story gates that must not be RDV-auto-collected.
-
-Generation / fill still auto-grants every event when its node opens
-(``collect_events=True`` with no exclusions). The Hub map tracker and
-in-logic highlighting instead withhold these until live game state
-confirms they happened.
-"""
+"""Tracker-only story gates that must not be RDV-auto-collected."""
 
 from __future__ import annotations
 

@@ -143,7 +143,6 @@ def update(yes: bool = False, force: bool = False) -> None:
                             line = f'{egg or name}=={version}'
                     elif "@" in line and "#" in line:
                         # PEP 508 does not allow us to specify a version, so we use custom syntax
-                        # name @ url#version ; marker
                         name, rest = line.split("@", 1)
                         version = rest.split("#", 1)[1].split(";", 1)[0].rstrip()
                         line = f"{name.rstrip()}=={version}"

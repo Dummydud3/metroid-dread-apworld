@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""
-Convert an Archipelago Metroid Bread spoiler.txt into a Randovania .rdvgame file.
-
-Features
---------
-• Parses AP spoiler (not JSON)
-• Matches template locations by region/area/pickup name
-• Replaces pickups correctly (NOT by order)
-• Counts items and updates rdvgame config automatically
-• Handles unique upgrades (only one allowed)
-• Supports multiworld: detects items from other players/games
-• Optional debug logging
-"""
+"""Convert an Archipelago Metroid Bread spoiler.txt into a Randovania .rdvgame file."""
 
 import argparse
 import json
@@ -38,12 +26,6 @@ except ImportError:
 
 
 # -----------------------------
-# Pickup Index Mapping (from Randovania's database)
-# -----------------------------
-# Complete location name mapping: AP location -> (Randovania name, index)
-# These indices are immutable and come from Randovania's logic database.
-# Each pickup location has a specific PickupIndex that must match exactly.
-# Generated from actual Randovania multiworld file - all 149 locations verified.
 
 AP_TO_RANDOVANIA_LOCATION_MAP = {
     "Artaria/Arbitrary Enky Room/Pickup (Missile Tank)": ("Artaria/Arbitrary Enky Room/Pickup (Missile Tank)", 1),
@@ -199,8 +181,6 @@ AP_TO_RANDOVANIA_LOCATION_MAP = {
 
 
 # -----------------------------
-# Utilities
-# -----------------------------
 
 def debug(msg, enabled):
     if enabled:
@@ -218,12 +198,9 @@ def write_json(path, data):
 
 
 # -----------------------------
-# Item name mapping (AP -> Randovania)
-# -----------------------------
 
 AP_TO_RANDOVANIA_ITEMS = {
     # Missiles - "Missile Launcher" doesn't exist in Dread, missiles are always available
-    # Map to Missile Tank instead
     "Missile Launcher": "Missile Tank",
     
     # Progressive items - these should match Randovania
@@ -302,30 +279,15 @@ def map_ap_item_to_randovania(ap_item_name):
 
 
 # -----------------------------
-# Spoiler parsing with Multiworld support
-# -----------------------------
 
 # Updated regex to capture player information in AP 0.6.7+ format:
-# Format: "Region - Area - Node (Player): Item (Player)"
-# IMPORTANT: Node can contain parentheses, e.g. "Pickup (Energy Tank)"
-# So we need to match everything from last " - " to the LAST "(" before ":"
 LOCATION_RE = re.compile(
     r"^(?P<region>.+?) - (?P<area>.+?) - (?P<node>.+) \((?P<location_player>[^)]+)\): (?P<item>.+) \((?P<item_player>[^)]+)\)$"
 )
 
 
 def parse_spoiler(spoiler_path, our_player_name=None, debug_enabled=False):
-    """
-    Parse AP spoiler with multiworld support.
-    
-    Args:
-        spoiler_path: Path to spoiler.txt
-        our_player_name: Our player's name (e.g. "DreadPlayer")
-        debug_enabled: Enable debug output
-    
-    Returns:
-        List of (region, area, node, item, player_name, is_ours)
-    """
+    """Parse AP spoiler with multiworld support."""
     placements = []
     in_locations_section = False
     line_num = 0
@@ -390,14 +352,9 @@ def parse_spoiler(spoiler_path, our_player_name=None, debug_enabled=False):
 
 
 # -----------------------------
-# Template location mapping (for single-player dict format)
-# -----------------------------
 
 def build_template_map(template_data):
-    """
-    Build mapping for single-player dict format:
-    (region, area, node) -> reference to location entry
-    """
+    """Build mapping for single-player dict format:"""
     locations = template_data["game_modifications"][0]["locations"]
     
     # Check if already multiworld format (list)
@@ -424,8 +381,6 @@ def build_template_map(template_data):
 
 
 # -----------------------------
-# Multiworld detection and conversion
-# -----------------------------
 
 def is_multiworld(placements):
     """Check if this is a multiworld seed"""
@@ -436,12 +391,7 @@ def is_multiworld(placements):
 
 
 def build_solo_locations(placements, debug_enabled=False):
-    """
-    Build schema-40 locations list for a *solo* Dread .rdvgame.
-
-    Always uses owner=0 (the only world). Foreign Archipelago items become
-    "Nothing" — real cross-game sync stays in the AP client, not Randovania.
-    """
+    """Build schema-40 locations list for a *solo* Dread .rdvgame."""
     locations = []
 
     for region, area, node, item, player_name, is_ours in placements:
@@ -482,10 +432,7 @@ def build_multiworld_locations(placements, template_map=None, our_player_slot=1,
 
 
 def _extract_dread_world(template_data):
-    """
-    Return (dread_preset, dread_game_mod) from a template that may contain
-    extra placeholder worlds. Prefer an explicit dread entry; fall back to [0].
-    """
+    """Return (dread_preset, dread_game_mod) from a template that may contain"""
     presets = template_data.get("info", {}).get("presets") or []
     mods = template_data.get("game_modifications") or []
 
@@ -512,26 +459,9 @@ def _extract_dread_world(template_data):
 
 
 # -----------------------------
-# Placement application with Multiworld support
-# -----------------------------
 
 def apply_placements(template_data, placements, our_player_slot=1, require_full_match=False, debug_enabled=False):
-    """
-    Apply item placements to template.
-    
-    Supports both single-player (dict) and multiworld (list) formats.
-    Automatically detects multiworld and uses appropriate format.
-    
-    Args:
-        template_data: The .rdvgame template
-        placements: List of (region, area, node, item, player, is_ours)
-        our_player_slot: Our AP slot number (1-indexed)
-        require_full_match: Require all locations to be matched
-        debug_enabled: Enable debug output
-    
-    Returns:
-        (counts, multiworld_items) tuple
-    """
+    """Apply item placements to template."""
     
     # Build template mapping
     template_map = build_template_map(template_data)
@@ -540,8 +470,6 @@ def apply_placements(template_data, placements, our_player_slot=1, require_full_
     is_mw = is_multiworld(placements)
     
     # Archipelago multiworld still exports a *solo* Dread .rdvgame.
-    # Randovania only allows Export Game from Game Details when world_count == 1
-    # (frozen builds). Cross-game sync is handled by MetroidBreadClient, not RDV.
     if is_mw:
         print("[INFO] Archipelago multiworld detected")
         print("[INFO] Exporting solo Dread .rdvgame (foreign items as Nothing)")
@@ -592,17 +520,7 @@ def apply_placements_singleplayer(template_data, placements, template_map, requi
 
 
 def apply_placements_multiworld(template_data, placements, template_map, our_player_slot, debug_enabled):
-    """
-    Apply AP multiworld placements into a *solo* Dread .rdvgame.
-
-    Why solo: frozen Randovania disables "Export Game" when world_count > 1
-    ("Multiworld games can only be exported from a game session"). Archipelago
-    already owns cross-game sync, so placeholder foreign worlds only block export.
-
-    Result:
-    - Exactly one dread preset + one dread game_modifications
-    - Schema-40 locations list; foreign AP items -> "Nothing", owner=0
-    """
+    """Apply AP multiworld placements into a *solo* Dread .rdvgame."""
     foreign_players = sorted({
         player_name
         for _r, _a, _n, _i, player_name, is_ours in placements
@@ -647,8 +565,6 @@ def apply_placements_multiworld(template_data, placements, template_map, our_pla
 
 
 # -----------------------------
-# Config updates
-# -----------------------------
 
 UNIQUE_UPGRADES = {
     "Morph Ball",
@@ -685,14 +601,11 @@ def update_config_counts(template_data, counts, debug_enabled=False):
     ammo = config["ammo_pickup_configuration"]["pickups_state"]
     
     # FIRST: Zero out all standard pickups to start fresh
-    # This prevents double-counting from template + spoiler
     for item_name in list(standard.keys()):
         if "num_shuffled_pickups" in standard[item_name]:
             standard[item_name]["num_shuffled_pickups"] = 0
     
     # Update artifacts configuration based on DNA items
-    # If we don't have any Metroid DNA items, set required_artifacts to 0
-    # This prevents Randovania from trying to create hints for non-existent DNA items
     dna_count = sum(count for item, count in counts.items() if "Metroid DNA" in item)
     
     # Handle artifacts config safely (might not exist in all templates)
@@ -708,7 +621,6 @@ def update_config_counts(template_data, counts, debug_enabled=False):
         debug(f"Warning: Could not update artifacts config: {e}", debug_enabled)
     
     # Special handling for progressive items
-    # If we're using Progressive Beam, zero out individual beam counts
     if "Progressive Beam" in counts and counts["Progressive Beam"] > 0:
         for beam in ["Wide Beam", "Plasma Beam", "Wave Beam"]:
             if beam in standard:
@@ -784,23 +696,9 @@ def update_config_counts(template_data, counts, debug_enabled=False):
 
 
 # -----------------------------
-# GUI Integration Helper
-# -----------------------------
 
 def extract_from_ap_output(ap_output_folder: str, player_name: str, player_slot: int = 1, template_path: str = None, debug_enabled: bool = False):
-    """
-    Extract data from Archipelago output and create .rdvgame file
-    
-    Args:
-        ap_output_folder: Path to AP's output folder (with .zip file)
-        player_name: Name of the player (used to detect multiworld items)
-        player_slot: Player's slot number in AP (1-indexed, default 1)
-        template_path: Path to template .rdvgame file (optional)
-        debug_enabled: Enable debug output
-    
-    Returns:
-        Path to created .rdvgame file, or None on failure
-    """
+    """Extract data from Archipelago output and create .rdvgame file"""
     print(f"Searching for spoiler log in: {ap_output_folder}")
     
     # Check if folder exists
@@ -879,7 +777,6 @@ def extract_from_ap_output(ap_output_folder: str, player_name: str, player_slot:
         return None
     
     # Determine our player name for multiworld detection
-    # Use the actual player name from the YAML (e.g., "DreadPlayer")
     our_player_name = player_name
     print(f"Our player: {our_player_name} (slot {player_slot})")
     
@@ -963,8 +860,6 @@ def print_remote_lua_export_reminder():
     print("=" * 72)
 
 
-# -----------------------------
-# Main (CLI)
 # -----------------------------
 
 def main():

@@ -11,8 +11,7 @@ assert "kivy" not in sys.modules, "kvui should be imported before kivy for froze
 if sys.platform == "win32":
     import ctypes
 
-    # kivy 2.2.0 introduced DPI awareness on Windows, but it makes the UI enter an infinitely recursive re-layout
-    # by setting the application to not DPI Aware, Windows handles scaling the entire window on its own, ignoring kivy's
+    # kivy 2.2.0 introduced DPI awareness on Windows, but it makes the UI enter an infinitely recursive...
     ctypes.windll.shcore.SetProcessDpiAwareness(0)
 
 os.environ["KIVY_NO_CONSOLELOG"] = "1"
@@ -36,9 +35,6 @@ Config.set("kivy", "exit_on_escape", "0")
 Config.set("graphics", "multisamples", "0")  # multisamples crash old intel drivers
 
 # Workaround for Kivy issue #9226.
-# caused by kivy by default using probesysfs,
-# which assumes all multi touch deviecs are touch screens. 
-# workaround provided by Snu of the kivy commmunity c:
 from kivy.utils import platform
 if platform == "linux":
     options = Config.options("input")
@@ -47,13 +43,9 @@ if platform == "linux":
             Config.remove_option("input", option)
 
 # Workaround for an issue where importing kivy.core.window before loading sounds
-# will hang the whole application on Linux once the first sound is loaded.
-# kivymd imports kivy.core.window, so we have to do this before the first kivymd import.
-# No longer necessary when we switch to kivy 3.0.0, which fixes this issue.
 from kivy.core.audio import SoundLoader
 for classobj in SoundLoader._classes:
     # The least invasive way to force a SoundLoader class to load its audio engine seems to be calling
-    # .extensions(), which e.g. in audio_sdl2.pyx then calls a function called "mix_init()"
     classobj.extensions()
 
 from kivymd.uix.divider import MDDivider
@@ -195,10 +187,7 @@ class ToggleButton(MDButton, ToggleButtonBehavior):
 
 # thanks kivymd
 class ResizableTextField(MDTextField):
-    """
-    Resizable MDTextField that manually overrides the builtin sizing.
-    Note that in order to use this, the sizing must be specified from within a .kv rule.
-    """
+    """Resizable MDTextField that manually overrides the builtin sizing."""
     def __init__(self, *args, **kwargs):
         # cursed rules override
         rules = Builder.match(self)
@@ -444,14 +433,11 @@ class MarkupDropdownTextItem(MDDropdownTextItem):
             if child.__class__ == MDLabel:
                 child.markup = True
     # Currently, this only lets us do markup on text that does not have any icons
-    # Create new TextItems as needed
 
 
 class MarkupDropdown(MDDropdownMenu):
     def on_items(self, instance, value: list) -> None:
-        """
-        The method sets the class that will be used to create the menu item.
-        """
+        """The method sets the class that will be used to create the menu item."""
 
         items = []
         viewclass = "MarkupDropdownTextItem"
@@ -711,13 +697,7 @@ class CommandPromptTextInput(ResizableTextField):
         text: typing.Optional[str],
         modifiers: typing.List[str]
     ) -> bool:
-        """
-        :param window: The kivy window object
-        :param keycode: A tuple of (keycode, keyname). Keynames are always lowercase
-        :param text: The text printed by this key, not accounting for modifiers, or `None` if no text.
-                     Seems to pretty naively interpret the keycode as unicode, so numlock can return odd characters.
-        :param modifiers: A list of string modifiers, like `ctrl` or `numlock`
-        """
+        """:param window: The kivy window object"""
         if keycode[1] == 'up':
             self._change_to_history_text_if_available(self._command_history_index + 1)
             return True
@@ -759,16 +739,7 @@ class MDNavigationItemBase(MDNavigationItem):
 class ButtonsPrompt(MDDialog):
     def __init__(self, title: str, text: str, response: typing.Callable[[str], None],
                  *prompts: str, **kwargs) -> None:
-        """
-        Customizable popup box that lets you create any number of buttons. The text of the pressed button is returned to
-        the callback.
-
-        :param title: The title of the popup.
-        :param text: The message prompt in the popup.
-        :param response: A callable that will get called when the user presses a button. The prompt will not close
-         itself so should be done here if you want to close it when certain buttons are pressed.
-        :param prompts: Any number of strings to be used for the buttons.
-        """
+        """Customizable popup box that lets you create any number of buttons. The text of the pressed button..."""
         layout = MDBoxLayout(orientation="vertical")
         label = MessageBoxLabel(text=text)
         layout.add_widget(label)
@@ -812,11 +783,7 @@ class MDScreenManagerBase(MDScreenManager):
             self.local_screen_names.append(widget.name)
 
     def switch_screens(self, new_tab: MDNavigationItemBase) -> None:
-        """
-        Called whenever the user clicks a tab to switch to a different screen.
-
-        :param new_tab: The new screen to switch to's tab.
-        """
+        """Called whenever the user clicks a tab to switch to a different screen."""
         name = new_tab.text
         if self.local_screen_names.index(name) > self.local_screen_names.index(self.current_screen.name):
             self.transition.direction = "left"
@@ -978,25 +945,11 @@ class GameManager(ThemedApp):
         self.server_connect_bar.select_text(port_start if port_start > 0 else host_start, len(s))
 
         # Uncomment to enable the kivy live editor console
-        # Press Ctrl-E (with numlock/capslock) disabled to open
-        # from kivy.core.window import Window
-        # from kivy.modules import console
-        # console.create_console(Window, self.container)
 
         return self.container
 
     def add_client_tab(self, title: str, content: Widget, index: int = -1) -> MDNavigationItemBase:
-        """
-        Adds a new tab to the client window with a given title, and provides a given Widget as its content.
-        Returns the new tab widget, with the provided content being placed on the tab as content.
-
-        :param title: The title of the tab.
-        :param content: The Widget to be added as content for this tab's new MDScreen. Will also be added to the
-         returned tab as tab.content.
-        :param index: The index to insert the tab at. Defaults to -1, meaning the tab will be appended to the end.
-
-        :return: The new tab.
-        """
+        """Adds a new tab to the client window with a given title, and provides a given Widget as its content."""
         if self.tabs.children:
             self.tabs.add_widget(MDDivider(orientation="vertical"))
         new_tab = MDNavigationItemBase(text=title)
@@ -1013,11 +966,7 @@ class GameManager(ThemedApp):
         return new_tab
 
     def remove_client_tab(self, tab: MDNavigationItemBase) -> None:
-        """
-        Called to remove a tab and its screen.
-
-        :param tab: The tab to remove.
-        """
+        """Called to remove a tab and its screen."""
         tab_index = self.tabs.children.index(tab)
         # if the tab is currently active we need to swap before removing it
         if tab == self.screens.current_tab:
@@ -1028,7 +977,6 @@ class GameManager(ThemedApp):
                 swap_index = tab_index - 2
             self.tabs.children[swap_index].on_release()
             # self.screens.switch_screens(self.tabs.children[swap_index])
-        # get the divider to the left if we can
         if not tab_index:
             divider_index = tab_index + 1
         else:
@@ -1406,7 +1354,6 @@ class KivyJSONtoTextParser(JSONtoTextParser):
 
     def _handle_text(self, node: JSONMessagePart):
         # All other text goes through _handle_color, and we don't want to escape markup twice,
-        # or mess up text that already has intentional markup applied to it
         if node.get("type", "text") == "text":
             node["text"] = escape_markup(node["text"])
         for ref in node.get("refs", []):

@@ -1,9 +1,4 @@
-"""
-Shared Metroid Bread client↔game bridge helpers.
-
-Maps Archipelago location/item IDs to Randovania / open-dread-rando indices
-and Lua resource tables used over the Ryujinx TCP protocol (port 6969).
-"""
+"""Shared Metroid Bread client↔game bridge helpers."""
 
 from __future__ import annotations
 
@@ -17,8 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 # Package directory (worlds/metroid_bread) — logic + client data live here.
-# When loaded from a .apworld zip, Path(__file__) is a virtual path; readers
-# below fall back to zip members / extracted runtime.
 ROOT = Path(__file__).resolve().parent
 
 
@@ -37,12 +30,7 @@ def _find_containing_apworld(start: Optional[Path] = None) -> Optional[Path]:
 
 
 def _read_world_text(filename: str) -> str:
-    """
-    Read a world-package text file from disk, extracted runtime, or .apworld zip.
-
-    Fixes NotADirectoryError when MetroidBreadClient is launched from zipimport
-    under ``custom_worlds/metroid_bread.apworld/.../Items.py``.
-    """
+    """Read a world-package text file from disk, extracted runtime, or .apworld zip."""
     candidates: list[Path] = [ROOT / filename]
     # Extracted Hub runtime (same layout Hub materializes for Electron).
     raw = (os.environ.get("DREAD_HUB_WORLD_DIR") or "").strip()
@@ -134,12 +122,7 @@ def _ap_location_key(location_name: str) -> str:
 
 @lru_cache(maxsize=1)
 def pickup_index_to_ap_location() -> Dict[int, int]:
-    """
-    Randovania pickup bitfield index → Archipelago location ID.
-
-    Parsed from source files to avoid importing the full worlds package
-    (which pulls in unrelated game deps at client launch).
-    """
+    """Randovania pickup bitfield index → Archipelago location ID."""
     import re
 
     export_text = _read_world_text("rdvgame_export.py")
@@ -187,12 +170,7 @@ def ap_location_for_pickup_index(pickup_index: int) -> Optional[int]:
 
 @lru_cache(maxsize=1)
 def ap_item_id_to_name() -> Dict[int, str]:
-    """
-    Archipelago item ID → name from worlds/metroid_bread/Items.py.
-
-    Parsed locally so archipelago.gg rooms without a custom datapackage still
-    resolve standard Dread item IDs (84000–84103, etc.).
-    """
+    """Archipelago item ID → name from worlds/metroid_bread/Items.py."""
     import re
 
     text = _read_world_text("Items.py")
@@ -295,12 +273,7 @@ def get_item_resources(
 
 
 def resources_to_lua_progression(progression: Union[List[dict], ResourceProgression]) -> str:
-    """
-    Build a Lua progression table string for RL.ReceivePickup.
-
-    Shape matches open-dread-rando / Randovania remote pickup:
-    {{{item_id=..., quantity=...}, ...}, {{...}, ...}}
-    """
+    """Build a Lua progression table string for RL.ReceivePickup."""
     stages = _normalize_progression(progression)
     parts = []
     for stage in stages:
@@ -322,13 +295,7 @@ def parent_for_resources(progression: Union[List[dict], ResourceProgression]) ->
 
 @lru_cache(maxsize=1)
 def known_ap_item_names() -> Tuple[str, ...]:
-    """
-    All known AP item display names, for /give-style fuzzy matching.
-
-    Union of dread_item_mapping.DREAD_ITEM_MAPPING keys, EXTRA_ITEM_RESOURCES
-    keys, and the local Items.py id->name table, so newly added items (e.g.
-    progressive/DNA variants) are matchable without touching this helper.
-    """
+    """All known AP item display names, for /give-style fuzzy matching."""
     try:
         from dread_item_mapping import DREAD_ITEM_MAPPING
     except ImportError:
@@ -342,15 +309,7 @@ def known_ap_item_names() -> Tuple[str, ...]:
 def resolve_debug_item_name(
     requested: str, limit: int = 5
 ) -> Tuple[Optional[str], List[str]]:
-    """
-    Resolve a user-typed /give argument against known AP Dread item names.
-
-    Tries an exact case-insensitive match, then a substring match, then a
-    difflib fuzzy match. Returns (resolved_name, suggestions):
-      - resolved_name is set only when the match is unambiguous.
-      - suggestions holds up to `limit` close names for a helpful error
-        message when nothing was unambiguously resolved.
-    """
+    """Resolve a user-typed /give argument against known AP Dread item names."""
     import difflib
 
     query = requested.strip()
@@ -377,16 +336,12 @@ def resolve_debug_item_name(
     suggestions = list(dict.fromkeys(substring_hits + fuzzy))[:limit]
     if not suggestions:
         # Widen the net purely for error-message suggestions (not auto-resolve)
-        # so typos still get a "did you mean" instead of a bare "not found".
         suggestions = difflib.get_close_matches(query, names, n=limit, cutoff=0.2)
     return None, suggestions
 
 
 def _lua_ensure_grant_next_artifact() -> str:
-    """
-    Inline GrantNextArtifact when romfs still has stock ODR powerup (no AP
-    overrides). Safe to run repeatedly; skips if the function already exists.
-    """
+    """Inline GrantNextArtifact when romfs still has stock ODR powerup (no AP"""
     return (
         "if not RandomizerPowerup then error('RandomizerPowerup missing') end; "
         "if type(RandomizerPowerup.GrantNextArtifact) ~= 'function' then "
@@ -449,17 +404,7 @@ def format_dna_debug_give_lua(item_name: str) -> str:
 
 
 def format_dna_receive_lua(message: str, received_pickups: int, inventory_index: int) -> str:
-    """
-    Grant Metroid DNA from the AP server via the next free artifact slot.
-
-    Uses RandomizerPowerup.GrantNextArtifact (ODR CheckArtifacts / HUD / Itorash
-    gate) instead of a fixed ITEM_RANDO_ARTIFACT_N progression table.
-
-    Always advances ReceivedPickups after a grant attempt so a soft-fail (HUD
-    refresh error, etc.) cannot leave the client stuck in grant cooldown with
-    the rest of the item queue blocked. If GrantNextArtifact is missing from
-    romfs (stock ODR powerup), installs a runtime fallback first.
-    """
+    """Grant Metroid DNA from the AP server via the next free artifact slot."""
     safe_message = message.replace("\\", "\\\\").replace('"', '\\"')
     return (
         "do "
@@ -495,11 +440,7 @@ def format_dna_receive_lua(message: str, received_pickups: int, inventory_index:
 
 
 def format_metroidnization_grant_lua(*, reason: str = "All Bosses") -> str:
-    """Grant ITEM_METROIDNIZATION so ODR's Itorash ADAM door unlocks.
-
-    Idempotent: no-op when already owned. Used for All Bosses (and All Bosses
-    + DNA) once the AP client confirms the gate conditions.
-    """
+    """Grant ITEM_METROIDNIZATION so ODR's Itorash ADAM door unlocks."""
     safe_reason = str(reason or "All Bosses").replace("\\", "\\\\").replace('"', '\\"')
     return (
         "do "
@@ -528,16 +469,7 @@ def format_metroidnization_grant_lua(*, reason: str = "All Bosses") -> str:
 
 
 def format_debug_give_lua(item_name: str, progression: Union[List[dict], ResourceProgression]) -> str:
-    """
-    Build Lua for the client's local /give debug command.
-
-    Grants `progression` through the same OnPickedUp handler real pickups use
-    (RandomizerPowerup / RandomizerWideBeam / etc.) so progressive items and
-    energy/ammo side effects behave correctly, but WITHOUT touching the
-    ReceivedPickups/InventoryIndex blackboard counters that back multiworld
-    sync. This must stay local-only: never call it in place of
-    RL.ReceivePickup, and never pair it with a LocationCheck send.
-    """
+    """Build Lua for the client's local /give debug command."""
     if is_dna_item(item_name):
         return format_dna_debug_give_lua(item_name)
     parent = parent_for_resources(progression)
@@ -588,10 +520,7 @@ def inventory_item_ids() -> List[str]:
 
 @lru_cache(maxsize=1)
 def _item_id_to_ap_rules() -> Dict[str, Tuple[str, int]]:
-    """
-    Map game item_id -> (AP item name, quantity-per-copy).
-    Prefer non-progressive AP names so logic can see Charge Beam / Morph Ball etc.
-    """
+    """Map game item_id -> (AP item name, quantity-per-copy)."""
     try:
         from dread_item_mapping import DREAD_ITEM_MAPPING
     except ImportError:
@@ -651,11 +580,9 @@ def counts_from_inventory_amounts(
             n = amount // unit
         elif item_id == "ITEM_MAX_LIFE":
             # Legacy: older grants wrote energy into ITEM_MAX_LIFE directly.
-            # Base energy is 99; each Energy Tank adds 100 (default ept).
             n = max(0, (amount - 99) // 100)
         elif item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN":
             # Chain stacks are not AP "Flash Shift Upgrade" pickup copies.
-            # Pickup counts come from items_received; Ghost Aura drives ability.
             continue
         else:
             n = amount // unit
@@ -753,7 +680,6 @@ def counts_from_starting_items(
             )
     else:
         # Progressive: each upgrade grants up_amt chains (including the first,
-        # which also unlocks Ghost Aura). ghost+0-chains is a legacy edge case.
         if ghost > 0:
             counts["Flash Shift Upgrade"] = max(
                 counts.get("Flash Shift Upgrade", 0), max(1, chains // up_amt)
@@ -767,13 +693,7 @@ def counts_from_starting_items(
 
 
 def _lua_toplevel_split_indices(code: str) -> List[int]:
-    """
-    Return exclusive end indices of top-level Lua statements.
-
-    Safe split points are only recorded when block/brace/paren depth is 0 and we
-    are outside strings/comments — at ';' or at newline. This prevents the old
-    packer bug of splitting on ';' inside \"a;b\" or '-- note; more'.
-    """
+    """Return exclusive end indices of top-level Lua statements."""
     n = len(code)
     ends: List[int] = []
     i = 0
@@ -881,7 +801,6 @@ def _lua_toplevel_split_indices(code: str) -> List[int]:
                 ends.append(i + 1)
             elif c == "\n":
                 # Only split if there is non-whitespace before this newline in
-                # the current statement (avoid blank-line spam).
                 ends.append(i + 1)
 
         i += 1
@@ -936,12 +855,7 @@ def split_lua_for_buffer(code: str, buffer_size: int) -> List[str]:
 
 
 def pack_lua_chunks(chunks: List[str], buffer_size: int = 4096) -> List[str]:
-    """
-    Pack Lua source fragments into send units each <= buffer_size.
-
-    Never splits on ';' inside strings/comments, and never byte-slices mid-statement
-    (that produced LUA_ERRSYNTAX / \"error parsing buffer: 3\" on ODR/exlaunch).
-    """
+    """Pack Lua source fragments into send units each <= buffer_size."""
     packed: List[str] = []
     current = ""
     for code in chunks:
@@ -950,7 +864,6 @@ def pack_lua_chunks(chunks: List[str], buffer_size: int = 4096) -> List[str]:
                 current = piece
                 continue
             # Join packed units with ';' — safe because each piece is a complete
-            # top-level statement sequence.
             candidate = f"{current};{piece}"
             if len(candidate) <= buffer_size:
                 current = candidate
@@ -998,10 +911,7 @@ def lua_chunk_has_balanced_quotes(code: str) -> bool:
 
 
 def build_bootstrap_chunks(buffer_size: int = 4096) -> List[str]:
-    """
-    Build Lua bootstrap chunks compatible with Randovania's DreadExecutor.
-    Uploads sync helpers + pickup index → Location_Collected_* mapping.
-    """
+    """Build Lua bootstrap chunks compatible with Randovania's DreadExecutor."""
     actors = load_pickup_actors()
     specials = load_special_pickups()
     # Indices in the bitfield are 0-based; Lua Pickups table is 1-based (index+1).
@@ -1024,10 +934,6 @@ def build_bootstrap_chunks(buffer_size: int = 4096) -> List[str]:
     boss_index_lua = "{" + ",".join(boss_index_entries) + "}"
 
     # After DoFile: ensure AP progressive Flash Shift Upgrade exists even when the
-    # installed randomizer_powerup.lua is stock ODR (no RandomizerFlashShiftUpgrade).
-    # Without this class, RL.ConfirmPickup errors → ReceivedPickups never advances →
-    # the client re-sends the same RL.ReceivePickup forever (popup loop).
-    # RL.FlashShiftRequiresMain is set from seed patch_extras when the client connects.
     part0 = f"""
 Game.DoFile('actors/items/randomizer_powerup/scripts/randomizer_powerup.lua')
 if not RL then RL = {{}} end
@@ -1187,7 +1093,6 @@ end
 """.strip()
 
     # Event-only / robot / chozo bosses: persist SPAWNGROUP deaths + GAME_PROGRESS
-    # props onto the player blackboard, then append beaten keys to game-state.
     try:
         from worlds.metroid_bread import bosses as _bosses_mod
     except Exception:
@@ -1258,7 +1163,6 @@ end
     story_keys_joined = "{" + ",".join(story_keys_lua) + "}"
 
     # Boss probe tables are interpolated; DeathLink Lua below stays a plain string
-    # so `{bb_health, ...}` is not treated as Python format fields.
     part3_boss = f"""
 RL.BossSpawnChecks = {spawn_lua}
 RL.BossProgressChecks = {progress_lua}
@@ -1738,14 +1642,12 @@ RL.SendApLog("AP: DeathLink detection active (poll + OnPlayerDead hook)")
 RL.Bootstrap = true
 """.strip()
     part3 = (part3_boss + "\n" + part3_rest).strip()
+    min_life = ap_min_life_install_lua()
+    if min_life:
+        part3 = part3 + "\n" + min_life
 
 
     # Reachable minimap: ApplyReachableMap → VisitBoundsSafe dim paint (flag=4)
-    # (needs OdrMap binder + ap_reachable_map_cells.lua for area bounds).
-    # Fillmap SetMinimapRegionVisited supplement is OFF (MapFillmapPaintEnabled=false).
-    # NEVER call legacy OdrMap.VisitBounds (0xe3b1b0+6; MapNativePaintEnabled stays
-    # false). Physical-OR: never revert walk visits (bright = walked). Dim
-    # force-save / dim-layout bootstrap is intentionally omitted.
     fillmap_lua_path = ROOT / "data" / "fillmap_actors.lua"
     fillmap_embed = ""
     if fillmap_lua_path.is_file():
@@ -2630,7 +2532,6 @@ Game.AddSF(2.0, "RL.EnsureMapBounds", "")
     chunks = [part0, part1, part2, part3, part_map]
 
     # Per-scenario pickup → blackboard property assignments
-    # Actor pickups use actor_name; boss/EMMI use callback_function (Randovania).
     by_scenario: Dict[str, List[Tuple[str, int]]] = {}
     for index_str, data in actors.items():
         scenario = data["scenario"]
@@ -2654,7 +2555,6 @@ Game.AddSF(2.0, "RL.EnsureMapBounds", "")
         chunks.append(code)
 
     # Pack into buffer-sized send units (never emit a chunk larger than buffer_size).
-    # Must not split on ';' inside strings/comments — that yields LUA_ERRSYNTAX (3).
     packed = pack_lua_chunks(chunks, buffer_size)
     for i, piece in enumerate(packed):
         if len(piece) > buffer_size:
@@ -2671,12 +2571,7 @@ def format_receive_pickup_lua(
     received_pickups: int,
     inventory_index: int,
 ) -> str:
-    """
-    Build RL.ReceivePickup(...) matching Randovania's DreadRemoteConnector.
-
-    On grant, bootstrap RL.GivePendingPickup shows the message via
-    Scenario.QueueAsyncPopup(msg, 7.0) then applies the item.
-    """
+    """Build RL.ReceivePickup(...) matching Randovania's DreadRemoteConnector."""
     safe_message = message.replace("\\", "\\\\").replace('"', '\\"')
     return (
         f'RL.ReceivePickup("{safe_message}",{parent},{repr(progression_lua)},'
@@ -2692,29 +2587,7 @@ def should_skip_local_inworld_grant(
     game_reported_locations: Optional[Set[int]] = None,
     locations_checked: Optional[Set[int]] = None,
 ) -> bool:
-    """
-    Direct-patch local Dread items already apply resources on pickup
-    (see ap_to_patcher._pickup_resources_and_caption / is_foreign=False).
-    Re-granting them via RL.ReceivePickup doubles progressive stages, or
-    otherwise desyncs the in-game inventory index from the server's.
-
-    Solo (exactly one real player in the room): every location the local
-    player can ever check is their own, so any item the server echoes back
-    for a location we found (item_player == slot) was, by construction,
-    already granted in-game the instant it was collected — there is no
-    "foreign" pickup in a solo room. Skip unconditionally in that case.
-
-    Multiworld: skip when this client saw the location collected in-game
-    (``game_reported_locations``) OR the AP server already has it checked
-    (``locations_checked``). The latter covers reconnect catch-up after
-    ``game_reported_locations`` is cleared on Dread reconnect — without it,
-    stackable local tanks can be re-granted while waiting for bitfield sync.
-    Items from other players' worlds use ``item_player != slot`` and must
-    always grant.
-
-    Start inventory / non-location items (location <= 0) and items found by
-    other players always grant, in both solo and multiworld rooms.
-    """
+    """Direct-patch local Dread items already apply resources on pickup"""
     if slot is None:
         return False
     if item_player != slot:
@@ -2735,14 +2608,7 @@ def inventory_grant_would_be_noop(
     resources: Optional[Union[List[dict], ResourceProgression]],
     inventory_ids: Optional[List[str]] = None,
 ) -> bool:
-    """
-    True when Lua ``HandlePickupResources`` would grant nothing for ``resources``.
-
-    Multi-stage progressives must inspect every stage (not only stage 0): owning
-    Wide/Varia/Charge must not block the next Progressive Beam/Suit/Charge tier.
-    Single-stage stackables (tanks, Flash Shift chains, Speed Booster charges)
-    always grant in Lua and must never be treated as already-owned duplicates.
-    """
+    """True when Lua ``HandlePickupResources`` would grant nothing for ``resources``."""
     if not amounts or not resources:
         return False
     stages = _normalize_progression(resources)
@@ -2766,7 +2632,6 @@ def inventory_grant_would_be_noop(
     }
 
     # Single-stage: skip only when every unique resource is already owned.
-    # Any stackable in the stage means Lua would still apply quantity → grant.
     if len(stages) == 1:
         checked = 0
         for res in stages[0]:
@@ -2790,7 +2655,6 @@ def inventory_grant_would_be_noop(
         return checked > 0
 
     # Multi-stage: Lua grants the first stage whose gate item is missing.
-    # Only a full clear of every stage is a true no-op / reconnect duplicate.
     saw_stage = False
     for stage in stages:
         if not stage:
@@ -2817,13 +2681,7 @@ def inventory_grant_would_be_noop(
 
 
 def format_skip_local_pickup_lua(received_pickups: int) -> str:
-    """
-    Advance ReceivedPickups without granting or showing a popup.
-
-    Keeps AP index sync when an in-world local pickup already applied the item.
-    Clears PendingPickup so a mid-popup remote grant cannot block index catch-up
-    (previously the skip no-op'd while PendingPickup was set, stalling reconnect).
-    """
+    """Advance ReceivedPickups without granting or showing a popup."""
     return (
         "do "
         f"local idx = {int(received_pickups)}; "
@@ -2854,12 +2712,7 @@ def deathlink_display_message(
     cause: str = "",
     game: str = "",
 ) -> str:
-    """Text for inbound DeathLink tip / popup.
-
-    Prefer the sender's ``cause`` when present. If empty, use
-    ``"{player} died in {game}"`` when a game name is known; otherwise
-    ``"Received from {player}"``.
-    """
+    """Text for inbound DeathLink tip / popup."""
     text = (cause or "").strip()
     if text:
         return text
@@ -2871,12 +2724,6 @@ def deathlink_display_message(
 
 
 # Local (skill-issue) deaths pin a joke tip; inbound DeathLink keeps the real cause.
-#
-# Tip priority (confirmed):
-#   1. Inbound DeathLink → real cause (never uses these pools)
-#   2. Out-of-logic room → OUT_OF_LOGIC_DEATH_JOKE_TIPS
-#   3. Environmental (when COD maps exclusively) → ENVIRONMENTAL_DEATH_JOKE_TIPS
-#   4. Generic skill-issue → LOCAL_DEATH_JOKE_TIPS
 LOCAL_DEATH_JOKE_TIPS: Tuple[Tuple[str, str], ...] = (
     ("DEATHLINK", "Samus experienced a skill issue"),
     ("DEATHLINK", "Maybe try dodging next time"),
@@ -2898,7 +2745,6 @@ OUT_OF_LOGIC_DEATH_JOKE_TIPS: Tuple[Tuple[str, str], ...] = (
 )
 
 # Ready for heat/lava/cold once CauseOfDeath is exclusive (see CAUSE_OF_DEATH_MATRIX.md).
-# Not selected until the client passes environmental=True.
 ENVIRONMENTAL_DEATH_JOKE_TIPS: Tuple[Tuple[str, str], ...] = (
     ("ENVIRONMENT", "The room itself wanted you dead"),
     ("ENVIRONMENT", "Suit check failed spectacularly"),
@@ -2908,7 +2754,6 @@ ENVIRONMENTAL_DEATH_JOKE_TIPS: Tuple[Tuple[str, str], ...] = (
 )
 
 # Remote Lua: scenario;x;y (V3D is 1-indexed: [1]=x [2]=y). Empty on failure.
-# Prefer LastDeathWorldPos (captured at MarkLocalDeath) when live GetPlayer fails.
 QUERY_PLAYER_WORLD_POS_LUA = """
 if RL ~= nil and type(RL.LastDeathWorldPos) == "string" and RL.LastDeathWorldPos ~= "" then
   return RL.LastDeathWorldPos
@@ -3003,12 +2848,7 @@ def choose_local_death_joke_tip(
     environmental: bool = False,
     exclude_body: Optional[str] = None,
 ) -> Tuple[str, str]:
-    """
-    Pick a local-death joke tip.
-
-    Returns ``(kind, formatted_tip)`` where kind is ``ool`` | ``env`` | ``generic``.
-    Skips ``exclude_body`` when another body remains in the pool (no immediate repeat).
-    """
+    """Pick a local-death joke tip."""
     kind, pool = _joke_pool_for_local_death(
         out_of_logic=out_of_logic, environmental=environmental
     )
@@ -3028,11 +2868,7 @@ def pick_local_death_joke_tip(
     environmental: bool = False,
     exclude_body: Optional[str] = None,
 ) -> str:
-    """Random joke tip for a local (non-DeathLink) death.
-
-    Priority among local tips: out-of-logic room jokes beat environmental jokes
-    beat generic skill-issue jokes. Inbound DeathLink never calls this.
-    """
+    """Random joke tip for a local (non-DeathLink) death."""
     _kind, tip = choose_local_death_joke_tip(
         out_of_logic=out_of_logic,
         environmental=environmental,
@@ -3082,12 +2918,7 @@ def format_death_tip_pin_lua(
     *,
     log_tag: str = "death tip pin",
 ) -> str:
-    """
-    Pin loading tip slot 0 + count=1 (SetTipText → Count → Order → ArmDeathLinkTip).
-
-    Same order as inbound DeathLink: store/re-arm only (no SetForced); checkpoint
-    TipRefresh after game-over A paints the tip.
-    """
+    """Pin loading tip slot 0 + count=1 (SetTipText → Count → Order → ArmDeathLinkTip)."""
     tip_lit = _lua_escape_sq(tip_text)
     tag_lit = _lua_escape_sq(log_tag)
     return f"""
@@ -3157,17 +2988,58 @@ end
 """.strip()
 
 
+def persist_life_floor(
+    values: list[float | None],
+    *,
+    floor: float = 1.0,
+) -> float | None:
+    """Life value to write on scenario entry and on a save snapshot.
+
+    Return ``floor`` only when every readable copy is below ``floor``.
+    ``None`` means do not write: there is no reading, or at least one copy is
+    already at or above the floor (do not pull a real hit down to 1).
+    """
+    numbers: list[float] = []
+    for value in values:
+        if value is None:
+            continue
+        try:
+            numbers.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if not numbers:
+        return None
+    if max(numbers) >= floor:
+        return None
+    return float(floor)
+
+
+def ap_min_life_install_lua() -> str:
+    """Inline ``ap_min_life.lua`` so a reconnect floors HP before the next boot."""
+    path = Path(__file__).resolve().parent / "dread_scripts" / "ap_min_life.lua"
+    try:
+        body = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    if "function ApMinLife.Install" not in body:
+        return ""
+    return (
+        "pcall(function()\n"
+        + body
+        + "\nif ApMinLife and ApMinLife.Install then ApMinLife.Install() end\n"
+        "end)\n"
+    )
+
+
 def format_deathlink_kill_lua(
     source: str = "DeathLink",
     death_message: Optional[str] = None,
 ) -> str:
-    """
-    Force a player death the same way ODR updates energy in randomizer_powerup.lua:
-    Game.SetItemAmount + live LIFE.fCurrentLife (Blackboard alone does NOT kill).
+    """Force a player death the same way ODR updates energy in randomizer_powerup.lua.
 
-    Sets DeathFromRemote/DeathSent so OnPlayerDead does not emit AP_DEATH (no echo).
-    Pins loading tip 0 to DEATHLINK / death_message (count=1) via OdrTip BEFORE
-    the kill so game-over → A → LoadGame("checkpoint") TipRefresh sees it.
+    A save-station / transport cinematic does not die from this 0. ApMinLife
+    floors scenario entry and the save snapshot at 1 HP. Do not floor here,
+    or a normal DeathLink would never kill.
     """
     message = death_message if death_message is not None else deathlink_display_message(source)
     popup_lit = _lua_escape_sq(message)

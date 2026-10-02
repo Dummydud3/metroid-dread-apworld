@@ -1,13 +1,4 @@
-/**
- * Editable YAML Editor option hints (Hub info buttons).
- *
- * Keys are YAML option names (snake_case), matching data-yaml / Options.py.
- * Option-set section headers use the set key (e.g. doors_to_change).
- * Choice dropdowns can use "optionKey::selectedValue" (e.g. game_goal::all_bosses);
- * the info bubble then shows the hint for the currently selected option.
- *
- * Edit the strings below — the Hub reads window.YAML_OPTION_HINTS.
- */
+/* * */
 (function (global) {
   "use strict";
 
@@ -24,11 +15,13 @@
     "cross_bomb_launch": "By sliding and morphing as the Cross Bomb is exploding, Samus gains a lot of horizontal momentum.",
     "cross_bomb_skip": "There are sets of crumble blocks that you must use Cross Bomb to roll across. All can be skipped with the right tools.",
     "damage_boost": "Most enemies will knock you away when Samus gets damaged. This can be used to get momentum over ledges.",
+    "dangerous_logic": "Off: a check is only in logic if it is reachable AND you can leave back toward the start (or otherwise escape). On: reachable is enough, even if the room softlocks you. The Dairon bomb upgrade room stays out of logic until you already have a way out (Bomb or Cross Bomb); the door locks behind you.",
     "death_link": "When you die, other Death Link players die too (and vice versa), if the room has Death Link enabled.",
     "diagonal_bomb_jump": "A special kind of bomb jump where you gain diagonal momentum from bombs that explode slightly to the side.",
     "diffusion_abuse": "Using Diffusion Beam in certain situations can bypass the usual requirements for some objects.",
     "dna_placement": "Where Metroid DNA may be placed when Required Metroid DNA > 0. prefer_emmi locks DNA onto Central Unit / EMMI-defeat pickups when possible.",
-    "door_lock_rando": "Randomize the weapon needed to open eligible doors. Both sides of a door always match. Only basic lock types are used (safe for open-dread-rando).",
+    "door_lock_rando": "Randomize the weapon needed to open eligible doors. Both sides of a door always match. Only basic lock types are used (safe for open-dread-rando). Ignored for placement when Randovania Door Rando Algorithm is on.",
+    "randovania_door_rando": "When on, door locks use Randovania's Individual Doors placer: every eligible door (and the same-type dock on the other side) is Power Beam while items are placed, then about 60% of those connections are locked from what you can already open when you first reach either side. Uses Doors to Change and Change Doors To. When off, Door Lock Randomizer keeps Bread's current placer.",
     "early_morph_ball": "If enabled, Morph Ball will be guaranteed early in the seed.",
     "enable_death_counter": "Track and display how many times you have died this seed.",
     "energy_parts": "Number of Energy Parts in the item pool. Four Energy Parts equal one Energy Tank.",
@@ -80,6 +73,9 @@
     "slide_jump": "By sliding off a cliff and jumping right before you fall you'll jump further.",
     "speed_booster_upgrade_count": "Number of Speed Booster Upgrade pickups in the pool (extra Speed Booster charges). 0 = none.",
     "speedbooster_conservation": "Maintaining and chaining Speed Booster through complex and otherwise unintended situations.",
+    "station_map_warp": "Master switch. On the pause map, A still navigates the world map and places markers. Y on a locked Save, Map, or Network station opens the warp prompt instead of cycling icon highlights, and only while that map is open. Y during gameplay does nothing. Y off a station still highlights icons. Which stations Y can target is set by Pause Map Warp Requirement and Pause Map Warp Reach. Off: the prompt is not in the game.",
+    "warp_requirement": "Visited: Y only offers a warp to a station you have already used. An unused station shows You haven't saved here yet (A closes that notice). Visible: Y offers a warp to any station icon the pause-map cursor has locked, including one you have not used, when that station has a spawn point. An unused station with no spawn still shows the unused notice. Ignored while Pause Map Station Warp is off.",
+    "warp_reach": "Local: Y only targets stations in the region you are currently in. A station in another region is ignored even if the cursor is sitting on it. Global: Y can target any Save, Map, or Network station, and the warp uses that station's own region and start point. Still limited by Pause Map Warp Requirement. Ignored while Pause Map Station Warp is off.",
     "stand_on_frozen_enemy": "After you receive the ice missiles you'll be able to freeze some enemies in place allowing you to reach certain spots.",
     "start_inventory_from_pool": "Pull starting inventory items from the item pool (standard Archipelago StartInventoryPool behavior).",
     "start_with_pulse_radar": "Start with Pulse Radar. When off, Pulse Radar is shuffled into the pool.",
@@ -96,6 +92,6 @@
     "yaml_player_name": "Your Archipelago slot / player name. Must match the name used when connecting to the server.",
     "disabled_lights": "Check a region to mass-delete its light actors, making rooms darker there.",
     "change_doors_to": "Which lock types a randomized door may become (beams, missiles, grapple, bombs, Ice/Storm/Diffusion, etc.).",
-    "doors_to_change": "Which vanilla door lock types may be randomized when Door Lock Rando is Individual Doors.",
+    "doors_to_change": "Which vanilla door lock types may be randomized when Door Lock Rando is Individual Doors, or when Randovania Door Rando Algorithm is on.",
   };
 })(typeof window !== "undefined" ? window : globalThis);

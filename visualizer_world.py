@@ -1,16 +1,4 @@
-"""Dread world-space layout and minimap-cell raster for the Hub visualizer.
-
-Uses the same coordinates as the game / logic database:
-
-- World XY from ``logic_database`` node ``coordinates`` and area polygons
-- Minimap cells of 100 world units, origin at each scenario's BMMAP ``grid.min``
-- Packed index ``row * cols + col`` (same formula as ``build_reachable_map_cells.py``)
-
-No PopTracker pixel fit — the visualizer SVG is this coordinate system with Y flipped for the screen.
-
-Cave silhouette, heat/water/EMMI, doors, and magnets live in ``terrain.json``
-(see ``visualizer_terrain.py``), extracted from each scenario BMMAP.
-"""
+"""Dread world-space layout and minimap-cell raster for the Hub visualizer."""
 
 from __future__ import annotations
 
@@ -344,7 +332,6 @@ def loop_fraction_inside(
 
 
 # Doorway / Z-overlay slivers are a few 100-unit cells. Walkable room
-# floors are larger. Nodes sitting in a sliver should light the floor.
 FLOOR_MIN_AREA = 120_000.0
 
 
@@ -354,12 +341,7 @@ def pick_loop_for_spot(
     loops: Sequence[Sequence[Sequence[float]]],
     camera: Optional[Sequence[Sequence[float]]] = None,
 ) -> Optional[int]:
-    """Pick the terrain island for a logic node.
-
-    Prefer a walkable floor that contains the point and belongs to the room
-    camera. Doorway nodes often sit on a tiny Z-overlay just outside the
-    navmesh — snap to that camera's largest floor instead of the sliver.
-    """
+    """Pick the terrain island for a logic node."""
     x = float(x)
     y = float(y)
     has_cam = bool(camera) and len(camera) >= 3

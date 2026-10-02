@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""
-Ensure Metroid Bread Hub client Python packages are installed.
-
-On Linux and Windows, packages are installed into a local virtualenv — never
-into Microsoft Store Python ``--user`` site-packages (those paths exceed
-Windows MAX_PATH once open-dread-rando's deep romfs textures are unpacked).
-
-- Linux: ``<world>/_metroid_bread_venv``
-- Windows: ``%LOCALAPPDATA%\\MetroidBread\\venv`` (short path on purpose)
-"""
+"""Ensure Metroid Bread Hub client Python packages are installed."""
 
 from __future__ import annotations
 
@@ -25,8 +16,6 @@ except ImportError:
     from worlds.metroid_bread.win_subprocess import run_hidden
 
 # Import name → pip requirement (used when requirements-client.txt is missing).
-# open_dread_rando: patcher engine (Connect/ensure so Patch finds it on Hub's interpreter).
-# Prefer >=2.19 (DNA HUD / upgrade-row schema); portable dist may ship unpinned.
 CLIENT_IMPORTS: Tuple[Tuple[str, str], ...] = (
     ("websockets", "websockets>=13.0.1,<14"),
     ("colorama", "colorama>=0.4.6"),
@@ -48,7 +37,6 @@ EXIT_PIP_FAILED = 3
 
 VENV_DIRNAME = "_metroid_bread_venv"
 # Windows: keep the venv root short — Store Python user-site + ODR textures
-# hit MAX_PATH (260) and fail with Errno 2 on doorshield*.bctex etc.
 WIN_VENV_REL = Path("MetroidBread") / "venv"
 
 VERSION_OK_CODE = (
@@ -162,11 +150,7 @@ def _probe_version_string(cmd: Sequence[str], *, timeout: float = 30.0) -> Optio
 
 
 def describe_missing_client_python() -> str:
-    """
-    Short checklist / wizard detail when no usable 3.11–3.13 interpreter exists.
-
-    Mentions a present-but-unsupported Python (e.g. 3.14) when found.
-    """
+    """Short checklist / wizard detail when no usable 3.11–3.13 interpreter exists."""
     for candidate in _base_python_candidates():
         ver = _probe_version_string(candidate)
         if not ver:
@@ -196,7 +180,6 @@ def _is_venv_python_cmd(python_cmd: Sequence[str], world: Optional[Path] = None)
 
 def _base_python_candidates() -> List[List[str]]:
     # Prefer 3.12+ first on Windows: Microsoft Store 3.11 cannot create a normal
-    # venv (redirects Scripts\\python.exe into Packages\\...), which breaks Hub.
     if sys.platform == "win32":
         return [
             ["py", "-3.12"],
@@ -292,12 +275,7 @@ def find_base_python(*, allow_store: bool = False) -> Optional[List[str]]:
 
 
 def find_client_python(world: Optional[Path] = None) -> Optional[List[str]]:
-    """
-    Interpreter used for Hub client deps / launch.
-
-    Prefer an existing local venv (deps live there on Linux/Windows). Otherwise
-    prefer managed portable CPython / DREAD_HUB_PYTHON, then host discovery.
-    """
+    """Interpreter used for Hub client deps / launch."""
     if uses_local_venv():
         vpy = venv_python_path(world)
         if vpy.is_file() and _probe([str(vpy)], VERSION_OK_CODE):
@@ -314,13 +292,7 @@ def ensure_local_venv(
     world: Optional[Path] = None,
     log: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Optional[List[str]], str]:
-    """
-    Create or reuse the Hub client venv.
-
-    Linux: ``<world>/_metroid_bread_venv`` with ``--system-site-packages``.
-    Windows: ``%LOCALAPPDATA%\\MetroidBread\\venv`` without system site-packages
-    (avoids Microsoft Store user-site MAX_PATH failures for open-dread-rando).
-    """
+    """Create or reuse the Hub client venv."""
     def _log(msg: str) -> None:
         if log:
             log(msg)
@@ -418,11 +390,7 @@ def resolve_install_python(
     world: Optional[Path] = None,
     log: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Optional[List[str]], str, int]:
-    """
-    Pick the interpreter that should receive pip installs / run the client.
-
-    Linux/Windows → always a local venv. macOS → passed or discovered host Python.
-    """
+    """Pick the interpreter that should receive pip installs / run the client."""
     if uses_local_venv():
         if python_cmd and _is_venv_python_cmd(python_cmd, world):
             if _probe(list(python_cmd), VERSION_OK_CODE):
@@ -452,12 +420,7 @@ def resolve_install_python(
 
 
 def missing_imports(python_cmd: Sequence[str]) -> List[str]:
-    """Return import names that fail under python_cmd.
-
-    ``open_dread_rando`` is also treated as missing when the package imports but
-    core submodules (``misc_patches``) are absent — a common broken/partial
-    pip install that still passes ``find_spec('open_dread_rando')``.
-    """
+    """Return import names that fail under python_cmd."""
     names = [name for name, _ in CLIENT_IMPORTS]
     # One subprocess: print comma-separated missing modules.
     code = (
@@ -646,12 +609,7 @@ def ensure_pip(
     *,
     log: Optional[Callable[[str], None]] = None,
 ) -> Tuple[bool, str]:
-    """
-    Best-effort bootstrap of pip via ``python -m ensurepip --upgrade``.
-
-    Safe to call when pip is already present (ensurepip is a no-op / upgrades).
-    Returns (ok, detail). ok means pip is importable afterward.
-    """
+    """Best-effort bootstrap of pip via ``python -m ensurepip --upgrade``."""
     def _log(msg: str) -> None:
         if log:
             log(msg)
@@ -764,7 +722,6 @@ def _install_packages(
     combined = f"{proc.stdout or ''}\n{proc.stderr or ''}".strip()
     if proc.returncode != 0:
         # One more ensurepip attempt if the failure looks like missing pip
-        # (e.g. race / broken venv) then retry once.
         if _looks_like_pip_missing(combined):
             ok_pip, _ = ensure_pip(python_cmd, log=log)
             if ok_pip:
@@ -793,13 +750,7 @@ def ensure_client_deps(
     world: Optional[Path] = None,
     log: Optional[Callable[[str], None]] = None,
 ) -> Tuple[bool, str, int]:
-    """
-    Ensure client packages exist in the target interpreter.
-
-    On Linux/Windows the target is always a local venv (short path on Windows).
-
-    Returns (ok, message, exit_code).
-    """
+    """Ensure client packages exist in the target interpreter."""
     def _log(msg: str) -> None:
         if log:
             log(msg)

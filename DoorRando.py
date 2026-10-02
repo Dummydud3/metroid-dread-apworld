@@ -1,14 +1,4 @@
-"""Door-lock randomizer for Metroid Bread.
-
-Enumerates physical doors from logic_database dock nodes, mutates
-default_dock_weakness in-memory, and emits open-dread-rando door_patches.
-
-Philosophy (dual mandate — see ``DoorRandoAssigner``): doors must both
-**reroute** traversal vs vanilla and **assist** assumed fill. Assignment is
-RDV-style Individual Doors timing: classify → pre-fill unlock (assist +
-reroute) → item fill → post-fill reach-gated interesting locks. Softening
-remains emergency-only for fill / preflight repair — never the normal design.
-"""
+"""Door-lock randomizer for Metroid Bread."""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -33,7 +23,6 @@ REGION_TO_SCENARIO: Dict[str, str] = {
 BASIC_DOOR_TYPES = _door_db.BASIC_ODR_DOOR_TYPES
 
 # ODR DoorType.PRESENCE has can_be_added=False — never emit these as targets.
-# phase_shift is not an ODR DoorType at all.
 ODR_CANNOT_ADD_DOOR_TYPES = _door_db.ODR_CANNOT_ADD_DOOR_TYPES
 
 # ODR DoorType.need_shield=True — each costs 2 shield IDs per scenario.
@@ -99,12 +88,7 @@ def _iter_door_docks(parser) -> Iterable[Tuple[NodeId, dict]]:
 
 
 def physical_key_for_node(region: str, node: dict) -> Optional[PhysicalKey]:
-    """Return (scenario, actor) only for ODR-patchable Mercury door actors.
-
-    Hard-excludes Phase Shift shutters (``doorshutter_*``), thermal
-    ``doorheat_*``, and other actordefs outside ODR ``DoorType`` /
-    ``ActorData``. Symbolic labels like ``Door006 (CG-CG)`` stay skipped.
-    """
+    """Return (scenario, actor) only for ODR-patchable Mercury door actors."""
     if not _door_db.is_patchable_door_source_node(node):
         return None
     actor = (node.get("extra") or {}).get("actor_name")
@@ -179,12 +163,7 @@ def roll_assignments(
     mode: str = "individual_doors",
     start_counts: Optional[Dict[str, int]] = None,
 ) -> Dict[PhysicalKey, str]:
-    """Pre-fill unlock assignments for Individual Doors (locks assigned post-fill).
-
-    Returns ``{ (scenario, actor): unlocked_weakness }`` for fill-assist +
-    reroute docks. Empty when vanilla. Prefer ``DoorRandoAssigner.pre_fill_roll``
-    when assist/reroute key lists are also needed.
-    """
+    """Pre-fill unlock assignments for Individual Doors (locks assigned post-fill)."""
     if mode in ("vanilla", "off", None) or mode == 0:
         return {}
 
@@ -315,13 +294,7 @@ def score_doors_by_new_checks(
     protected: Optional[Set[PhysicalKey]] = None,
     max_candidates: int = 48,
 ) -> List[Tuple[int, PhysicalKey]]:
-    """
-    Score assigned doors by how many extra active pickups become reachable
-    (and whether the goal opens) if the door is softened to Power Beam.
-
-    Returns (score, key) pairs sorted best-first. Score is
-    ``1000`` if softening newly reaches the goal, else the pickup delta.
-    """
+    """Score assigned doors by how many extra active pickups become reachable"""
     if not assignments:
         return []
 
@@ -384,13 +357,7 @@ def pick_doors_to_soften(
     top_k: int = 6,
     assignments: Optional[Dict[PhysicalKey, str]] = None,
 ) -> List[PhysicalKey]:
-    """
-    Choose top-K doors to soften for fill repair.
-
-    Prefer positive check-delta (opens more checks). Among equal helpfulness,
-    soften lower-tier / less interesting locks first so Wave/Grapple chokepoints
-    survive longer than Missile/Charge tint locks.
-    """
+    """Choose top-K doors to soften for fill repair."""
     if not scored or top_k <= 0:
         return []
     from .DoorRandoAssigner import LOCK_TIER

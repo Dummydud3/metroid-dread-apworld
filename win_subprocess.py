@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""
-Windows-friendly subprocess helpers.
-
-Console ``.exe`` children (node, python, npm.cmd, winget, …) flash a terminal
-window under Archipelago's GUI launcher unless CREATE_NO_WINDOW is set.
-"""
+"""Windows-friendly subprocess helpers."""
 
 from __future__ import annotations
 
@@ -20,11 +15,7 @@ def hidden_subprocess_kwargs(
     *,
     extra_creationflags: int = 0,
 ) -> dict:
-    """
-    Kwargs for subprocess.run / Popen that hide the console on Windows.
-
-    Safe no-op on non-Windows. Callers may still pass capture_output=True.
-    """
+    """Kwargs for subprocess.run / Popen that hide the console on Windows."""
     if os.name != "nt":
         return {}
     startupinfo = subprocess.STARTUPINFO()

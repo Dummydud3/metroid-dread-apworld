@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""
-Metroid Bread Archipelago Patcher GUI
-
-A simple GUI tool to convert Archipelago spoiler files to patched Metroid Bread mods.
-This streamlines the entire process into a few clicks!
-"""
+"""Metroid Bread Archipelago Patcher GUI"""
 
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox
@@ -124,7 +119,6 @@ class DreadPatcherGUI:
             self.log(f"Selected spoiler: {filename}")
             
             # Try to auto-detect player name from filename
-            # Format: AP_12345_Spoiler.txt or similar
             try:
                 path = Path(filename)
                 # Look for yaml files in parent directory

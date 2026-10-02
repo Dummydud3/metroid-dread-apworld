@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""
-Sweep Metroid Bread on/off generation options (solo) and log pass/fail.
-
-Tests the 11 binary options that change seed generation (excludes
-start_with_pulse_radar and cosmetics). Uses in-process AP generation through
-fill + accessibility — does not write .zip / spoiler output.
-
-Usage (from Archipelago repo root):
-  py -3.11 worlds/metroid_bread/tools/gen_combo_bot.py
-  py -3.11 worlds/metroid_bread/tools/gen_combo_bot.py --limit 8 --seed 1
-  py -3.11 worlds/metroid_bread/tools/gen_combo_bot.py --resume
-"""
+"""Sweep Metroid Bread on/off generation options (solo) and log pass/fail."""
 from __future__ import annotations
 
 import argparse
@@ -93,12 +82,7 @@ def combo_id(opts: dict) -> str:
 
 
 def bootstrap_ap() -> dict[str, Any]:
-    """
-    Load worlds before Fill.
-
-    Importing Fill first causes circular imports (alttp/oot/etc. import Fill while
-    Fill is still initializing), which spams ERROR:root and can leave worlds unloaded.
-    """
+    """Load worlds before Fill."""
     global _AP
     if _AP is not None:
         return _AP

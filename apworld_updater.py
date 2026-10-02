@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""
-Check GitHub Releases for a newer metroid_bread.apworld and install it.
-
-Source: Dummydud3/metroid-dread-apworld releases/latest (asset metroid_bread.apworld).
-Prompts before download; soft-fails on network errors; ignores prereleases.
-"""
+"""Check GitHub Releases for a newer metroid_bread.apworld and install it."""
 
 from __future__ import annotations
 
@@ -171,9 +166,7 @@ def read_local_world_version(
     *,
     apworld: Optional[Path] = None,
 ) -> str:
-    """
-    Local world_version: folder archipelago.json, else installed/containing apworld.
-    """
+    """Local world_version: folder archipelago.json, else installed/containing apworld."""
     base = Path(world_dir) if world_dir is not None else WORLD_DIR
     folder_ver = read_world_version_from_json(base / "archipelago.json")
     if folder_ver:
@@ -203,12 +196,7 @@ def read_local_world_version(
 
 
 def _ssl_context() -> ssl.SSLContext:
-    """
-    Build an SSL context that works under Archipelago / portable Pythons.
-
-    Frozen or embeddable interpreters often lack system CA bundles; prefer
-    ``certifi`` when importable.
-    """
+    """Build an SSL context that works under Archipelago / portable Pythons."""
     try:
         import certifi
 
@@ -266,12 +254,7 @@ def _pick_stable_release(data: Any) -> Optional[Dict[str, Any]]:
 
 
 def fetch_latest_release() -> Tuple[Optional[Dict[str, Any]], str]:
-    """
-    Return ``(release_json, error_detail)``.
-
-    ``error_detail`` is empty on success. Soft-fails on network / empty stable.
-    Tries ``/releases/latest``, then falls back to listing releases.
-    """
+    """Return ``(release_json, error_detail)``."""
     last_err = ""
     try:
         data = _http_get_json(API_LATEST_URL)
@@ -427,9 +410,7 @@ def verify_apworld_zip(
     *,
     min_version: Optional[str] = None,
 ) -> Tuple[bool, str, str]:
-    """
-    Open path as zip; require archipelago.json. Returns (ok, message, version).
-    """
+    """Open path as zip; require archipelago.json. Returns (ok, message, version)."""
     try:
         with zipfile.ZipFile(path, "r") as zf:
             member = None
@@ -494,9 +475,7 @@ def download_and_install(
     progress_cb: Optional[ProgressFn] = None,
     log: Optional[LogFn] = None,
 ) -> Tuple[bool, str]:
-    """
-    Download to *.partial → verify zip → backup existing → replace → invalidate stamp.
-    """
+    """Download to *.partial → verify zip → backup existing → replace → invalidate stamp."""
     def _log(msg: str) -> None:
         logger.info("%s", msg)
         if log:
@@ -609,9 +588,7 @@ def prompt_and_maybe_update(
     log: Optional[LogFn] = None,
     parent: Any = None,
 ) -> UpdateCheckResult:
-    """
-    Check for update; if available, ask Yes / Not now / Open releases via tkinter.
-    """
+    """Check for update; if available, ask Yes / Not now / Open releases via tkinter."""
     def _log(msg: str) -> None:
         if log:
             log(msg)

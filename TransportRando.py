@@ -11,13 +11,10 @@ NodeId = Tuple[str, str, str]
 SideId = str  # "Region/Area/Node"
 
 # Ghavoran Elun shuttle has a cutscene actor plus a non-cutscene twin that must
-# stay in sync for the map / usable to update correctly (matches Randovania).
 _FLIPPER_CUTSCENE_ACTOR = "wagontrain_quarantine_with_cutscene_000"
 _FLIPPER_PLAIN_ACTOR = "wagontrain_quarantine_000"
 
 # Itorash must stay on its vanilla Hanubia capsule. Pairing it with Cataris /
-# Artaria (or any mid-game elevator) lets DNA-0 seeds reach Raven Beak after a
-# couple of local checks once StartKit has handed out Power Bomb.
 _LOCKED_TRANSPORT_REGIONS = frozenset({"Itorash"})
 
 
@@ -36,13 +33,7 @@ def _side_id(node_id: NodeId) -> SideId:
 
 
 def _arrival_spawn(extra: dict, actor: str) -> str:
-    """Local platform/spawn to land on when arriving at this transport.
-
-    Must be start_point_actor_name (same as Randovania). Never use
-    target_spawn_point — that is the *vanilla remote* platform and points
-    shuffled elevators at actors that do not exist in the destination scenario
-    (guest null-deref / Ryujinx Invalid memory at 0x0).
-    """
+    """Local platform/spawn to land on when arriving at this transport."""
     start = extra.get("start_point_actor_name")
     if isinstance(start, str) and start.strip():
         return start.strip()
@@ -56,11 +47,7 @@ def _arrival_spawn(extra: dict, actor: str) -> str:
 
 
 def _connection_label(meta: dict) -> str:
-    """Human-readable destination label for map icons / room-name overlay.
-
-    Strip '.' so ODR icon ids (RDV_TRANSPORT_{name without spaces}) stay safe —
-    e.g. 'Hanubia - E.M.M.I.' → 'Hanubia - EMMI'.
-    """
+    """Human-readable destination label for map icons / room-name overlay."""
     if meta.get("transporter_name"):
         raw = str(meta["transporter_name"])
     else:
@@ -121,7 +108,6 @@ def roll_matching(transports: Dict[SideId, dict], rng, mode: str = "randomized")
     matching: Dict[SideId, SideId] = {}
     for _typ, sides in by_type.items():
         # Retry a few shuffles so we can avoid same-scenario pairs (game assumes
-        # a scenario change on transport use; same-scenario has crashed in AP play).
         best: Dict[SideId, SideId] = {}
         best_cross = -1
         for _attempt in range(24):
@@ -163,12 +149,7 @@ def apply_matching(parser, transports: Dict[SideId, dict], matching: Dict[SideId
 
 
 def apply_matching_from_slot_data(parser, matching: Optional[Dict[SideId, SideId]]) -> int:
-    """
-    Apply a serialized transport_matching dict onto a fresh parser graph.
-
-    Returns how many sides were rewritten. Used by the AP client tracker so
-    in-logic / minimap paint match shuffled elevators in the patched game.
-    """
+    """Apply a serialized transport_matching dict onto a fresh parser graph."""
     if not matching:
         return 0
     transports = collect_transports(parser)
@@ -230,10 +211,7 @@ def roll_connected_matching(
     mode: str = "randomized",
     attempts: int = 40,
 ) -> Tuple[Dict[SideId, SideId], Dict[SideId, dict]]:
-    """
-    Roll a transport matching that does not regress full-loadout reachability.
-    Returns (matching, transports). matching may be {} on failure / off.
-    """
+    """Roll a transport matching that does not regress full-loadout reachability."""
     transports = collect_transports(logic.parser)
     if mode in ("off", "vanilla", None) or mode == 0 or not transports:
         return {}, transports
@@ -250,7 +228,6 @@ def roll_connected_matching(
     }
     def refresh() -> None:
         # Dock targets are baked into the adjacency cache, so a plain cache
-        # clear would leave the reachability check looking at the old graph.
         logic.rebuild_graph()
 
     baseline_inv = logic.inventory_from_counts(full_counts)

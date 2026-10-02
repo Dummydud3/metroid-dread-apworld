@@ -1,20 +1,4 @@
 -- Metroid Bread loading tip pools (TITLE||BODY).
---
--- EDIT THIS FILE to add tips. Keep each entry under ~200 characters
--- (OdrTip caption limit is 240 including {c6}/{c7}/{c0} codes).
---
--- ApTipPool (default / always-on):
---   Always in the active generic carousel once the Hub client is connected.
---
--- ApTipPoolSecondary (progress unlocks):
---   For each Location_Collected check on this save, the next tip from this
---   list is unlocked into the active generic pool (in order, one per check).
---   Example: 0 checks → only ApTipPool; 3 checks → ApTipPool + first 3 here.
---   PrepareGenericCarousel still shows up to 5 tips at a time, shuffled from
---   the unlocked set.
---
--- Priority tips (Death Link / local death / early CONNECT CLIENT) are handled
--- separately in ap_loading_tips.lua and temporarily replace this carousel.
 
 ApTipPool = {
   "{c6}DNA COUNTER{c7}||Metroid DNA fills the HUD DNA counter toward your Required DNA goal. Network Stations can hint DNA locations when that option is on.{c0}",

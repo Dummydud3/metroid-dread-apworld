@@ -1,23 +1,4 @@
-"""
-Rebuild an installed mod's map_icon_keys.json from its patcher.json.
-
-Repairs sidecars written before KEYS_VERSION 3, which numbered every custom_icon
-pickup — including the major-item spheres open-dread-rando never gives a custom
-icon — so every later location's MAP_ICON_ItemCustom{n} was shifted and map labels
-showed another check's logic state and item name.
-
-Also upgrades pre-v4 sidecars, which carry no `sprite` per entry and so leave every
-revealed icon stuck on the `unknown` graphic.
-
-No re-patch is needed: the runtime label path writes the full display string with
-OdrText.SetLocalized and the icon graphic is a runtime OdrMap.SetIconSprite write,
-so a corrected sidecar is enough.
-
-Usage:
-    python dread_scripts/rebuild_map_icon_keys.py [mod_root]
-
-mod_root defaults to output_path from dread_direct_patch_config.json.
-"""
+"""Rebuild an installed mod's map_icon_keys.json from its patcher.json."""
 
 from __future__ import annotations
 

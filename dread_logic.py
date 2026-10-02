@@ -1,15 +1,10 @@
-"""
-Live Randovania logic bridge for Metroid Bread Archipelago.
-
-Evaluates the logic_database node graph against CollectionState so assumed fill
-respects one-ways, events, and lock-ins (e.g. ElunReleaseX / frozen Artaria).
-"""
+"""Live Randovania logic bridge for Metroid Bread Archipelago."""
 
 from __future__ import annotations
 
 from collections import deque
 from pathlib import Path
-from typing import AbstractSet, Dict, FrozenSet, Iterable, Optional, Set, Tuple, TYPE_CHECKING
+from typing import AbstractSet, Dict, FrozenSet, Iterable, Mapping, Optional, Set, Tuple, TYPE_CHECKING
 
 from .logic_parser import RandovaniaLogicParser
 from .Events import EVENT_RESOURCE_TO_ITEM
@@ -24,7 +19,6 @@ NodeId = Tuple[str, str, str]  # region, area, node
 MISC_ALWAYS_ON: FrozenSet[str] = frozenset({"SeparateBeams", "SeparateMissiles"})
 
 # RDV misc short name -> MetroidBreadOptions field (truthy value enables the resource).
-# Matches randovania dread generator bootstrap logical_patches / dock / teleporter flags.
 MISC_TO_OPTION: Dict[str, str] = {
     "NerfPowerBombs": "nerf_power_bombs",
     "DoorLocks": "door_lock_rando",
@@ -98,6 +92,20 @@ TRICK_LEVEL_LABELS: Dict[int, str] = {
     5: "Ludicrous",
 }
 
+# Randovania dread logic_database/header.json ``damage_reductions``.
+# Lowest owned multiplier wins. 0.0 is immunity.
+# Heat/Cold/Lava HP costs stay the database amounts (RDV Strict, 1×).
+# RDV Damage Strictness (starter presets use Medium 1.5×) is a separate
+# global multiplier Bread does not expose; boss Damage gates already use
+# the raw database numbers, and these do too.
+# constant_heat_damage / constant_cold_damage / constant_lava_damage are
+# patcher DPS only. RDV does not rescale these requirements from them.
+ENV_DAMAGE_REDUCTIONS: Dict[str, Tuple[Tuple[str, float], ...]] = {
+    "Heat": (("Varia Suit", 0.0), ("Gravity Suit", 0.0)),
+    "Cold": (("Varia Suit", 0.75), ("Gravity Suit", 0.0)),
+    "Lava": (("Varia Suit", 0.75), ("Gravity Suit", 0.0)),
+}
+
 # Individual AP names implied by progressive counts
 PROGRESSIVE_EXPAND: Dict[str, Tuple[str, ...]] = {
     "Progressive Beam": ("Wide Beam", "Plasma Beam", "Wave Beam"),
@@ -109,7 +117,6 @@ PROGRESSIVE_EXPAND: Dict[str, Tuple[str, ...]] = {
 }
 
 # RDV item short name -> AP item (None = always owned / not an item)
-# Keys must match logic_database/header.json resource_database.items
 ITEM_SHORT_TO_AP: Dict[str, Optional[str]] = {
     "Nothing": None,
     "Power": None,
@@ -201,10 +208,13 @@ class DreadLogic:
             artaria_starts[0] if artaria_starts else (starts[0] if starts else ("Artaria", "Intro Room", "Start Point"))
         )
 
-        self._reachable_cache: Dict[FrozenSet[str], Set[NodeId]] = {}
+        # (inventory, dangerous_logic) -> nodes that are in logic
+        self._reachable_cache: Dict[Tuple[FrozenSet[str], bool], Set[NodeId]] = {}
         # node -> list of (target, requirement)
         self._adj: Dict[NodeId, list] = {}
         self._rev_adj: Optional[Dict[NodeId, list]] = None
+        # Event items that appear in a negated requirement. Adding one can close a path.
+        self._negated_event_items: FrozenSet[str] = frozenset()
         self._build_adjacency()
 
         # Event nodes grant logical event items during BFS (RDV-style).
@@ -229,6 +239,68 @@ class DreadLogic:
                         region_name, area_name, node_name
                     ):
                         self._adj[src].append(((t_region, t_area, t_node), req))
+        self._rev_adj = None
+        self._negated_event_items = self._scan_negated_event_items()
+
+    def dangerous_logic_enabled(self) -> bool:
+        """True when reachable rooms may be required even if the player cannot leave."""
+        try:
+            opt = getattr(self.world.options, "dangerous_logic", None)
+        except Exception:
+            return False
+        if opt is None:
+            return False
+        try:
+            return int(opt.value) > 0
+        except Exception:
+            return bool(getattr(opt, "value", False))
+
+    def _scan_negated_event_items(self) -> FrozenSet[str]:
+        """Event items used as ``negate`` requirements (a collect can close a path)."""
+        found: Set[str] = set()
+        seen_templates: Set[str] = set()
+
+        def walk(req) -> None:
+            if not isinstance(req, dict):
+                return
+            req_type = req.get("type")
+            if req_type == "resource":
+                data = req.get("data") or {}
+                if data.get("type") == "events" and data.get("negate") and data.get("name"):
+                    item = EVENT_RESOURCE_TO_ITEM.get(data.get("name"))
+                    if item:
+                        found.add(item)
+                return
+            if req_type == "template":
+                tname = req.get("data")
+                if not isinstance(tname, str) or tname in seen_templates:
+                    return
+                seen_templates.add(tname)
+                tmpl = self.parser.templates.get(tname)
+                if isinstance(tmpl, dict):
+                    walk(tmpl.get("requirement") if "requirement" in tmpl else tmpl)
+                return
+            data = req.get("data")
+            if isinstance(data, dict):
+                items = data.get("items")
+                if isinstance(items, list):
+                    for item in items:
+                        walk(item)
+
+        for edges in self._adj.values():
+            for _target, req in edges:
+                walk(req)
+        return frozenset(found)
+
+    def _ensure_reverse(self) -> Dict[NodeId, list]:
+        if self._rev_adj is not None:
+            return self._rev_adj
+        rev: Dict[NodeId, list] = {}
+        for src, edges in self._adj.items():
+            for tgt, req in edges:
+                rev.setdefault(tgt, []).append((src, req))
+        self._rev_adj = rev
+        return rev
 
     def set_starting_node(self, node: NodeId) -> None:
         self.starting_node = node
@@ -376,10 +448,7 @@ class DreadLogic:
         *,
         exclude_auto_events: Optional[AbstractSet[str]] = None,
     ) -> Set[Tuple[str, str]]:
-        """
-        Unique (region, area) pairs reachable with the given inventory.
-        Always includes the starting area.
-        """
+        """Unique (region, area) pairs reachable with the given inventory."""
         inv = self.inventory_from_counts(counts)
         nodes = self.get_reachable_nodes(inv, exclude_auto_events=exclude_auto_events)
         areas: Set[Tuple[str, str]] = {
@@ -390,6 +459,9 @@ class DreadLogic:
         return areas
 
     def trick_level(self, trick_short: str) -> int:
+        # Out-of-logic checks still need a reach path. Tricks stay off the panel.
+        if getattr(self, "_ignore_tricks", False):
+            return 99
         opt_name = TRICK_TO_OPTION.get(trick_short)
         if not opt_name:
             return 0
@@ -487,14 +559,7 @@ class DreadLogic:
                     best = 1
                 return best >= amount
             if ap == "__energy__":
-                best = 99
-                for token in inventory:
-                    if token.startswith("__energy_") and token.endswith("__") and token != "__energy__":
-                        try:
-                            best = max(best, int(token[len("__energy_"):-2]))
-                        except ValueError:
-                            pass
-                return best >= amount
+                return self._current_energy(inventory) >= amount
             if ap == "Flash Shift Upgrade":
                 if amount <= 1:
                     return "Flash Shift Upgrade" in inventory or any(
@@ -528,35 +593,81 @@ class DreadLogic:
 
         return False
 
-    def _misc_ok(self, rname: str) -> bool:
-        """
-        RDV misc resources gate optional patches (e.g. NerfPowerBombs).
-
-        Open Charge Door / Destroy Enky require ``NOT NerfPowerBombs`` for the
-        Power Bomb alternate; when the option is on, that branch must fail so
-        generator logic matches ODR's ``_remove_pb_weaknesses`` patch.
-        """
-        if rname in MISC_ALWAYS_ON:
-            return True
-        opt_name = MISC_TO_OPTION.get(rname)
-        if not opt_name:
-            return False
-        opt = getattr(self.world.options, opt_name, None)
+    def _option_enabled(self, name: str) -> bool:
+        opt = getattr(self.world.options, name, None)
         if opt is None:
             return False
         try:
             return int(opt.value) > 0
         except Exception:
-            return bool(opt.value)
+            return bool(getattr(opt, "value", False))
+
+    def _misc_ok(self, rname: str) -> bool:
+        """RDV misc resources gate optional patches (e.g. NerfPowerBombs)."""
+        if rname in MISC_ALWAYS_ON:
+            return True
+        # DoorLocks removes vanilla-shield sequence breaks. Randovania enables
+        # it for any non-vanilla dock mode; Bread does the same when either
+        # door placer is on.
+        if rname == "DoorLocks":
+            return self._option_enabled("door_lock_rando") or self._option_enabled(
+                "randovania_door_rando"
+            )
+        opt_name = MISC_TO_OPTION.get(rname)
+        if not opt_name:
+            return False
+        return self._option_enabled(opt_name)
+
+    def _current_energy(self, inventory: FrozenSet[str]) -> int:
+        """Collected max HP. Numeric ``__energy_N__`` wins; 99 if none is present.
+
+        Matches RDV's starting energy of ``energy_per_tank - 1`` plus tanks and
+        parts (see ``inventory_from_counts``). A legacy inventory that only has
+        the ``__energy__`` flag is treated as base 99 HP.
+        """
+        best: Optional[int] = None
+        for token in inventory:
+            if not token.startswith("__energy_") or not token.endswith("__") or token == "__energy__":
+                continue
+            try:
+                value = int(token[len("__energy_"):-2])
+            except ValueError:
+                continue
+            best = value if best is None else max(best, value)
+        return 99 if best is None else best
+
+    def _env_damage_taken(self, name: str, amount: int, inventory: FrozenSet[str]) -> Optional[float]:
+        """HP this Heat/Cold/Lava requirement costs after suit reduction.
+
+        None when ``name`` is not environmental damage. 0.0 means immune.
+        Same rule as RDV ``ResourceDatabase.get_damage_reduction``: the lowest
+        matching multiplier applies, then ``health > amount * multiplier``.
+        """
+        rows = ENV_DAMAGE_REDUCTIONS.get(name)
+        if rows is None:
+            return None
+        mult = 1.0
+        for item_name, factor in rows:
+            if item_name in inventory and factor < mult:
+                mult = factor
+        if mult <= 0.0:
+            return 0.0
+        return float(amount) * mult
+
+    def _min_energy_to_survive(self, taken: float) -> int:
+        """Smallest integer HP that stays strictly above ``taken`` (RDV ``health <= 0`` fails)."""
+        if taken <= 0.0:
+            return 1
+        return int(taken) + 1
 
     def _damage_ok(self, name: str, amount: int, inventory: FrozenSet[str]) -> bool:
-        suitless = self.trick_level("Suitless")
-        has_varia = "Varia Suit" in inventory
-        has_grav = "Gravity Suit" in inventory
-        if name == "Heat":
-            return has_varia or has_grav or suitless >= 1
-        if name in ("Cold", "Lava"):
-            return has_grav or suitless >= 2
+        taken = self._env_damage_taken(name, amount, inventory)
+        if taken is not None:
+            # Suitless level is the sibling trick resource (Beginner/Intermediate/
+            # Advanced = 1/2/3). Disabled fails that check, not this one.
+            # Varia or Gravity zeros Heat. Gravity zeros Cold and Lava.
+            # Varia cuts Cold and Lava to 75%. No extra trick floor.
+            return self._current_energy(inventory) > taken
         if name == "Damage":
             # Combat chip damage — allow if Combat trick or enough energy
             if self.trick_level("Combat") >= 1:
@@ -573,14 +684,7 @@ class DreadLogic:
         inventory: FrozenSet[str],
         start: NodeId | AbstractSet[NodeId],
     ) -> Set[NodeId]:
-        """Expand from one node or a seed set (multi-source).
-
-        Multi-source is required when auto-collecting events: some rooms use
-        ``negate`` on the same event that you collect inside (Chain Reaction
-        Device). Restarting BFS from world spawn after granting that event
-        permanently softlocks the room in logic — entry needs the event *off*,
-        but the climb needs it *on* after you already walked in.
-        """
+        """Expand from one node or a seed set (multi-source)."""
         if isinstance(start, (set, frozenset, list, deque)):
             seeds: Iterable[NodeId] = start
         else:
@@ -597,6 +701,324 @@ class DreadLogic:
                     queue.append(target)
         return reachable
 
+    def _nodes_that_can_reach(self, goal: NodeId, inventory: FrozenSet[str]) -> Set[NodeId]:
+        """Nodes with a satisfied path to ``goal`` (escape back toward the start)."""
+        return self._nodes_that_can_reach_any((goal,), inventory)
+
+    def _nodes_that_can_reach_any(
+        self,
+        goals: Iterable[NodeId],
+        inventory: FrozenSet[str],
+    ) -> Set[NodeId]:
+        """Nodes with a satisfied path to any goal (start component or main roam)."""
+        rev = self._ensure_reverse()
+        found: Set[NodeId] = set(goals)
+        queue: deque[NodeId] = deque(found)
+        while queue:
+            current = queue.popleft()
+            for src, requirement in rev.get(current, ()):
+                if src in found:
+                    continue
+                if self.evaluate_requirement(requirement, inventory):
+                    found.add(src)
+                    queue.append(src)
+        return found
+
+    def _roam_targets(
+        self,
+        reached: AbstractSet[NodeId],
+        inventory: FrozenSet[str],
+        start: NodeId,
+    ) -> Set[NodeId]:
+        """Start component plus the largest strongly connected roam.
+
+        The intro spawn is often one-way. The largest component reachable from
+        there is the area you can actually move around in. A lock-in room such
+        as Charge Beam or the Dairon bomb upgrade is its own tiny component and
+        is not a target until an exit from that room is already open.
+        """
+        fwd: Dict[NodeId, list] = {}
+        rev_local: Dict[NodeId, list] = {}
+        for node in reached:
+            outs: list = []
+            for target, requirement in self._adj.get(node, ()):
+                if target not in reached:
+                    continue
+                if not self.evaluate_requirement(requirement, inventory):
+                    continue
+                outs.append(target)
+                rev_local.setdefault(target, []).append(node)
+            fwd[node] = outs
+            rev_local.setdefault(node, [])
+
+        seen: Set[NodeId] = set()
+        order: list = []
+        for seed in reached:
+            if seed in seen:
+                continue
+            stack = [(seed, 0)]
+            seen.add(seed)
+            while stack:
+                current, index = stack[-1]
+                outs = fwd.get(current, ())
+                if index < len(outs):
+                    stack[-1] = (current, index + 1)
+                    nxt = outs[index]
+                    if nxt not in seen:
+                        seen.add(nxt)
+                        stack.append((nxt, 0))
+                else:
+                    stack.pop()
+                    order.append(current)
+
+        seen = set()
+        sccs: list = []
+        for node in reversed(order):
+            if node in seen:
+                continue
+            comp: list = []
+            stack = [node]
+            seen.add(node)
+            while stack:
+                current = stack.pop()
+                comp.append(current)
+                for prev in rev_local.get(current, ()):
+                    if prev not in seen:
+                        seen.add(prev)
+                        stack.append(prev)
+            sccs.append(comp)
+
+        if not sccs:
+            return {start}
+        start_comp = next((comp for comp in sccs if start in comp), None)
+        # Rooms you cannot leave (bomb upgrade, charge beam) are tiny components.
+        # The intro spawn is often one-way, so the main roam can be a different
+        # component than the start. Prefer the largest component you can move
+        # around in, and ignore one-room lock-ins.
+        others = [
+            comp for comp in sccs
+            if comp is not start_comp and len(comp) >= 4
+        ]
+        anchor = max(others, key=len) if others else (start_comp or [start])
+        targets = set(anchor)
+        if start_comp:
+            targets.update(start_comp)
+        else:
+            targets.add(start)
+        return targets
+
+    def _forward_hits(
+        self,
+        origin: NodeId,
+        goals: AbstractSet[NodeId],
+        inventory: FrozenSet[str],
+    ) -> bool:
+        if origin in goals:
+            return True
+        seen: Set[NodeId] = {origin}
+        queue: deque[NodeId] = deque((origin,))
+        while queue:
+            current = queue.popleft()
+            for target, requirement in self._adj.get(current, ()):
+                if target in seen:
+                    continue
+                if not self.evaluate_requirement(requirement, inventory):
+                    continue
+                if target in goals:
+                    return True
+                seen.add(target)
+                queue.append(target)
+        return False
+
+    def _grant_safe_events(
+        self,
+        inv: Set[str],
+        safe: AbstractSet[NodeId],
+        exclude: FrozenSet[str],
+    ) -> bool:
+        """Collect events standing in rooms that can already reach the start.
+
+        Skips negated events: collecting those can close the path back.
+        """
+        added = False
+        negated = self._negated_event_items
+        for node, event_item in self._event_items.items():
+            if event_item in exclude or event_item in inv or event_item in negated:
+                continue
+            if node not in safe:
+                continue
+            inv.add(event_item)
+            added = True
+        return added
+
+    def _grant_one_negated_safe_event(
+        self,
+        inv: Set[str],
+        safe: AbstractSet[NodeId],
+        start: NodeId,
+        exclude: FrozenSet[str],
+    ) -> bool:
+        """Collect negated events already inside rooms that can reach the start.
+
+        Tries them together first. An event is kept only when its node can still
+        reach the start with every candidate set. If the batch locks every
+        candidate out, fall back to the first event that is safe on its own.
+        """
+        negated = self._negated_event_items
+        candidates = [
+            (node, event_item)
+            for node, event_item in self._event_items.items()
+            if event_item in negated
+            and event_item not in inv
+            and event_item not in exclude
+            and node in safe
+        ]
+        if not candidates:
+            return False
+        trial = set(inv)
+        trial.update(event_item for _node, event_item in candidates)
+        trial_key = frozenset(trial)
+        reached = self._bfs_once(trial_key, start)
+        targets = self._roam_targets(reached, trial_key, start)
+        escapable = self._nodes_that_can_reach_any(targets, trial_key)
+        kept = [event_item for node, event_item in candidates if node in escapable]
+        if kept:
+            inv.update(kept)
+            return True
+        for node, event_item in candidates:
+            if self._forward_hits(node, targets, frozenset(inv | {event_item})):
+                inv.add(event_item)
+                return True
+        return False
+
+    def _grant_one_negated_stuck_event(
+        self,
+        inv: Set[str],
+        reached: AbstractSet[NodeId],
+        escapable: AbstractSet[NodeId],
+        start: NodeId,
+        exclude: FrozenSet[str],
+    ) -> bool:
+        """Collect one negated event in a pocket when triggering it opens the way out.
+
+        Boss rooms and central units are modeled this way: the node cannot reach
+        the start until the event is set, and the event is also a negate somewhere
+        else in the graph. The pickup item is still not assumed.
+        """
+        negated = self._negated_event_items
+        for node, event_item in self._event_items.items():
+            if event_item not in negated or event_item in inv or event_item in exclude:
+                continue
+            if node not in reached or node in escapable:
+                continue
+            trial = frozenset(inv | {event_item})
+            reached_now = self._bfs_once(trial, start)
+            targets = self._roam_targets(reached_now, trial, start)
+            if self._forward_hits(node, targets, trial):
+                inv.add(event_item)
+                return True
+        return False
+
+    def _pocket_rescue(
+        self,
+        inv: Set[str],
+        reached: AbstractSet[NodeId],
+        escapable: AbstractSet[NodeId],
+        start: NodeId,
+        exclude: FrozenSet[str],
+    ) -> bool:
+        """Collect events inside a no-return pocket when those events open a way out.
+
+        The item at a pickup is not assumed. A switch (event) in the room counts
+        only if, after triggering it, some node in the pocket can reach the start.
+        """
+        stuck = reached - escapable
+        if not stuck:
+            return False
+        local = set(inv)
+        before = set(local)
+        seeds = list(stuck)
+        goals = escapable | {start}
+        for _ in range(len(self._event_items) + 1):
+            hit, grew = self._pocket_bfs(seeds, local, goals, exclude)
+            if hit and (local - before):
+                inv.update(local)
+                return True
+            if not grew:
+                return False
+        return False
+
+    def _pocket_bfs(
+        self,
+        seeds: list,
+        local: Set[str],
+        goals: AbstractSet[NodeId],
+        exclude: FrozenSet[str],
+    ) -> Tuple[bool, bool]:
+        """Walk a stuck pocket. Returns (hit escape, gained one non-negated event)."""
+        negated = self._negated_event_items
+        seen: Set[NodeId] = set(seeds)
+        queue: deque[NodeId] = deque(seeds)
+        while queue:
+            current = queue.popleft()
+            event_item = self._event_items.get(current)
+            if (
+                event_item
+                and event_item not in local
+                and event_item not in exclude
+                and event_item not in negated
+            ):
+                local.add(event_item)
+                return False, True
+            if current in goals:
+                return True, False
+            inv_key = frozenset(local)
+            for target, requirement in self._adj.get(current, ()):
+                if target in seen:
+                    continue
+                if not self.evaluate_requirement(requirement, inv_key):
+                    continue
+                if target in goals:
+                    return True, False
+                seen.add(target)
+                queue.append(target)
+        return False, False
+
+    def _reachable_with_escape(
+        self,
+        inventory: FrozenSet[str],
+        start: NodeId,
+        exclude: FrozenSet[str],
+    ) -> Set[NodeId]:
+        """Reachable nodes the player can also leave.
+
+        Escape means a path back to the start component, or into the largest
+        roaming component (the main area you can move around in after a one-way
+        out of the intro). A one-room lock-in is not that component. The pickup
+        in the room is never assumed, so the Dairon bomb upgrade and the Artaria
+        charge beam room stay out of logic until an exit is already open.
+        """
+        inv: Set[str] = set(inventory)
+        limit = len(self._event_items) + 3
+        safe: Set[NodeId] = {start}
+        for _ in range(limit):
+            frozen = frozenset(inv)
+            reached = self._bfs_once(frozen, start)
+            targets = self._roam_targets(reached, frozen, start)
+            escapable = self._nodes_that_can_reach_any(targets, frozen)
+            safe = reached & escapable
+            if self._grant_safe_events(inv, safe, exclude):
+                continue
+            if self._grant_one_negated_safe_event(inv, safe, start, exclude):
+                continue
+            if self._grant_one_negated_stuck_event(inv, reached, escapable, start, exclude):
+                continue
+            if self._pocket_rescue(inv, reached, escapable, start, exclude):
+                continue
+            return safe
+        frozen = frozenset(inv)
+        return self._bfs_once(frozen, start) & self._nodes_that_can_reach(start, frozen)
+
     def get_reachable_nodes(
         self,
         inventory: FrozenSet[str],
@@ -604,30 +1026,41 @@ class DreadLogic:
         collect_events: bool = True,
         exclude_auto_events: Optional[AbstractSet[str]] = None,
     ) -> Set[NodeId]:
-        """BFS from start, optionally granting event items as their nodes become reachable.
-
-        ``exclude_auto_events``: event item names that must already be in
-        ``inventory`` to count (Hub tracker uses this so Quiet Robe / X release
-        are not invented from reachability alone). Generation leaves this empty.
-
-        When events are collected, expansion continues from the already-reachable
-        set (not only from spawn) so before/after event gates stay consistent.
-        """
+        """BFS from start, optionally granting event items as their nodes become reachable."""
         start = start or self.starting_node
         exclude = frozenset(exclude_auto_events or ())
+        dangerous = self.dangerous_logic_enabled()
         # Cache only the default generation path (full auto-collect, no excludes).
-        cache_ok = collect_events and not exclude and start == self.starting_node
-        if cache_ok and inventory in self._reachable_cache:
-            return self._reachable_cache[inventory]
+        # _ignore_tricks is stable for a whole search, and the cache is cleared
+        # when that flag toggles, so those results can be reused too.
+        # The dangerous-logic flag is part of the key so on/off cannot share a result.
+        cache_ok = (
+            collect_events
+            and not exclude
+            and start == self.starting_node
+        )
+        cache_key = (inventory, dangerous)
+        if cache_ok and cache_key in self._reachable_cache:
+            return self._reachable_cache[cache_key]
 
         if not collect_events:
             return self._bfs_once(inventory, start)
 
+        # Off: a node is in logic only when it is reachable and can get back to
+        # the start with the items already owned (events along a real escape count;
+        # the pickup in the room does not). On: reachable is enough.
+        if not dangerous:
+            reachable = self._reachable_with_escape(inventory, start, exclude)
+            if cache_ok:
+                self._reachable_cache[cache_key] = reachable
+                if len(self._reachable_cache) > 8192:
+                    self._reachable_cache.clear()
+            return reachable
+
         inv: Set[str] = set(inventory)
-        reachable: Set[NodeId] = {start}
+        reachable = {start}
         for _ in range(len(self._event_items) + 2):
             # Expand from every node already reached so collecting a room event
-            # does not require re-entering through a "event not yet done" door.
             reachable = self._bfs_once(frozenset(inv), reachable)
             gained = False
             for node, event_item in self._event_items.items():
@@ -640,8 +1073,8 @@ class DreadLogic:
                 break
 
         if cache_ok:
-            self._reachable_cache[inventory] = reachable
-            if len(self._reachable_cache) > 512:
+            self._reachable_cache[cache_key] = reachable
+            if len(self._reachable_cache) > 8192:
                 self._reachable_cache.clear()
         return reachable
 
@@ -725,6 +1158,51 @@ class DreadLogic:
         seen.add(label)
         bucket.append(label)
 
+    def _note_env_damage(
+        self,
+        name: str,
+        amount: int,
+        inventory: FrozenSet[str],
+        items: list,
+        seen_items: Set[str],
+        *,
+        missing: bool,
+    ) -> bool:
+        """Record suit immunity or the HP a Heat/Cold/Lava edge actually costs.
+
+        The Suitless trick is a sibling resource and is recorded there, at the
+        level that edge asks for. This does not invent an extra trick floor.
+        """
+        taken = self._env_damage_taken(name, amount, inventory)
+        if taken is None:
+            return False
+        has_varia = "Varia Suit" in inventory
+        has_grav = "Gravity Suit" in inventory
+        if name == "Heat":
+            if has_varia:
+                if not missing:
+                    self._add_unique(items, seen_items, "Varia Suit")
+            elif has_grav:
+                if not missing:
+                    self._add_unique(items, seen_items, "Gravity Suit")
+            elif missing:
+                self._add_unique(items, seen_items, "Varia Suit")
+        elif name in ("Cold", "Lava"):
+            if has_grav:
+                if not missing:
+                    self._add_unique(items, seen_items, "Gravity Suit")
+            elif missing:
+                self._add_unique(items, seen_items, "Gravity Suit")
+            if has_varia and taken > 0.0 and not missing:
+                self._add_unique(items, seen_items, "Varia Suit")
+        if taken > 0.0:
+            self._add_unique(
+                items,
+                seen_items,
+                self._item_fact_label("Energy", self._min_energy_to_survive(taken)),
+            )
+        return True
+
     def _collect_damage_used(
         self,
         name: str,
@@ -735,22 +1213,7 @@ class DreadLogic:
         seen_items: Set[str],
         seen_tricks: Set[str],
     ) -> None:
-        has_varia = "Varia Suit" in inventory
-        has_grav = "Gravity Suit" in inventory
-        suitless = self.trick_level("Suitless")
-        if name == "Heat":
-            if has_varia:
-                self._add_unique(items, seen_items, "Varia Suit")
-            elif has_grav:
-                self._add_unique(items, seen_items, "Gravity Suit")
-            elif suitless >= 1:
-                self._add_unique(tricks, seen_tricks, self._trick_fact_label("Suitless", 1))
-            return
-        if name in ("Cold", "Lava"):
-            if has_grav:
-                self._add_unique(items, seen_items, "Gravity Suit")
-            elif suitless >= 2:
-                self._add_unique(tricks, seen_tricks, self._trick_fact_label("Suitless", 2))
+        if self._note_env_damage(name, amount, inventory, items, seen_items, missing=False):
             return
         if name == "Damage":
             if self.trick_level("Combat") >= 1:
@@ -775,20 +1238,7 @@ class DreadLogic:
     ) -> None:
         if self._damage_ok(name, amount, inventory):
             return
-        has_varia = "Varia Suit" in inventory
-        has_grav = "Gravity Suit" in inventory
-        suitless = self.trick_level("Suitless")
-        if name == "Heat":
-            if not has_varia and not has_grav:
-                self._add_unique(items, seen_items, "Varia Suit")
-            if suitless >= 1:
-                self._add_unique(tricks, seen_tricks, self._trick_fact_label("Suitless", max(1, suitless)))
-            return
-        if name in ("Cold", "Lava"):
-            if not has_grav:
-                self._add_unique(items, seen_items, "Gravity Suit")
-            if suitless >= 2:
-                self._add_unique(tricks, seen_tricks, self._trick_fact_label("Suitless", 2))
+        if self._note_env_damage(name, amount, inventory, items, seen_items, missing=True):
             return
         if name == "Damage":
             self._add_unique(items, seen_items, self._item_fact_label("Energy", amount))
@@ -1118,3 +1568,355 @@ class DreadLogic:
             "via": via,
             "error": "",
         }
+
+    # Abilities the pause-map panel can list. Order is the display order.
+    # Tokens are what evaluate_requirement understands; the label is the panel text.
+    _PANEL_ABILITIES: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+        ("Morph Ball", ("Morph Ball",)),
+        ("Bomb", ("Bomb",)),
+        ("Cross Bomb", ("Cross Bomb",)),
+        ("Power Bomb", ("Power Bomb", "__pb_ammo__")),
+        ("Spider Magnet", ("Spider Magnet",)),
+        ("Charge Beam", ("Charge Beam",)),
+        ("Diffusion Beam", ("Diffusion Beam",)),
+        ("Wide Beam", ("Wide Beam",)),
+        ("Plasma Beam", ("Plasma Beam",)),
+        ("Wave Beam", ("Wave Beam",)),
+        ("Grapple Beam", ("Grapple Beam",)),
+        ("Super Missile", ("Super Missile",)),
+        ("Ice Missile", ("Ice Missile",)),
+        ("Storm Missile", ("Storm Missile",)),
+        ("Phantom Cloak", ("Phantom Cloak",)),
+        ("Flash Shift", ("Flash Shift",)),
+        ("Pulse Radar", ("Pulse Radar",)),
+        ("Varia Suit", ("Varia Suit",)),
+        ("Gravity Suit", ("Gravity Suit",)),
+        ("Speed Booster", ("Speed Booster",)),
+        ("Spin Boost", ("Spin Boost",)),
+        ("Space Jump", ("Space Jump",)),
+        ("Screw Attack", ("Screw Attack",)),
+        ("Flash Shift chains", ("__flash_upgrade_9__",)),
+        ("Missiles", ("__missile_ammo_999__",)),
+        ("Energy", ("__energy_9999__",)),
+    )
+
+    def _panel_base_inventory(self) -> FrozenSet[str]:
+        """Gear the seed starts with, so it is not listed as a requirement."""
+        inv = {"__missile_ammo_15__", "__energy_99__"}
+        try:
+            start_missiles = int(self.world.options.starting_missiles.value)
+        except Exception:
+            start_missiles = 15
+        if start_missiles > 0:
+            inv.add(f"__missile_ammo_{start_missiles}__")
+        try:
+            if int(self.world.options.start_with_pulse_radar.value) > 0:
+                inv.add("Pulse Radar")
+        except Exception:
+            pass
+        try:
+            if int(self.world.options.starting_power_bombs.value) > 0:
+                inv.add("Power Bomb")
+                inv.add("__pb_ammo__")
+        except Exception:
+            pass
+        return frozenset(inv)
+
+    def _panel_inventory(self, labels: AbstractSet[str]) -> FrozenSet[str]:
+        inv = set(self._panel_base_inventory())
+        token_of = {label: tokens for label, tokens in self._PANEL_ABILITIES}
+        for label in labels:
+            inv.update(token_of.get(label, (label,)))
+        return frozenset(inv)
+
+    def _panel_help_labels(self, req, inventory: FrozenSet[str]) -> Set[str]:
+        """Ability names that could satisfy a failing requirement."""
+        found: Set[str] = set()
+        if not isinstance(req, dict):
+            return found
+        req_type = req.get("type")
+        if req_type in (None, "trivial", "impossible"):
+            return found
+        if req_type == "template":
+            tmpl = self.parser.templates.get(req.get("data"))
+            inner = tmpl.get("requirement") if isinstance(tmpl, dict) else tmpl
+            return self._panel_help_labels(inner, inventory)
+        if req_type == "and":
+            for item in (req.get("data") or {}).get("items") or []:
+                if not self.evaluate_requirement(item, inventory):
+                    found |= self._panel_help_labels(item, inventory)
+            return found
+        if req_type == "or":
+            items = (req.get("data") or {}).get("items") or []
+            if any(self.evaluate_requirement(item, inventory) for item in items):
+                return found
+            for item in items:
+                found |= self._panel_help_labels(item, inventory)
+            return found
+        if req_type != "resource":
+            return found
+        data = req.get("data") or {}
+        if data.get("negate"):
+            return found
+        if self.evaluate_requirement(req, inventory):
+            return found
+        rtype = data.get("type")
+        rname = data.get("name")
+        if rtype == "items":
+            ap = ITEM_SHORT_TO_AP.get(rname) if rname in ITEM_SHORT_TO_AP else None
+            if ap == "__missile_ammo__":
+                found.add("Missiles")
+            elif ap == "__pb_ammo__":
+                found.add("Power Bomb")
+            elif ap == "__energy__":
+                found.add("Energy")
+            elif ap == "Flash Shift Upgrade":
+                found.add("Flash Shift chains")
+            elif ap and ap != "Metroid DNA":
+                found.add(ap)
+            return found
+        if rtype == "damage":
+            if rname == "Heat":
+                found.add("Varia Suit")
+                found.add("Energy")
+            elif rname in ("Cold", "Lava"):
+                found.add("Gravity Suit")
+                found.add("Energy")
+            elif rname == "Damage":
+                found.add("Energy")
+        return found
+
+    def _frontier_abilities(
+        self,
+        inventory: FrozenSet[str],
+        reachable: Optional[Set[NodeId]] = None,
+    ) -> Set[str]:
+        if reachable is None:
+            reachable = self.get_reachable_nodes(inventory)
+        found: Set[str] = set()
+        known = {label for label, _tokens in self._PANEL_ABILITIES}
+        for node in reachable:
+            for target, req in self._adj.get(node, ()):
+                if target in reachable:
+                    continue
+                if self.evaluate_requirement(req, inventory):
+                    continue
+                for label in self._panel_help_labels(req, inventory):
+                    if label in known:
+                        found.add(label)
+        return found
+
+    def minimal_abilities(
+        self,
+        node: NodeId,
+        *,
+        ignore_tricks: bool = False,
+        max_size: int = 6,
+        max_states: int = 800,
+    ) -> Optional[list]:
+        """Smallest ability set that reaches node under the seed trickset.
+
+        Returns None when no set of at most max_size abilities reaches it.
+        Tricks are not listed; ignore_tricks treats them as allowed so an
+        out-of-logic check can still report the items that reach it.
+        """
+        self._ignore_tricks = ignore_tricks
+        if ignore_tricks:
+            self._reachable_cache.clear()
+        try:
+            order = [label for label, _tokens in self._PANEL_ABILITIES]
+            rank = {label: i for i, label in enumerate(order)}
+
+            def reached(labels: FrozenSet[str]) -> bool:
+                return node in self.get_reachable_nodes(self._panel_inventory(labels))
+
+            empty: FrozenSet[str] = frozenset()
+            if reached(empty):
+                return []
+            queue: deque[FrozenSet[str]] = deque([empty])
+            seen = {empty}
+            while queue and len(seen) <= max_states:
+                current = queue.popleft()
+                if len(current) >= max_size:
+                    continue
+                inventory = self._panel_inventory(current)
+                reachable_now = self.get_reachable_nodes(inventory)
+                for label in self._frontier_abilities(inventory, reachable_now):
+                    if label in current:
+                        continue
+                    nxt = frozenset(set(current) | {label})
+                    if nxt in seen:
+                        continue
+                    seen.add(nxt)
+                    if reached(nxt):
+                        return sorted(nxt, key=lambda name: rank.get(name, 99))
+                    queue.append(nxt)
+            return None
+        finally:
+            if ignore_tricks:
+                self._ignore_tricks = False
+                self._reachable_cache.clear()
+
+    def map_panel_lines(self, node: NodeId) -> list:
+        """Lines for the pause-map panel. Empty means nothing is required."""
+        catalog = self.catalog_panel_lines([node])
+        return list(catalog.get(node) or [])
+
+    def catalog_panel_lines(self, nodes: Iterable[NodeId]) -> Dict[NodeId, list]:
+        """Minimum ability lines for many checks, searched once per mode.
+
+        A check the trickset can obtain gets that smallest item set. A check
+        the trickset cannot obtain gets only the items that reach it.
+        """
+        pending = [node for node in nodes]
+        solved: Dict[NodeId, list] = {}
+        self._panel_reach_only = set()
+        self._fill_panel_catalog(pending, solved, ignore_tricks=False)
+        left = [node for node in pending if node not in solved]
+        if left:
+            before = set(solved)
+            self._fill_panel_catalog(left, solved, ignore_tricks=True)
+            self._panel_reach_only.update(node for node in solved if node not in before)
+        still = [node for node in pending if node not in solved]
+        for node in still:
+            owned = self._shrink_panel_labels(node, ignore_tricks=False)
+            if owned is not None:
+                solved[node] = owned
+                continue
+            reached = self._shrink_panel_labels(node, ignore_tricks=True)
+            if reached is not None:
+                solved[node] = reached
+                self._panel_reach_only.add(node)
+        return solved
+
+    def _shrink_panel_labels(self, node: NodeId, *, ignore_tricks: bool) -> Optional[list]:
+        """Drop abilities until the set is minimal. Used when the breadth search stops early."""
+        self._ignore_tricks = ignore_tricks
+        self._reachable_cache.clear()
+        try:
+            labels = [label for label, _tokens in self._PANEL_ABILITIES]
+            rank = {label: i for i, label in enumerate(labels)}
+            full = frozenset(labels)
+            if node not in self.get_reachable_nodes(self._panel_inventory(full)):
+                return None
+            have = set(labels)
+            changed = True
+            while changed:
+                changed = False
+                for label in labels:
+                    if label not in have:
+                        continue
+                    trial = have - {label}
+                    if node in self.get_reachable_nodes(self._panel_inventory(frozenset(trial))):
+                        have.remove(label)
+                        changed = True
+            return sorted(have, key=lambda name: rank.get(name, 99))
+        finally:
+            self._ignore_tricks = False
+            self._reachable_cache.clear()
+
+    def _fill_panel_catalog(
+        self,
+        nodes: list,
+        solved: Dict[NodeId, list],
+        *,
+        ignore_tricks: bool,
+    ) -> None:
+        self._ignore_tricks = ignore_tricks
+        self._reachable_cache.clear()
+        try:
+            order = [label for label, _tokens in self._PANEL_ABILITIES]
+            rank = {label: i for i, label in enumerate(order)}
+            targets: Set[NodeId] = set(nodes)
+            empty: FrozenSet[str] = frozenset()
+            queue: deque[FrozenSet[str]] = deque([empty])
+            seen = {empty}
+            while queue and targets and len(seen) <= 6000:
+                current = queue.popleft()
+                inventory = self._panel_inventory(current)
+                reachable = self.get_reachable_nodes(inventory)
+                hit = targets & reachable
+                if hit:
+                    lines = sorted(current, key=lambda name: rank.get(name, 99))
+                    for node in hit:
+                        solved[node] = lines
+                        targets.discard(node)
+                    if not targets:
+                        break
+                if len(current) >= 6:
+                    continue
+                for label in self._frontier_abilities(inventory, reachable):
+                    if label in current:
+                        continue
+                    nxt = frozenset(set(current) | {label})
+                    if nxt in seen:
+                        continue
+                    seen.add(nxt)
+                    queue.append(nxt)
+        finally:
+            self._ignore_tricks = False
+            self._reachable_cache.clear()
+
+
+def map_panel_rows(option_values: Mapping) -> list:
+    """Minimum ability rows for every pickup, under the seed's trickset.
+
+    Each row is scenario, map x/y, area name, and the panel lines. An empty
+    line list means the check needs no listed ability. Out-of-logic checks
+    already contain only the items that reach them.
+    """
+    import json
+
+    class _Holder:
+        def __init__(self, value):
+            self.value = value
+
+    class _Options:
+        def __init__(self, values: Mapping):
+            self._values = {str(key): val for key, val in dict(values).items()}
+
+        def __getattr__(self, name: str):
+            if name not in self._values:
+                raise AttributeError(name)
+            return _Holder(self._values[name])
+
+    class _World:
+        player = 1
+
+        def __init__(self, values: Mapping):
+            self.options = _Options(values)
+
+    logic = DreadLogic(_World(option_values))
+    pickup_path = Path(__file__).parent / "dread_pickup_actors.json"
+    pickups = json.loads(pickup_path.read_text(encoding="utf-8"))
+    nodes = []
+    meta = []
+    for info in pickups.values():
+        if not isinstance(info, dict):
+            continue
+        region = info.get("region")
+        area = info.get("area")
+        node = info.get("node")
+        scenario = info.get("scenario")
+        coords = info.get("coordinates") or {}
+        if not (region and area and node and scenario):
+            continue
+        try:
+            x = int(round(float(coords["x"])))
+            y = int(round(float(coords["y"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+        node_id = (str(region), str(area), str(node))
+        nodes.append(node_id)
+        meta.append((str(scenario), x, y, str(area), node_id))
+    catalog = logic.catalog_panel_lines(nodes)
+    rows = []
+    for scenario, x, y, area, node_id in meta:
+        rows.append({
+            "scenario": scenario,
+            "x": x,
+            "y": y,
+            "area": area,
+            "lines": list(catalog.get(node_id) or []),
+        })
+    return rows

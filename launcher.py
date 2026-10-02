@@ -1,12 +1,4 @@
-"""
-Metroid Bread Launcher Component
-Registers the Metroid Bread Client Hub in the Archipelago Launcher.
-
-Launch path:
-  1. Prefer our Electron Metroid Bread Client Hub (dread-client-app)
-  2. Download npm packages when missing; auto-repair incomplete Electron installs
-  3. Fall back to the Python MetroidBreadClient when Hub cannot start
-"""
+"""Metroid Bread Launcher Component"""
 
 from worlds.LauncherComponents import Component, components, Type, launch_subprocess
 
@@ -15,19 +7,13 @@ from .icon_setup import *
 
 
 def run_hub_or_client(*args):
-    """
-    Entry point for multiprocessing spawn — must stay at module level (picklable).
-    Starts our Hub with package install/repair, or the Python client fallback.
-
-    Any failure must show a MessageBox / wizard — never a silent no-op.
-    """
+    """Entry point for multiprocessing spawn — must stay at module level (picklable)."""
     try:
         from .hub_launcher import launch_hub_or_fallback
 
         launch_hub_or_fallback(args, wait=True)
     except Exception as exc:
         # launch_hub_or_fallback already MessageBoxes most paths; this catches
-        # import failures or anything that escaped without UI.
         try:
             from .hub_launcher import LAUNCH_NEED_DEPS_HINT, show_user_error
 

@@ -1,8 +1,6 @@
 -- Archipelago overrides appended after open-dread-rando's generated randomizer_powerup.
--- Redefines only what AP needs so progressive/boss pickup classes from ODR remain intact.
 
 -- All Bosses: DNA CheckArtifacts must not unlock Itorash; the AP client grants
--- ITEM_METROIDNIZATION only when every non-RB boss is beaten (and DNA, if any).
 AP_ALL_BOSSES_GATE = AP_ALL_BOSSES_GATE or false
 
 local function ap_all_bosses_gate()
@@ -13,8 +11,6 @@ local function ap_all_bosses_gate()
 end
 
 -- HUD DNA refresh must never abort a grant. ODR's UpdateHudDnaCount throws when
--- DnaCountLabel is nil (UI not ready / label missing); that used to fail the
--- remote DNA pcall so ReceivedPickups never advanced and the AP item queue stalled.
 local function ap_ensure_hud_dna_wrapped()
     if not Scenario or type(Scenario.UpdateHudDnaCount) ~= "function" then
         return
@@ -84,7 +80,6 @@ function RandomizerPowerup.CheckArtifacts(resource)
 end
 
 -- Remote AP DNA (format_dna_receive_lua / /give). Stock ODR has no GrantNextArtifact;
--- without this, server DNA shows the popup but never increments the HUD counter.
 function RandomizerPowerup.GrantNextArtifact()
     if not Init or not Init.iNumRequiredArtifacts or Init.iNumRequiredArtifacts == 0 then
         Game.LogWarn(0, "GrantNextArtifact: DNA gate disabled (iNumRequiredArtifacts=0)")
@@ -137,7 +132,6 @@ function RandomizerPowerup.MarkLocationCollected(locationIdentifier)
     end
 
     -- Boss/EMMI death callbacks often run outside INGAME; push bitfield immediately
-    -- (AddSF alone can be dropped mid-cutscene) and retry after the cutscene.
     if RL and RL.GetCollectedIndicesAndSend then
         pcall(RL.GetCollectedIndicesAndSend)
         Game.AddSF(0.05, "RL.GetCollectedIndicesAndSend", "")
@@ -147,11 +141,6 @@ function RandomizerPowerup.MarkLocationCollected(locationIdentifier)
 end
 
 -- Progressive Flash Shift Upgrade: unlock Ghost Aura on first pickup when
--- Require Main Item is OFF. When Require Main is ON, upgrades only add chains.
--- First unlock also keeps the upgrade's chain grant (upgrade_amount) so
--- iChainDashMax is non-zero and Flash Shift is actually usable. Stripping
--- chains to 0 left Ghost Aura owned with iChainDashMax=0 → no usable flashes.
--- AP_FLASH_SHIFT_REQUIRES_MAIN is set by finalize_mod / client from seed options.
 AP_FLASH_SHIFT_REQUIRES_MAIN = AP_FLASH_SHIFT_REQUIRES_MAIN or false
 
 local function ap_flash_shift_requires_main()
@@ -184,7 +173,6 @@ if not RandomizerPowerup._APFlashUpgradeHooked then
     function RandomizerPowerup.IncreaseItemAmount(item_id, quantity, capacity)
         if item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and quantity and quantity > 0 then
             -- Local pickups use RandomizerPowerup (ODR has no SPECIFIC_CLASSES
-            -- entry for chain upgrades). Unlock Ghost here; still grant chains.
             ap_unlock_flash_shift_from_upgrade()
         end
         return _APIncreaseItemAmount(item_id, quantity, capacity)
@@ -205,7 +193,6 @@ function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
 end
 
 -- Main Flash Shift: do not strip chains when inventory still has 0
--- (lets AP catch up after a Ghost-only local grant).
 function RandomizerFlashShift.OnPickedUp(actor, progression)
     progression = progression or {{{item_id = "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", quantity = 0}}}
 

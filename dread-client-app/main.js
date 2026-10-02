@@ -82,7 +82,6 @@ function climbForFrozenInstall(startDir) {
 
 function inferApRootFromWorldConfig(worldDir) {
   // Runtime extracts under ProgramData have no CommonClient nearby; saved Hub
-  // paths (games_folder / yaml) often still point at a source checkout.
   try {
     const cfgPath = path.join(worldDir, "dread_client_ui_config.json");
     if (!fs.existsSync(cfgPath)) return "";
@@ -104,9 +103,7 @@ function bundledApCore(worldDir) {
   return hasCommonClient(core) ? core : "";
 }
 
-/**
- * Prefer install root from Hub env (source or frozen), then climb/infer/frozen.
- */
+/* * */
 function resolveInstallCandidate(worldDir, { prefer = "" } = {}) {
   const envInstall = (process.env.DREAD_HUB_INSTALL_ROOT || "").trim();
   if (envInstall && fs.existsSync(envInstall)) {
@@ -124,13 +121,7 @@ function resolveInstallCandidate(worldDir, { prefer = "" } = {}) {
   return "";
 }
 
-/**
- * Resolve import root (CommonClient.py) + install root (Players/output/host.yaml).
- *
- * Prefer world/ap_core for imports when present — MetroidBreadClient is built
- * against that API. A nearby full AP tree (e.g. D:\\Archipelago) is install-only
- * so an older CommonClient cannot break Connect (missing handle_url_arg, etc.).
- */
+/* * */
 function resolveApRoots(worldDir) {
   const core = bundledApCore(worldDir);
   const envRoot = (
@@ -146,7 +137,6 @@ function resolveApRoots(worldDir) {
       return { importRoot: resolved, installRoot: install };
     }
     // Explicit non-ap_core AP root: still prefer bundled ap_core for imports
-    // when Hub ships it (matches client); keep env root as install.
     if (core) {
       return { importRoot: core, installRoot: resolved };
     }
@@ -165,7 +155,6 @@ function resolveApRoots(worldDir) {
   }
 
   // Conventional checkout: worlds/metroid_bread → repo root (may lack CommonClient
-  // when Hub runs from custom_worlds/_metroid_bread_runtime next to a frozen install).
   const legacy = path.resolve(worldDir, "..", "..");
   const frozen = climbForFrozenInstall(worldDir);
   return {
@@ -445,7 +434,7 @@ function saveConfig(partial) {
     cfg.ryujinx_output_path = cfg.output_path;
   }
   writeJsonFile(CONFIG_PATH, cfg);
-  if (!cfg.debug_logs) {
+  if (!cfg.debug_logs && visualizerWindow) {
     closeVisualizerWindow();
   }
 
@@ -465,7 +454,6 @@ function saveConfig(partial) {
       freesink: Boolean(cfg.freesink),
       games_folder: cfg.games_folder || DEFAULT_OUTPUT_SCAN,
       // Frozen Hub / apworld ship exlaunch/deploy next to the world package.
-      // Preserve an existing key; never drop it when rewriting patcher config.
       custom_exlaunch_deploy:
         patchDefaults.custom_exlaunch_deploy || "exlaunch/deploy",
     };
@@ -501,7 +489,6 @@ function findPythonLauncher() {
 
   if (process.platform !== "win32") {
     // Linux Hub client deps live in a local venv (never systemwide pip).
-    // Prefer venv over DREAD_HUB_PYTHON (which may point at managed install_only).
     const venvPython = path.join(WORLD_DIR, "_metroid_bread_venv", "bin", "python");
     if (process.platform === "linux" && fs.existsSync(venvPython)) {
       const venvLauncher = { cmd: venvPython, prefixArgs: [] };
@@ -512,8 +499,6 @@ function findPythonLauncher() {
     }
 
     // Managed portable CPython — prefer one that already has client packages.
-    // Bare managed install is still usable as a bootstrap base for ensure_client_deps
-    // when the Hub venv does not exist yet (Connect then launches the venv).
     const dreadHubPython = (process.env.DREAD_HUB_PYTHON || "").trim();
     if (dreadHubPython && fs.existsSync(dreadHubPython)) {
       const managed = { cmd: dreadHubPython, prefixArgs: [] };
@@ -544,8 +529,6 @@ function findPythonLauncher() {
   }
 
   // Windows Hub client deps install into %LOCALAPPDATA%\MetroidBread\venv.
-  // Prefer that venv BEFORE DREAD_HUB_PYTHON — managed/portable CPython is only
-  // used as a venv *base*; launching it directly skips websockets/yaml installs.
   const winVenvPython = path.join(
     process.env.LOCALAPPDATA || "",
     "MetroidBread",
@@ -565,7 +548,6 @@ function findPythonLauncher() {
   if (dreadHubPython && fs.existsSync(dreadHubPython)) {
     const managed = { cmd: dreadHubPython, prefixArgs: [] };
     // Prefer packaged managed Python; allow bare version match only as bootstrap
-    // for ensure_client_deps (startClient launches HUB_CLIENT_PYTHON / venv after).
     if (
       probeCandidate(managed, hasWebsockets) ||
       probeCandidate(managed, hasOdr) ||
@@ -590,7 +572,6 @@ function findPythonLauncher() {
     candidates.find((c) => probeCandidate(c, hasPathspec)) ||
     candidates.find((c) => probeCandidate(c, versionOkShared));
   // Do NOT fall back to py -3.11 when nothing probes clean — that yields a bare
-  // launcher exit (classic 103 / pymanager 0xA0000006) with no useful UI hint.
   if (!found) {
     return null;
   }
@@ -607,11 +588,7 @@ function parseHubClientPython(text) {
   return { cmd: p, prefixArgs: [] };
 }
 
-/**
- * Install websockets/etc. for the Hub client.
- * Shares worlds/metroid_bread/ensure_client_deps.py with hub_launcher / bat / sh.
- * On Linux, ensure_client_deps creates/uses ``_metroid_bread_venv`` (not system pip).
- */
+/* * */
 function ensureClientDeps(launcher) {
   if (!launcher) {
     return { ok: false, error: pythonMissingError() };
@@ -668,7 +645,6 @@ function ensureClientDeps(launcher) {
     };
   }
   // Linux/Windows: ensure may have just created/refreshed the Hub venv —
-  // clear cache so startClient re-resolves to that interpreter.
   if (process.platform === "linux" || process.platform === "win32") {
     cachedPythonLauncher = null;
   }
@@ -929,7 +905,6 @@ const HUB_LOG_MAX_BYTES = 8 * 1024 * 1024;
 
 function getLogsDir() {
   // Matches Utils.user_path("logs") when Hub sets DREAD_HUB_INSTALL_ROOT /
-  // Utils.local_path to INSTALL_ROOT (writable Archipelago install / ProgramData).
   const dir = path.join(INSTALL_ROOT, "logs");
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -980,7 +955,6 @@ function appendLog(stream, text, level = "normal") {
     level: level === "debug" ? "debug" : "normal",
   });
   // Always tee Hub/main-process lines to disk (including debug) so connect
-  // failures are diagnosable even when the Log panel was unread.
   const stamp = new Date().toISOString().replace(/\..+$/, "");
   const tag = level === "debug" ? "DEBUG" : stream === "stderr" ? "STDERR" : "INFO";
   appendHubLogFile(`[${stamp}] ${tag} ${payloadText.replace(/\r?\n$/, "")}\n`);
@@ -1095,7 +1069,6 @@ function normalizeConnectOpts(opts) {
   }
 
   // Text Client / launcher strings: optional scheme + slot:password@host:port.
-  // Always pass bare host:port to Python --connect (ws-first in CommonClient).
   const parsed = parseConnectServerString(server);
   if (parsed.server) {
     server = parsed.server;
@@ -1195,7 +1168,6 @@ function startClient(opts) {
   }
 
   // Must launch the same interpreter ensure_client_deps just provisioned
-  // (MetroidBread venv). Do not fall back to bare DREAD_HUB_PYTHON / py -3.12.
   const launchPy = deps.python || findPythonLauncher() || launcher;
   const { cmd, prefixArgs } = launchPy;
   appendLog("stdout", `[app] Starting client with ${formatPythonCmd(launchPy)}\n`);
@@ -1546,7 +1518,6 @@ function loadSingleplayerZip(zipPath) {
   }
 
   // Reuse the same zip -> spoiler extraction the direct patcher / seed scan use,
-  // so a dropped output.zip feeds the exact same runPatch() path as multiworld.
   const extracted = extractSpoilerFromZip(clean);
   if (!extracted.ok) return extracted;
 
@@ -1842,7 +1813,6 @@ function runPatch(opts) {
   if (cfg.clean_output) args.push("--clean");
   args.push(cfg.freesink ? "--freesink" : "--no-freesink");
   // Always point frozen/source Hub at the world-bundled deploy when present so
-  // cwd/config quirks cannot fall through to a missing absolute-dev path.
   const bundledDeploy = path.join(WORLD_DIR, "exlaunch", "deploy");
   if (fs.existsSync(path.join(bundledDeploy, "subsdk9"))) {
     args.push("--custom-exlaunch-deploy", bundledDeploy);
@@ -1958,8 +1928,6 @@ function launchRyujinx(opts = {}) {
 
   try {
     // Direct Electron/Node spawn of Ryujinx.exe exits immediately on Windows
-    // (native exit 0xE0434352) — observed with .NET Ryujinx + detached stdio.
-    // Launch via `cmd /c start` so the emulator process is fully independent.
     let child;
     if (process.platform === "win32") {
       child = spawn(
@@ -1983,7 +1951,6 @@ function launchRyujinx(opts = {}) {
   }
 
   // Passive wait in MetroidBreadClient (poll until :6969 accepts). Only a short
-  // grace so Ryujinx can spawn — do not use a blind 30s one-shot connect.
   const CONNECT_DELAY_MS = 3000;
   if (clientProcess) {
     const ip = cfg.dread_ip || "127.0.0.1";
@@ -2017,6 +1984,7 @@ function defaultYamlConfig() {
       dna_placement: "prefer_emmi",
       hint_all_dna: true,
       door_lock_rando: "vanilla",
+      randovania_door_rando: false,
       doors_to_change: [
         "Access Open",
         "Charge Beam Door",
@@ -2087,8 +2055,12 @@ function defaultYamlConfig() {
       room_name_display: "never",
       raven_beak_damage_table: "consistent_low",
       nerf_power_bombs: false,
+      dangerous_logic: false,
       disabled_lights: [],
       x_starts_released: false,
+      station_map_warp: false,
+      warp_requirement: "visited",
+      warp_reach: "global",
       combat_tricks: "beginner",
       knowledge_tricks: "disabled",
       movement_tricks: "disabled",
@@ -2688,6 +2660,10 @@ function yamlProbeAllTricksDisabled(tricks) {
 }
 
 function yamlProbeDoorsOff(opts) {
+  const rdv = opts.randovania_door_rando;
+  if (rdv === true || rdv === 1 || rdv === "1" || rdv === "true" || rdv === "on") {
+    return false;
+  }
   const doors = String(opts.door_lock_rando || "vanilla").toLowerCase();
   const transport = String(opts.transport_rando || "off").toLowerCase();
   const doorsOff = ["vanilla", "off", "0"].includes(doors);
@@ -2981,7 +2957,6 @@ function evaluateFromCatalogue(opts) {
     }
     const trickAlt = row.trick_alt || null;
     // Catalogue trick_alt opens with Starting Items=0. Still a valid alternative
-    // when budget is under min_kit_size (raise items OR enable those tricks).
     const fixAlt =
       budget === 0 || budget < (row.min_kit_size || 0)
         ? formatTrickAlt(trickAlt)
@@ -3149,7 +3124,6 @@ function runYamlProbeProcess(payload) {
 
   const launchPy = findPythonLauncher() || launcher;
   // -P / PYTHONSAFEPATH: do not prepend the script directory to sys.path.
-  // Otherwise world Options.py shadows ap_core Options (circular ImportError).
   const args = [...(launchPy.prefixArgs || []), "-P", YAML_PROBE_SCRIPT];
 
   return new Promise((resolve) => {

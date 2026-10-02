@@ -1,7 +1,4 @@
-"""
-Complete Metroid Bread player options for Archipelago
-Includes all tricks and glitches from Randovania
-"""
+"""Complete Metroid Bread player options for Archipelago"""
 
 from dataclasses import dataclass
 from Options import (
@@ -17,26 +14,7 @@ from .DoorRando import (
 
 
 class MetroidBreadAccessibility(ItemsAccessibility):
-    """
-    Set rules for reachability of your items/locations.
-
-    **Full:** ensure everything can be reached and acquired.
-
-    **Minimal:** ensure what is needed to reach your goal can be acquired.
-
-    **Items:** ensure all logically relevant items can be acquired. Some items, such as keys, may be self-locking, and
-    some locations may be inaccessible.
-
-    Metroid Bread always enforces a stronger world rule regardless of this setting:
-    when Raven Beak becomes reachable, at least 90% of clearable pickup checks must
-    already be reachable with that same collection state (100% when Game Goal is
-    100%).
-
-    During generation, Minimal is upgraded to Items. Full is kept only when every
-    AP pickup/event is in logic under the rolled tricks; otherwise it is
-    downgraded to Items (Speedbooster Conservation / Knowledge / etc. gate several
-    checks that would otherwise fail fulfills_accessibility on every seed).
-    """
+    """Set rules for reachability of your items/locations."""
     default = ItemsAccessibility.option_items
 
 LIGHT_REGIONS = (
@@ -48,17 +26,7 @@ LIGHT_REGIONS = (
 # ===== TRICK/GLITCH OPTIONS =====
 
 class TrickDifficulty(Choice):
-    """
-    Base class for trick difficulty levels (Randovania LayoutTrickLevel names).
-
-    Numeric values match RDV ``LayoutTrickLevel.as_number`` so logic database
-    requirements compare correctly:
-
-    Disabled=0, Beginner=1, Intermediate=2, Advanced=3, Expert=4, Ludicrous=5.
-
-    Legacy YAML aliases (easy/medium/hard) map to Intermediate/Advanced/Expert.
-    Pre-rename ``expert`` meant value 5; prefer ``ludicrous`` for that level now.
-    """
+    """Base class for trick difficulty levels (Randovania LayoutTrickLevel names)."""
     option_disabled = 0
     option_beginner = 1
     option_intermediate = 2
@@ -73,212 +41,140 @@ class TrickDifficulty(Choice):
 
 
 class KnowledgeTricks(TrickDifficulty):
-    """
-    Some destructible objects have vulnerabilities other than those which the player is informed of.
-    For example, Power Bomb can be used to destroy Enkys or open charge beam doors.
-    """
+    """Some destructible objects have vulnerabilities other than those which the player is informed of."""
     display_name = "Knowledge"
 
 
 class MovementTricks(TrickDifficulty):
-    """
-    Non-obvious movement which can't easily be classified using other tricks.
-    Players may be expected to perform precise jumps and other niche movement optimizations.
-    """
+    """Non-obvious movement which can't easily be classified using other tricks."""
     display_name = "Movement"
 
 
 class CombatTricks(TrickDifficulty):
-    """
-    If enabled, the player may be expected to defeat enemies and bosses with fewer items and less health.
-    Defaults to Beginner so early bosses (e.g. Corpius) are logically clearable without
-    collecting Energy Tanks during accessibility checks.
-    """
+    """If enabled, the player may be expected to defeat enemies and bosses with fewer items and less hea..."""
     display_name = "Combat"
     default = 1
 
 
 class PseudoWave(TrickDifficulty):
-    """
-    It's possible to fire through solid walls without obtaining Wave Beam.
-    """
+    """It's possible to fire through solid walls without obtaining Wave Beam."""
     display_name = "Pseudo-Wave Beam"
 
 
 class InfiniteBombJump(TrickDifficulty):
-    """
-    By chaining and timing bomb jumps it's possible to reach the top of a room.
-    """
+    """By chaining and timing bomb jumps it's possible to reach the top of a room."""
     display_name = "Infinite Bomb Jump"
 
 
 class WaterBombJump(TrickDifficulty):
-    """
-    Performing a WBJ will make higher bomb jumps underwater possible.
-    """
+    """Performing a WBJ will make higher bomb jumps underwater possible."""
     display_name = "Water Bomb Jump"
 
 
 class WaterSpaceJump(TrickDifficulty):
-    """
-    Used to gain height underwater in certain places without Gravity Suit.
-    """
+    """Used to gain height underwater in certain places without Gravity Suit."""
     display_name = "Water Space Jump"
 
 
 class SingleWallWallJump(TrickDifficulty):
-    """
-    With this technique it is possible to jump up a single wall all the way up. Requires Morph Ball.
-    """
+    """With this technique it is possible to jump up a single wall all the way up. Requires Morph Ball."""
     display_name = "Single-wall Wall Jump"
 
 
 class SlideJump(TrickDifficulty):
-    """
-    By sliding off a cliff and jumping right before you fall you'll jump further.
-    """
+    """By sliding off a cliff and jumping right before you fall you'll jump further."""
     display_name = "Slide Jump"
 
 
 class SpeedBoosterConservation(TrickDifficulty):
-    """
-    Maintaining and chaining Speed Booster through complex and otherwise unintended situations.
-    """
+    """Maintaining and chaining Speed Booster through complex and otherwise unintended situations."""
     display_name = "Speed Booster Conservation"
 
 
 class WallJumpTricks(TrickDifficulty):
-    """
-    Basic movement ability which can be abused in unintended ways.
-    """
+    """Basic movement ability which can be abused in unintended ways."""
     display_name = "Wall Jump"
 
 
 class HeatColdRuns(TrickDifficulty):
-    """
-    You can run through heat and cold rooms without a suit. It depends on your health how long you can stay.
-    """
+    """You can run through heat and cold rooms without a suit. It depends on your health how long you ca..."""
     display_name = "Heat/Cold Runs"
 
 
 class ReverseGrappleBlock(Toggle):
-    """
-    Opening up grapple blocks from the "wrong" side is possible.
-    """
+    """Opening up grapple blocks from the "wrong" side is possible."""
     display_name = "Reverse Grapple Block"
 
 
 class DamageBoost(TrickDifficulty):
-    """
-    Most enemies will knock you away when Samus gets damaged. This can be used to get momentum over ledges.
-    """
+    """Most enemies will knock you away when Samus gets damaged. This can be used to get momentum over l..."""
     display_name = "Damage Boost"
 
 
 class StandOnFrozenEnemy(TrickDifficulty):
-    """
-    After you receive the ice missiles you'll be able to freeze some enemies in place allowing you to reach certain spots.
-    """
+    """After you receive the ice missiles you'll be able to freeze some enemies in place allowing you to..."""
     display_name = "Stand on Frozen Enemy"
 
 
 class GrappleMovement(TrickDifficulty):
-    """
-    Using Grapple Beam for magnets without Spider Magnet, jumping from the tether, or Grapple Boost.
-    """
+    """Using Grapple Beam for magnets without Spider Magnet, jumping from the tether, or Grapple Boost."""
     display_name = "Grapple Movement"
 
 
 class CrossBombSkip(TrickDifficulty):
-    """
-    There are sets of crumble blocks that you must use Cross Bomb to roll across. All can be skipped with the right tools.
-    """
+    """There are sets of crumble blocks that you must use Cross Bomb to roll across. All can be skipped..."""
     display_name = "Cross Bomb Skip"
 
 
 class ClimbSlopedTunnels(TrickDifficulty):
-    """
-    Various tunnels that contain slopes in the game can be ascended with bombs or good movement.
-    """
+    """Various tunnels that contain slopes in the game can be ascended with bombs or good movement."""
     display_name = "Climb Sloped Tunnels"
 
 
 class ShortBoost(TrickDifficulty):
-    """
-    Flash Shift can be manipulated to allow you to charge Speed Booster in a smaller area than intended.
-    """
+    """Flash Shift can be manipulated to allow you to charge Speed Booster in a smaller area than intended."""
     display_name = "Short Boost"
 
 
 class DiffusionAbuse(TrickDifficulty):
-    """
-    Using Diffusion Beam in certain situations can bypass the usual requirements for some objects.
-    """
+    """Using Diffusion Beam in certain situations can bypass the usual requirements for some objects."""
     display_name = "Diffusion Abuse"
 
 
 class FlashShiftSkip(TrickDifficulty):
-    """
-    With certain items or movement techniques, the Shutter Platforms can be bypassed without Flash Shift.
-    """
+    """With certain items or movement techniques, the Shutter Platforms can be bypassed without Flash Sh..."""
     display_name = "Flash Shift Skip"
 
 
 class DiagonalBombJump(TrickDifficulty):
-    """
-    A special kind of bomb jump where you gain diagonal momentum from bombs that explode slightly to the side.
-    """
+    """A special kind of bomb jump where you gain diagonal momentum from bombs that explode slightly to..."""
     display_name = "Diagonal Bomb Jump"
 
 
 class LedgeWarp(TrickDifficulty):
-    """
-    A frame perfect trick that allows you to warp to a ledge you have previously been at.
-    """
+    """A frame perfect trick that allows you to warp to a ledge you have previously been at."""
     display_name = "Ledge Warp"
 
 
 class CrossBombLaunch(TrickDifficulty):
-    """
-    By sliding and morphing as the Cross Bomb is exploding, Samus gains a lot of horizontal momentum.
-    """
+    """By sliding and morphing as the Cross Bomb is exploding, Samus gains a lot of horizontal momentum."""
     display_name = "Cross Bomb Launch"
 
 
 class FloorClip(TrickDifficulty):
-    """
-    Many floors can be clipped through with Speed Booster, Flash Shift, and/or Grapple Beam.
-    """
+    """Many floors can be clipped through with Speed Booster, Flash Shift, and/or Grapple Beam."""
     display_name = "Floor Clip"
 
 
 class ClimbSlopedSurfaces(TrickDifficulty):
-    """
-    It is possible to gain height on sloped surfaces with good movement (free-aim, Flash Shift, Spin Boost, or Phantom Cloak).
-    """
+    """It is possible to gain height on sloped surfaces with good movement (free-aim, Flash Shift, Spin..."""
     display_name = "Climb Sloped Surfaces"
 
 
 # ===== DNA / GOAL OPTIONS =====
-# Required DNA gates the Itorash artifact door. Game Goal chooses the win condition.
 
 class GameGoal(Choice):
-    """
-    How to complete your Metroid Bread slot.
-
-    **Defeat Raven Beak:** kill Raven Beak (Itorash). Generation still requires
-    >=90% of clearable pickup checks in logic when Raven Beak opens.
-
-    **100%:** collect every check in your slot, then kill Raven Beak. Generation
-    requires 100% of clearable checks in logic before Raven Beak opens; the
-    client only sends goal when all checks are collected and Raven Beak is beaten.
-
-    **All Bosses:** defeat every combat/story boss (see bosses.py), including
-    Z-57 via its pickup check, then kill Raven Beak. Generation keeps the 90%
-    clearance gate and also requires every boss node in logic when Raven Beak
-    opens; the client only sends goal when all bosses are beaten and the game
-    beaten flag is set.
-    """
+    """How to complete your Metroid Bread slot."""
     display_name = "Game Goal"
     option_defeat_raven_beak = 0
     option_one_hundred_percent = 1
@@ -296,10 +192,7 @@ class GameGoal(Choice):
 
 
 class RequiredDNA(Range):
-    """
-    How many Metroid DNA must be collected before Raven Beak is logically /
-    in-game accessible. 0 disables the DNA gate (vanilla-style open artifacts).
-    """
+    """How many Metroid DNA must be collected before Raven Beak is logically /"""
     display_name = "Required Metroid DNA"
     range_start = 0
     range_end = 12
@@ -307,10 +200,7 @@ class RequiredDNA(Range):
 
 
 class DNAPlacement(Choice):
-    """
-    Where Metroid DNA may be placed when Required Metroid DNA > 0.
-    prefer_emmi locks DNA onto Central Unit / EMMI-defeat pickups when possible.
-    """
+    """Where Metroid DNA may be placed when Required Metroid DNA > 0."""
     display_name = "Metroid DNA Placement"
     option_prefer_emmi = 0
     option_prefer_bosses = 1
@@ -319,20 +209,14 @@ class DNAPlacement(Choice):
 
 
 class HintAllDNA(DefaultOnToggle):
-    """
-    When Required Metroid DNA > 0, Adam / Network Stations reveal where all
-    required DNA are located.
-    """
+    """When Required Metroid DNA > 0, Adam / Network Stations reveal where all"""
     display_name = "Hint All Metroid DNA"
 
 
 # ===== DOOR / TRANSPORT =====
 
 class DoorLockRando(Choice):
-    """
-    Randomize the weapon needed to open eligible doors. Both sides of a door
-    always match. Only basic lock types are used (safe for open-dread-rando).
-    """
+    """Randomize the weapon needed to open eligible doors. Both sides of a door"""
     display_name = "Door Lock Randomizer"
     option_vanilla = 0
     option_individual_doors = 1
@@ -341,10 +225,23 @@ class DoorLockRando(Choice):
     default = 0
 
 
-class DoorsToChange(OptionSet):
-    """Which vanilla door types may be randomized (when Door Lock Rando is on).
+class RandovaniaDoorRando(Toggle):
+    """Place locks with Randovania's Individual Doors algorithm.
 
-    Keys match Randovania Dread ``change_from`` (see docs/door_rando_rdv_catalogue.md).
+    When on, eligible doors are opened to Power Beam before items are placed,
+    then about 60% of those connections are locked from the inventory that can
+    already reach either side. Uses Doors to Change and Change Doors To.
+    When off, Door Lock Randomizer keeps Bread's current placer.
+    """
+    display_name = "Randovania Door Rando Algorithm"
+    default = 0
+
+
+class DoorsToChange(OptionSet):
+    """Which vanilla door types may be randomized.
+
+    Used when Door Lock Randomizer is Individual Doors, and when Randovania
+    Door Rando Algorithm is on.
     """
     display_name = "Doors to Change"
     valid_keys = sorted(DEFAULT_DOORS_TO_CHANGE)
@@ -352,24 +249,14 @@ class DoorsToChange(OptionSet):
 
 
 class ChangeDoorsTo(OptionSet):
-    """Pool of lock types a randomized door may become.
-
-    ODR-addable RDV ``change_to`` (beams / missiles / grapple / blast / Ice /
-    Storm / Diffusion). Never Sensor/phantom_cloak; Access Permanently Closed
-    is deferred. See docs/door_rando_rdv_catalogue.md.
-    """
+    """Pool of lock types a randomized door may become."""
     display_name = "Change Doors To"
     valid_keys = sorted(DEFAULT_CHANGE_DOORS_TO)
     default = frozenset(DEFAULT_CHANGE_DOORS_TO)
 
 
 class TransportRando(Choice):
-    """
-    Shuffle elevator and shuttle destinations (two-way within type).
-    Teleporters stay vanilla. The Itorash capsule stays on its vanilla Hanubia
-    pairing so transport rando cannot open Raven Beak from a mid-game elevator.
-    Falls back to vanilla if a shuffle strands checks.
-    """
+    """Shuffle elevator and shuttle destinations (two-way within type)."""
     display_name = "Transport Randomizer"
     option_off = 0
     option_randomized = 1
@@ -401,22 +288,17 @@ class ShowEnemyDamage(Toggle):
 
 
 class ShowPlayerDamage(DefaultOnToggle):
-    """Show floating damage numbers when Samus takes damage (ODR config.ini
-    ``AIManager.bShowPlayerDamage``). Off = hidden, same as Randovania/ODR."""
+    """Show floating damage numbers when Samus takes damage (ODR config.ini"""
     display_name = "Show Player Damage"
 
 
 class ImmediateEnergyParts(DefaultOnToggle):
-    """When enabled, each Energy Part immediately raises max energy by 1/4 of
-    Energy Per Tank (ODR ``immediate_energy_parts`` / ``Init.bImmediateEnergyParts``).
-    When off, four parts are needed before energy increases (vanilla fragment
-    behavior). Matches Randovania's Immediate Energy Part setting."""
+    """When enabled, each Energy Part immediately raises max energy by 1/4 of"""
     display_name = "Immediate Energy Parts"
 
 
 class ConstantHeatDamage(Range):
-    """Constant heated-room damage per second (ODR ``constant_environment_damage.heat``).
-    0 = vanilla scaling damage. Randovania starter uses 20."""
+    """Constant heated-room damage per second (ODR ``constant_environment_damage.heat``)."""
     display_name = "Constant Heat Damage"
     range_start = 0
     range_end = 1000
@@ -424,8 +306,7 @@ class ConstantHeatDamage(Range):
 
 
 class ConstantColdDamage(Range):
-    """Constant cold-room damage per second (ODR ``constant_environment_damage.cold``).
-    0 = vanilla scaling damage. Randovania starter uses 20."""
+    """Constant cold-room damage per second (ODR ``constant_environment_damage.cold``)."""
     display_name = "Constant Cold Damage"
     range_start = 0
     range_end = 1000
@@ -433,8 +314,7 @@ class ConstantColdDamage(Range):
 
 
 class ConstantLavaDamage(Range):
-    """Constant lava damage per second (ODR ``constant_environment_damage.lava``).
-    0 = vanilla scaling damage. Randovania starter uses 20."""
+    """Constant lava damage per second (ODR ``constant_environment_damage.lava``)."""
     display_name = "Constant Lava Damage"
     range_start = 0
     range_end = 1000
@@ -467,10 +347,7 @@ class RavenBeakDamageTable(Choice):
 
 
 class NerfPowerBombs(Toggle):
-    """
-    Power Bomb Limitations (RDV / ODR): Power Bombs no longer open Charge Beam
-    doors or destroy Enkys. Generator logic follows the same restriction.
-    """
+    """Power Bomb Limitations (RDV / ODR): Power Bombs no longer open Charge Beam"""
     display_name = "Nerf Power Bombs"
 
 
@@ -479,6 +356,62 @@ class DisabledLights(OptionSet):
     display_name = "Disabled Lights"
     valid_keys = sorted(LIGHT_REGIONS)
     default = frozenset()
+
+
+class StationMapWarp(Toggle):
+    """Master switch for pause-map station warps (YAML ``station_map_warp``).
+
+    On the pause map, A still navigates the world map and places markers.
+    Y on a locked Save, Map, or Network station opens the warp prompt instead
+    of cycling icon highlights, and only while that map page is actually open
+    (Enabled and Visible). Y during gameplay does nothing. Y off a station
+    still highlights icons. Which stations Y can target is set by Pause Map
+    Warp Requirement and Pause Map Warp Reach. Off: the prompt is not in the
+    game. Existing yamls that only set this option keep warping; the new
+    options are not required.
+    """
+    display_name = "Pause Map Station Warp"
+    default = 0
+
+
+class StationWarpRequirement(Choice):
+    """Which locked stations Y may warp to when Pause Map Station Warp is on.
+
+    Visited (default, current behavior): only a Save, Map, or Network station
+    you have already used. An unused station shows "You haven't saved here
+    yet" and A closes that notice. It does not warp.
+    Visible: any station icon the pause-map cursor has locked, including one
+    you have not used, when the catalog has a spawn point for it. A confirms
+    that warp and B cancels. An unused station with no spawn still shows the
+    unused notice instead of loading a bad target.
+    Y only opens a prompt while the pause map is open. Ignored while Pause
+    Map Station Warp is off.
+    """
+    display_name = "Pause Map Warp Requirement"
+    option_visible = 0
+    option_visited = 1
+    default = 1
+
+
+class StationWarpReach(Choice):
+    """Which regions Y may warp to when Pause Map Station Warp is on.
+
+    The pause-map lock already follows the region named in the map header, and
+    that header can be a region other than the one Samus is standing in. A
+    warp loads the catalog station's own scenario and start point. That is
+    global, so the default stays global and existing seeds do not shrink to
+    the current region.
+    Local: only a station in the scenario you are currently in. A station in
+    another region is ignored even when the cursor distance matches it.
+    Global: any Save, Map, or Network station in the game, still limited by
+    Pause Map Warp Requirement.
+    Y only opens a prompt while the pause map is open. Ignored while Pause
+    Map Station Warp is off.
+    """
+    display_name = "Pause Map Warp Reach"
+    option_local = 0
+    option_global = 1
+    default = 1
 
 
 class XStartsReleased(Toggle):
@@ -531,13 +464,7 @@ class PowerBombTankAmmo(Range):
 
 
 class VanillaFlashShiftBehaviour(DefaultOnToggle):
-    """
-    When enabled, the pool contains a single **Flash Shift** item that grants the
-    full vanilla ability (Ghost Aura + 2 chain dashes), matching Randovania / ODR.
-
-    When disabled, Flash Shift uses the upgrade-based system controlled by
-    Flash Shift Upgrade Count and Require Main Item.
-    """
+    """When enabled, the pool contains a single **Flash Shift** item that grants the"""
     display_name = "Vanilla Flash Shift Behaviour"
 
 
@@ -550,18 +477,7 @@ class FlashShiftUpgradeAmount(Range):
 
 
 class FlashShiftUpgradeCount(Range):
-    """
-    Number of Flash Shift Upgrade pickups in the pool (1–5).
-
-    Only used when Vanilla Flash Shift Behaviour is off.
-    All N upgrades are always added to the item pool and displace Missile Tank
-    filler 1:1 (same padding bucket), so they are guaranteed placements — not
-    optional leftovers that can be dropped when the pool is full.
-    Classification is filler (chain ammo) like Missile Tanks; they do not consume
-    major progression capacity. When Require Main Item is also off, the first
-    upgrade is promoted to progression and also grants Upgrade Amount chains so
-    Flash Shift is usable immediately; later upgrades add chains only.
-    """
+    """Number of Flash Shift Upgrade pickups in the pool (1–5)."""
     display_name = "Flash Shift Upgrade Count"
     range_start = 1
     range_end = 5
@@ -576,10 +492,7 @@ class SpeedBoosterUpgradeCount(Range):
 
 
 class FlashShiftIncludedAmmo(Range):
-    """
-    Chain dashes bundled with the main Flash Shift item (vanilla is 2).
-    Used when Vanilla Flash Shift Behaviour is on, or when Require Main Item is on.
-    """
+    """Chain dashes bundled with the main Flash Shift item (vanilla is 2)."""
     display_name = "Flash Shift Included Ammo"
     range_start = 0
     range_end = 10
@@ -587,16 +500,7 @@ class FlashShiftIncludedAmmo(Range):
 
 
 class FlashShiftUpgradeRequiresMainItem(DefaultOnToggle):
-    """
-    Only used when Vanilla Flash Shift Behaviour is off.
-
-    **On:** Flash Shift Upgrades may be collected early and stack chains, but the
-    ability does not unlock until the main Flash Shift item is collected.
-
-    **Off:** the first Flash Shift Upgrade unlocks the ability (progressive major)
-    and grants Flash Shift Upgrade Amount chains so Flash Shift is immediately
-    usable; later upgrades add that many chains each.
-    """
+    """Only used when Vanilla Flash Shift Behaviour is off."""
     display_name = "Require Main Item"
 
 
@@ -645,49 +549,37 @@ class PowerBombTanks(Range):
 # ===== PROGRESSIVE ITEM OPTIONS =====
 
 class ProgressiveBeams(Toggle):
-    """
-    If enabled, individual beam upgrades (Wide, Plasma, Wave) are replaced with Progressive Beams.
-    """
+    """If enabled, individual beam upgrades (Wide, Plasma, Wave) are replaced with Progressive Beams."""
     display_name = "Progressive Beams"
     default = 1
 
 
 class ProgressiveCharge(Toggle):
-    """
-    If enabled, Charge Beam and Diffusion Beam are replaced with Progressive Charge Beam.
-    """
+    """If enabled, Charge Beam and Diffusion Beam are replaced with Progressive Charge Beam."""
     display_name = "Progressive Charge Beam"
     default = 1
 
 
 class ProgressiveMissiles(Toggle):
-    """
-    If enabled, Super Missile and Ice Missile are replaced with Progressive Missiles.
-    """
+    """If enabled, Super Missile and Ice Missile are replaced with Progressive Missiles."""
     display_name = "Progressive Missiles"
     default = 0
 
 
 class ProgressiveBombs(Toggle):
-    """
-    If enabled, Bomb and Cross Bomb are replaced with Progressive Bombs.
-    """
+    """If enabled, Bomb and Cross Bomb are replaced with Progressive Bombs."""
     display_name = "Progressive Bombs"
     default = 1
 
 
 class ProgressiveSuit(Toggle):
-    """
-    If enabled, Varia Suit and Gravity Suit are replaced with Progressive Suits.
-    """
+    """If enabled, Varia Suit and Gravity Suit are replaced with Progressive Suits."""
     display_name = "Progressive Suit"
     default = 1
 
 
 class ProgressiveSpin(Toggle):
-    """
-    If enabled, Spin Boost and Space Jump are replaced with Progressive Spins.
-    """
+    """If enabled, Spin Boost and Space Jump are replaced with Progressive Spins."""
     display_name = "Progressive Spin"
     default = 1
 
@@ -695,10 +587,7 @@ class ProgressiveSpin(Toggle):
 # ===== LOGIC OPTIONS =====
 
 def _build_starting_location_option():
-    """
-    Choice: default (Artaria Intro), random_save_station (any RDV-valid start),
-    or a specific Save/Map/Nav station / start point.
-    """
+    """Choice: default (Artaria Intro), random_save_station (any RDV-valid start),"""
     from .starting_locations import load_starting_locations
 
     starts = load_starting_locations()
@@ -730,21 +619,19 @@ StartingLocation = _build_starting_location_option()
 
 
 class EarlyMorphBall(Toggle):
-    """
-    If enabled, Morph Ball will be guaranteed early in the seed.
-    """
+    """If enabled, Morph Ball will be guaranteed early in the seed."""
     display_name = "Early Morph Ball"
     default = 0
 
 
-class StartingKitItems(Range):
-    """
-    Max progression items the generator may precollect as a Start Kit so the
-    chosen starting location has enough sphere-0 checks to fill.
+class DangerousLogic(Toggle):
+    """Off: a check is only in logic if it is reachable AND you can leave back toward the start (or otherwise escape). On: reachable is enough, even if the room softlocks you."""
+    display_name = "Dangerous Logic"
+    default = 0
 
-    0 (default) = never auto-grant Start Kit items. Raise this when using a
-    cramped random start (Morph / Bomb / etc. behind the spawn).
-    """
+
+class StartingKitItems(Range):
+    """Max progression items the generator may precollect as a Start Kit so the"""
     display_name = "Starting Items"
     range_start = 0
     range_end = 5
@@ -753,11 +640,8 @@ class StartingKitItems(Range):
 
 @dataclass
 class MetroidBreadOptions(PerGameCommonOptions):
-    """
-    Complete options for Metroid Bread with all tricks and glitches
-    """
+    """Complete options for Metroid Bread with all tricks and glitches"""
     # Victory implies 90% clearance (100% for one_hundred_percent; all bosses
-    # adds a boss-node gate on top of 90%).
     accessibility: MetroidBreadAccessibility
     start_inventory_from_pool: StartInventoryPool
     death_link: DeathLink
@@ -770,6 +654,7 @@ class MetroidBreadOptions(PerGameCommonOptions):
 
     # Door / transport
     door_lock_rando: DoorLockRando
+    randovania_door_rando: RandovaniaDoorRando
     doors_to_change: DoorsToChange
     change_doors_to: ChangeDoorsTo
     transport_rando: TransportRando
@@ -794,6 +679,9 @@ class MetroidBreadOptions(PerGameCommonOptions):
     nerf_power_bombs: NerfPowerBombs
     disabled_lights: DisabledLights
     x_starts_released: XStartsReleased
+    station_map_warp: StationMapWarp
+    warp_requirement: StationWarpRequirement
+    warp_reach: StationWarpReach
 
     # Item pool counts
     energy_tanks: EnergyTanks
@@ -828,6 +716,7 @@ class MetroidBreadOptions(PerGameCommonOptions):
     starting_location: StartingLocation
     starting_kit_items: StartingKitItems
     early_morph_ball: EarlyMorphBall
+    dangerous_logic: DangerousLogic
 
     # Trick/Glitch options
     knowledge_tricks: KnowledgeTricks
@@ -869,6 +758,7 @@ metroid_bread_option_groups = [
     ]),
     OptionGroup("Door & Transport Rando", [
         DoorLockRando,
+        RandovaniaDoorRando,
         DoorsToChange,
         ChangeDoorsTo,
         TransportRando,
@@ -888,6 +778,9 @@ metroid_bread_option_groups = [
         NerfPowerBombs,
         DisabledLights,
         XStartsReleased,
+        StationMapWarp,
+        StationWarpRequirement,
+        StationWarpReach,
     ]),
     OptionGroup("Starting Location", [
         StartingLocation,
@@ -926,6 +819,9 @@ metroid_bread_option_groups = [
         ProgressiveBombs,
         ProgressiveSuit,
         ProgressiveSpin,
+    ]),
+    OptionGroup("Logic", [
+        DangerousLogic,
     ]),
     OptionGroup("Basic Tricks", [
         KnowledgeTricks,

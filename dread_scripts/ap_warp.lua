@@ -1,18 +1,4 @@
 -- ApWarp: location-independent hotkey warps (not HK autosave / ProgressKeeper).
---
--- Must be bootstrapped at the END of scenario.lc so ODR Scenario.* methods exist.
--- Hotkey polling piggybacks on Scenario.CheckDebugInputs (ODR's proven input loop).
---
--- Hotkeys (INGAME, user interaction enabled):
---   Close pause/options while holding ZL → last checkpoint
---   Close pause/options while holding ZR → last Save / Network / Map station
---   ZL + DPAD_LEFT  → last checkpoint
---   ZR + DPAD_RIGHT → last Save / Network / Map station
---   ZL + ZR + DPAD_LEFT  → last checkpoint  (same style as suit-change debug)
---   ZL + ZR + DPAD_RIGHT → last Save / Network / Map station
---
--- Warp uses the same LoadScenario call as ODR warp-to-start.
--- Combos are edge-triggered (release and press again) — no sticky cooldown.
 
 ApWarp = ApWarp or {
   enabled = true,
@@ -32,9 +18,6 @@ ApWarp.seen_start = ApWarp.seen_start or nil
 ApWarp.seen_scenario = ApWarp.seen_scenario or nil
 
 -- Charclass of the weight plate the engine actually respawns Samus on. The
--- savestation/accesspoint/maproom actors the player interacts with are usables,
--- not spawn points, and LoadScenario silently falls back to the scenario's
--- default start when handed one.
 local SAVE_PLATFORM_CHARCLASSES = {
   weightactivatedplatform_save = true,
   weightactivatedplatform_access = true, -- Network Station plate
@@ -42,7 +25,6 @@ local SAVE_PLATFORM_CHARCLASSES = {
 }
 
 -- Usables that update the ZR+DPAD_RIGHT ("last save") warp target. Matches
--- ODR Scenario.IsSaveStation: Save, Network (Adam), and Map stations.
 local SAVE_USABLE_CHARCLASSES = {
   savestation = true,
   accesspoint = true,
@@ -84,8 +66,6 @@ local function charclass_of(name, tbl)
 end
 
 -- GetEntities only covers the loaded scenario, so spawns recorded in another
--- area need a name test. Save / Network / Map plates embed identifiable tokens
--- (savestation_000_platform, accesspoint_000_platform, maproom_platform, …).
 local function name_looks_like_save(name)
   local low = string.lower(name)
   return string.find(low, "savestation", 1, true) ~= nil
@@ -105,8 +85,6 @@ local function is_save_spawn(name)
 end
 
 -- Map a Save / Network / Map station usable to the plate the engine spawns on.
--- Suffixes are inconsistent (_platform vs _WeightPlate), so prefer the
--- SMARTOBJECT backlink and fall back to a name prefix.
 local function resolve_save_platform(usable_name)
   local tbl = entities()
   if not tbl then
@@ -175,10 +153,7 @@ function ApWarp.NoteCheckpoint(scenario, start_point)
   capture_spawn("checkpoint", scenario, start_point)
 end
 
---- Track the engine's own respawn point. Whatever sits in the player
---- blackboard is by definition a spawn actor LoadScenario accepts, so this is
---- both the most reliable save signal and the only warp target guaranteed to
---- put Samus where she expects to be.
+-- - Track the engine's own respawn point. Whatever sits in the player
 function ApWarp.SyncFromBlackboard()
   local ps = Game.GetPlayerBlackboardSectionName and Game.GetPlayerBlackboardSectionName()
   if not ps then return end
@@ -362,8 +337,6 @@ function ApWarp.Install()
         pcall(ApWarp.NoteSaveStation, actor)
       end
       -- ODR sends the player to the seed's starting location on plain ZL+ZR.
-      -- Our combos are ZL+ZR plus a d-pad direction, so let those through to
-      -- ApWarp.Tick instead of racing two LoadScenario calls.
       if inputs("DPAD_LEFT") or inputs("DPAD_RIGHT") then
         return
       end

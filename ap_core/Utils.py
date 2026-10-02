@@ -131,10 +131,7 @@ def is_frozen() -> bool:
 
 
 def local_path(*path: str) -> str:
-    """
-    Returns path to a file in the local Archipelago installation or source.
-    This might be read-only and user_path should be used instead for ROMs, configuration, etc.
-    """
+    """Returns path to a file in the local Archipelago installation or source."""
     if hasattr(local_path, 'cached_path'):
         pass
     elif is_frozen():
@@ -473,7 +470,6 @@ class RestrictedUnpickler(pickle.Unpickler):
         if module == "builtins" and name in safe_builtins:
             return getattr(builtins, name)
         # used by OptionCounter
-        # necessary because the actual Options class instances are pickled when transfered to WebHost generation pool
         if module == "collections" and name == "Counter":
             return collections.Counter
         # used by MultiServer -> savegame/multidata
@@ -517,10 +513,7 @@ def restricted_dumps(obj: Any) -> bytes:
 
 
 class ByValue:
-    """
-    Mixin for enums to pickle value instead of name (restores pre-3.11 behavior). Use as left-most parent.
-    See https://github.com/python/cpython/pull/26658 for why this exists.
-    """
+    """Mixin for enums to pickle value instead of name (restores pre-3.11 behavior). Use as left-most pa..."""
     def __reduce_ex__(self, prot):
         return self.__class__, (self._value_, )
 
@@ -736,15 +729,7 @@ def get_intended_text(input_text: str, possible_answers) -> typing.Tuple[str, bo
 
 
 def get_input_text_from_response(text: str, command: str) -> typing.Optional[str]:
-    """
-    Parses the response text from `get_intended_text` to find the suggested input and autocomplete the command in
-    arguments with it.
-
-    :param text: The response text from `get_intended_text`.
-    :param command: The command to which the input text should be added. Must contain the prefix used by the command
-                    (`!` or `/`).
-    :return: The command with the suggested input text appended, or None if no suggestion was found.
-    """
+    """Parses the response text from `get_intended_text` to find the suggested input and autocomplete th..."""
     if "did you mean " in text:
         for question in ("Didn't find something that closely matches",
                          "Too many close matches"):
@@ -811,7 +796,6 @@ def open_filename(title: str, filetypes: typing.Iterable[typing.Tuple[str, typin
     else:
         if is_macos and is_kivy_running():
             # on macOS, mixing kivy and tk does not work, so spawn a new process
-            # FIXME: performance of this is pretty bad, and we should (also) look into alternatives
             from multiprocessing import Process, Queue
             res: "Queue[typing.Optional[str]]" = Queue()
             Process(target=_mp_open_filename, args=(res, title, filetypes, suggest)).start()
@@ -856,7 +840,6 @@ def save_filename(title: str, filetypes: typing.Iterable[typing.Tuple[str, typin
     else:
         if is_macos and is_kivy_running():
             # on macOS, mixing kivy and tk does not work, so spawn a new process
-            # FIXME: performance of this is pretty bad, and we should (also) look into alternatives
             from multiprocessing import Process, Queue
             res: "Queue[typing.Optional[str]]" = Queue()
             Process(target=_mp_save_filename, args=(res, title, filetypes, suggest)).start()
@@ -901,7 +884,6 @@ def open_directory(title: str, suggest: str = "") -> typing.Optional[str]:
     else:
         if is_macos and is_kivy_running():
             # on macOS, mixing kivy and tk does not work, so spawn a new process
-            # FIXME: performance of this is pretty bad, and we should (also) look into alternatives
             from multiprocessing import Process, Queue
             res: "Queue[typing.Optional[str]]" = Queue()
             Process(target=_mp_open_directory, args=(res, title, suggest)).start()
@@ -976,17 +958,8 @@ _faf_tasks: "Set[asyncio.Task[typing.Any]]" = set()
 
 
 def async_start(co: Coroutine[None, None, typing.Any], name: Optional[str] = None) -> None:
-    """
-    Use this to start a task when you don't keep a reference to it or immediately await it,
-    to prevent early garbage collection. "fire-and-forget"
-    """
+    """Use this to start a task when you don't keep a reference to it or immediately await it,"""
     # https://docs.python.org/3.11/library/asyncio-task.html#asyncio.create_task
-    # Python docs:
-    # ```
-    # Important: Save a reference to the result of [asyncio.create_task],
-    # to avoid a task disappearing mid-execution.
-    # ```
-    # This implementation follows the pattern given in that documentation.
 
     task: asyncio.Task[typing.Any] = asyncio.create_task(co, name=name)
     _faf_tasks.add(task)
@@ -1019,7 +992,6 @@ class DeprecateDict(dict):
 def _extend_freeze_support() -> None:
     """Extend multiprocessing.freeze_support() to also work on Non-Windows and without setting spawn method first."""
     # original upstream issue: https://github.com/python/cpython/issues/76327
-    # code based on https://github.com/pyinstaller/pyinstaller/blob/develop/PyInstaller/hooks/rthooks/pyi_rth_multiprocessing.py#L26
     import multiprocessing
     import multiprocessing.spawn
 
@@ -1072,35 +1044,7 @@ _extend_freeze_support()
 def visualize_regions(root_region: Region, file_name: str, *,
                       show_entrance_names: bool = False, show_locations: bool = True, show_other_regions: bool = True,
                       linetype_ortho: bool = True, regions_to_highlight: set[Region] | None = None) -> None:
-    """Visualize the layout of a world as a PlantUML diagram.
-
-    :param root_region: The region from which to start the diagram from. (Usually the "Menu" region of your world.)
-    :param file_name: The name of the destination .puml file.
-    :param show_entrance_names: (default False) If enabled, the name of the entrance will be shown near each connection.
-    :param show_locations: (default True) If enabled, the locations will be listed inside each region.
-            Priority locations will be shown in bold.
-            Excluded locations will be stricken out.
-            Locations without ID will be shown in italics.
-            Locked locations will be shown with a padlock icon.
-            For filled locations, the item name will be shown after the location name.
-            Progression items will be shown in bold.
-            Items without ID will be shown in italics.
-    :param show_other_regions: (default True) If enabled, regions that can't be reached by traversing exits are shown.
-    :param linetype_ortho: (default True) If enabled, orthogonal straight line parts will be used; otherwise polylines.
-    :param regions_to_highlight: Regions that will be highlighted in green if they are reachable.
-
-    Example usage in World code:
-    from Utils import visualize_regions
-    state = self.multiworld.get_all_state(False)
-    state.update_reachable_regions(self.player)
-    visualize_regions(self.get_region("Menu"), "my_world.puml", show_entrance_names=True,
-                      regions_to_highlight=state.reachable_regions[self.player])
-
-    Example usage in Main code:
-    from Utils import visualize_regions
-    for player in multiworld.player_ids:
-        visualize_regions(multiworld.get_region("Menu", player), f"{multiworld.get_out_file_name_base(player)}.puml")
-    """
+    """Visualize the layout of a world as a PlantUML diagram."""
     if regions_to_highlight is None:
         regions_to_highlight = set()
     assert root_region.multiworld, "The multiworld attribute of root_region has to be filled"
@@ -1207,10 +1151,7 @@ def is_iterable_except_str(obj: object) -> TypeGuard[typing.Iterable[typing.Any]
 
 
 class DaemonThreadPoolExecutor(concurrent.futures.ThreadPoolExecutor):
-    """
-    ThreadPoolExecutor that uses daemonic threads that do not keep the program alive.
-    NOTE: use this with caution because killed threads will not properly clean up.
-    """
+    """ThreadPoolExecutor that uses daemonic threads that do not keep the program alive."""
 
     def _adjust_thread_count(self):
         # see upstream ThreadPoolExecutor for details
@@ -1252,20 +1193,7 @@ def get_full_typename(t: type) -> str:
 
 
 def get_all_causes(ex: Exception) -> str:
-    """Return a string describing the recursive causes of this exception.
-
-    :param ex: The exception to be described.
-    :return A multiline string starting with the initial exception on the first line and each resulting exception
-            on subsequent lines with progressive indentation.
-
-            For example:
-
-            ```
-            Exception: Invalid value 'bad'.
-             Which caused: Options.OptionError: Error generating option
-              Which caused: ValueError: File bad.yaml is invalid.
-            ```
-    """
+    """Return a string describing the recursive causes of this exception."""
     cause = ex
     causes = [f"{get_full_typename(type(ex))}: {ex}"]
     while cause := cause.__cause__:

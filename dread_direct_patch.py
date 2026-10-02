@@ -1,87 +1,5 @@
 #!/usr/bin/env python3
-"""
-Archipelago Metroid Bread — Direct Patcher (bypasses Randovania Export UI)
-
-## How Randovania does it
-1. Load .rdvgame → LayoutDescription (presets + game_modifications)
-2. DreadPatchDataFactory.create_game_specific_data()
-   builds a patcher.json-shaped dict (pickups, starting_*, enable_remote_lua, …)
-3. DreadGameExporter._do_export_game()
-   → open_dread_rando.patch_with_status_update(base_rom, ryujinx_mod, patch_data)
-
-## How we do it
-1. Parse Archipelago spoiler (our placements + foreign item names)
-2. Build the same patcher.json via ap_to_patcher.create_patcher_json()
-   (always enable_remote_lua=true for TCP :6969)
-3. Call open_dread_rando the same way Randovania does
-4. Copy patcher.json + map_icon_keys.json + randomizer_powerup.lua + reachable
-   minimap data into the mod
-5. finalize_mod() brands credits.txt (Metroid Bread + Archipelago Implementation /
-   Dummydude before Major Item Locations), strips leftover HK autosave bootstrap,
-   installs ApWarp hotkeys + Elun arrival-gate restore, hardcodes ODR death-counter
-   DNA-slot HUD coords (Ryujinx-safe), then ships reachable-map data into RomFS
-6. Save-file dim reveal is OFF by default (reveal_minimap_save: false).
-   Bright paint uses VisitBoundsSafe in-game; the offline tool remains under tools/.
-7. map_icon_keys.json maps pickup_index / location_id / actor → MAP_ICON_ItemCustom{n}
-   (ODR assignment order) for Phase 2 collected labels.
-
-No Randovania GUI / game-session export required.
-
-ApWarp hotkeys (location-independent warps)
--------------------------------------------
-  finalize_mod() installs dread_scripts/ap_warp.lua (TOC + system.pkg) and patches
-  system/scripts/scenario.lc to DoFile + ApWarp.Install(). Tracks last Save /
-  Network / Map station (ODR IsSaveStation set) vs last scripted checkpoint.
-  Close pause/options while holding ZL → last checkpoint; hold ZR → last station.
-  Fallback: ZL+DPAD_LEFT / ZR+DPAD_RIGHT.
-
-  Any prior -- AP_HK_AUTOSAVE / ProgressKeeper bootstrap is stripped on every patch
-  (that path was wiping inventory on load).
-
-Loading tips on Continue / New Game
------------------------------------
-  finalize_mod() installs dread_scripts/ap_loading_tips.lua (TOC + system.pkg) and
-  patches system/scripts/init.lc to DoFile + ApLoadingTips.Install(). With OdrTip
-  subsdk9, Install wraps LoadGame / OnLoadScenarioRequest / StartPrologue /
-  LoadProfile to call Game.SetForcedTooltip only (no ShowLoadingScreen thrash).
-  SetLoadingMode trampoline re-applies LOADING+0x68.
-
-  Experiment (default ON): ap_to_patcher + finalize_mod also rewrite BTXT for the
-  AP context-4 carousel (TIP_000–TIP_004) via ODR text_patches / live romfs
-  when OdrTip forces context class 4. Titles become "AP POOL4 0"…"AP POOL4 4".
-  Disable with METROID_BREAD_CAROUSEL_TIP_PATCHES=0 then re-patch (or re-run finalize).
-
-Reachable minimap (AP logic → bright map)
------------------------------------------
-  finalize_mod() installs bounds-only reachable_map_cells.lua the ODR way:
-    → romfs/system/scripts/ap_reachable_map_cells.{lua,lc}
-    → TOC + packs/system/system.pkg (+ replacements.json)
-  Loose romfs copy alone is NOT enough — Game.DoFile resolves via TOC/.lc
-  like death_counter.lua. Bootstrap DoFile loads bounds; client pushes
-  RL.ApplyReachableMap. Real full-room paint uses exlaunch
-  OdrMap.VisitBoundsSafe (legacy VisitBounds stays crash-guarded; see
-  docs/odrmap_exlaunch_binder.md). enable_remote_lua stays true.
-  Dim force-save / RevealDimLayout are disabled; bright = VisitBoundsSafe
-  + optional fillmaps + physical walk OR.
-
-  Acceptance (manual):
-  1. Start + AP-reachable bright via VisitBoundsSafe (current scenario)
-  2. Item receive opens areas → brighten without walking
-  3. Reload → recompute from current inventory
-  4. Walk into unreachable → brightens (physical OR; no revert)
-  5. HUD matches pause map (same visit bits)
-  6. /map_smoke and /map_smoke_bounds for bright smoke tests
-  7. /map_icon_smoke [actor] for ForceEntityIconVisible (map icon pop-out)
-  8. /map_unlock_region [scenario] probes AreaBox world-map unlock (OdrMap.UnlockWorldRegion)
-  9. Collect item → map inspector shows "{Item} (Collected)"; die/reload restores labels
-
-Usage
------
-  py -3.11 dread_direct_patch.py --spoiler path\\to\\*_Spoiler.txt --player DreadPlayer
-  py -3.11 dread_direct_patch.py --seed-folder output\\AP_... --player DreadPlayer
-
-Config (optional): dread_direct_patch_config.json next to this script.
-"""
+"""Archipelago Metroid Bread — Direct Patcher (bypasses Randovania Export UI)"""
 
 from __future__ import annotations
 
@@ -111,18 +29,9 @@ DEFAULT_RYUJINX_MOD = Path(
     os.path.expandvars(rf"%APPDATA%\Ryujinx\mods\contents\{DREAD_TITLE_ID}")
 )
 # Atmosphere output root is the CFW folder (usually <SD>/atmosphere). ODR nests
-# contents/<titleid>/ and exefs_patches/ under it — never wipe the whole tree.
 DEFAULT_ATMOSPHERE_ROOT = Path("")
 DEFAULT_BASE_ROM = Path(r"C:\Users\dummy\Downloads\md rando")
 # This is the exlaunch project's Makefile `OUT` directory (see OUT in
-# open-dread-rando-exlaunch/Makefile) -- i.e. every `./exlaunch.sh build`
-# (misc/scripts/post-build.sh) writes the freshly built subsdk9 + main.npdm
-# directly here. Because that build output folder IS this patcher's
-# custom_exlaunch_deploy source, a new exlaunch build/deploy is picked up on
-# the very next direct-patch run with no separate "install into the patcher"
-# copy step. Keep this in sync with dread_direct_patch_config.json's
-# "custom_exlaunch_deploy" key; verify with
-# open-dread-rando-exlaunch/tools/_verify_patcher_sync.sh.
 DEFAULT_CUSTOM_EXLAUNCH_DEPLOY = Path(
     r"C:\Users\dummy\Downloads\open-dread-rando-exlaunch"
     r"\src\open_dread_rando_exlaunch\deploy"
@@ -152,7 +61,6 @@ def load_config() -> Dict[str, Any]:
         "clean_output": False,
         "freesink": False,
         # Prefer world-relative deploy (apworld / Hub runtime). Absolute local
-        # exlaunch OUT remains a last-resort candidate in resolve_custom_exlaunch_deploy.
         "custom_exlaunch_deploy": str(dread_paths.BUNDLED_EXLAUNCH_DEPLOY).replace("\\", "/"),
         # Offline samus.bmssv dim reveal — OFF (bright path is VisitBoundsSafe in-game).
         "reveal_minimap_save": False,
@@ -185,13 +93,7 @@ def normalize_mod_compatibility(value: Optional[str]) -> str:
 
 
 def mod_layout_paths(output: Path, compatibility: str) -> Dict[str, Path]:
-    """
-    Resolve romfs / exefs / IPS dirs the same way open-dread-rando does.
-
-    Ryujinx:  <output>/DreadRandovania/{romfs,exefs}
-    Atmosphere: <output>/contents/<tid>/{romfs,exefs}
-                <output>/exefs_patches/DreadRandovania/*.ips
-    """
+    """Resolve romfs / exefs / IPS dirs the same way open-dread-rando does."""
     compat = normalize_mod_compatibility(compatibility)
     if compat == "atmosphere":
         mod_root = output / "contents" / DREAD_TITLE_ID
@@ -213,11 +115,7 @@ def mod_layout_paths(output: Path, compatibility: str) -> Dict[str, Path]:
 
 
 def clean_mod_output(output: Path, compatibility: str) -> None:
-    """
-    Remove previous Metroid Bread / Randovania mod files only.
-
-    Never rmtree an Atmosphere CFW root — that would wipe unrelated mods.
-    """
+    """Remove previous Metroid Bread / Randovania mod files only."""
     compat = normalize_mod_compatibility(compatibility)
     if compat == "atmosphere":
         targets = [
@@ -268,13 +166,7 @@ def _load_reveal_minimap_save_module():
 
 
 def maybe_reveal_minimap_save(*, enabled: bool = False) -> None:
-    """
-    Optionally reveal minimap fog in the newest Ryujinx profile save.
-
-    Default OFF — reachable bright paint uses VisitBoundsSafe in-game.
-    Non-fatal when enabled: missing save, locked file, Ryujinx running, or
-    tool errors only log [WARN] and never fail the patch.
-    """
+    """Optionally reveal minimap fog in the newest Ryujinx profile save."""
     if not enabled:
         log("[INFO] reveal_minimap_save disabled — skipping save fog reveal")
         return
@@ -286,7 +178,6 @@ def maybe_reveal_minimap_save(*, enabled: bool = False) -> None:
             keep_visited=True,
             fill_gaps=True,
             # Engine-max rows on scenarios already in the save only.
-            # create_missing/section cloning is unsafe (crashes load).
             full_rows=mod.DEFAULT_FULL_ROWS,  # 0:299
             scenarios=None,
             create_missing=False,
@@ -332,19 +223,7 @@ def resolve_custom_exlaunch_deploy(cfg: Optional[Dict[str, Any]] = None) -> Opti
 
 
 def install_custom_exlaunch(exefs: Path, deploy: Optional[Path]) -> None:
-    """
-    Re-install custom OdrMap exlaunch over stock ODR exefs after patching.
-
-    open-dread-rando always writes its stock subsdk9; without this step the
-    custom VisitBounds / OdrMap binders are lost. Missing deploy is non-fatal
-    (stock remote lua still works).
-
-    Uses shutil.copy2 so the destination Explorer/mtime matches the *source*
-    binary's build time (not "now"). A week-old date after a successful patch
-    usually means the bundled/custom source itself is that old — check the
-    [OK] log line (source path + size), not the file date alone.
-    Stock open-dread-rando subsdk9 is ~191054 bytes; custom OdrMap is larger.
-    """
+    """Re-install custom OdrMap exlaunch over stock ODR exefs after patching."""
     if deploy is None:
         log(
             "[WARN] custom OdrMap exlaunch deploy not found — keeping stock ODR "
@@ -483,10 +362,7 @@ def ensure_remote_lua(
 
 
 def apply_freesink(patcher_data: dict, enabled: bool) -> None:
-    """
-    Randovania freesink → cosmetic_patches.config.SubAreaManager.bKillPlayerOutsideScenario.
-    When freesink is ON, out-of-bounds kills are disabled (bKillPlayerOutsideScenario=false).
-    """
+    """Randovania freesink → cosmetic_patches.config.SubAreaManager.bKillPlayerOutsideScenario."""
     cosmetic = patcher_data.setdefault("cosmetic_patches", {})
     if not isinstance(cosmetic, dict):
         cosmetic = {}
@@ -507,12 +383,7 @@ def apply_freesink(patcher_data: dict, enabled: bool) -> None:
 
 
 def _format_odr_validation_error(err: str, *, head: int = 1800, tail: int = 500) -> str:
-    """Keep the jsonschema *message* visible when the dump is enormous.
-
-    Root ``additionalProperties`` failures embed the entire schema + instance
-    (hundreds of KB). Truncating with ``err[-2000:]`` only showed door_patches
-    tails and hid the real reason (e.g. unexpected ``has_flash_upgrades``).
-    """
+    """Keep the jsonschema *message* visible when the dump is enormous."""
     err = (err or "").strip()
     if not err:
         return "(no error output)"
@@ -545,13 +416,7 @@ def _summarize_jsonschema_error(exc: BaseException) -> str:
 
 
 def validate_patcher_json(patcher_data: dict) -> None:
-    """Fail fast with a clear error if open-dread-rando would reject the JSON.
-
-    Validates against ``files/schema.json`` only — do **not** import
-    ``open_dread_rando.dread_patcher`` here. That module pulls cosmetic →
-    misc_patches; a broken/partial pip install then fails with
-    ``ModuleNotFoundError: misc_patches`` even though the JSON is fine.
-    """
+    """Fail fast with a clear error if open-dread-rando would reject the JSON."""
     schema = None
     try:
         import open_dread_rando
@@ -600,12 +465,7 @@ def _broken_odr_install_message(exc: BaseException) -> str:
 
 
 def verify_elevator_brflds(romfs: Path, patcher_json: Path) -> None:
-    """Fail the patch if written brfld transporter targets ≠ patcher.json.
-
-    A prior shipyard wagontrain crash was chased while the live mod's brflds
-    came from a *different* seed than patcher.json (re-patch overwrite). This
-    check makes that desync a hard error instead of a silent in-game null deref.
-    """
+    """Fail the patch if written brfld transporter targets ≠ patcher.json."""
     with open(patcher_json, encoding="utf-8") as f:
         data = json.load(f)
     elevators = data.get("elevators") or []
@@ -711,12 +571,7 @@ def run_open_dread_rando(
 
 
 def _register_system_script_asset(romfs: Path, stem: str, data: bytes) -> None:
-    """
-    Register a system/scripts/<stem>.{lua,lc} so Game.DoFile('….lua') works.
-
-    ODR stores custom system scripts as .lc inside packs/system/system.pkg and TOC.
-    A loose romfs copy alone is invisible to the engine / depackager.
-    """
+    """Register a system/scripts/<stem>.{lua,lc} so Game.DoFile('….lua') works."""
     from mercury_engine_data_structures.formats.pkg import Pkg
     from mercury_engine_data_structures.formats.toc import Toc
     from mercury_engine_data_structures.game_check import Game
@@ -808,14 +663,7 @@ def install_map_unlock_region_script(romfs: Path) -> None:
 
 
 def install_ap_map_icon_atlas(romfs: Path) -> None:
-    """Overwrite ODR's minimap icons.bctex with the AP-stamped atlas.
-
-    ODR already replaces textures/system/minimap/icons/icons.bctex via
-    add_custom_files; we drop our stamped copy on the same loose-romfs path
-    (and replacements.json entry) so:
-      - foreign / unknown reveals use the Archipelago cluster cell
-      - in-logic uncollected checks can use the green '?' cell at runtime
-    """
+    """Overwrite ODR's minimap icons.bctex with the AP-stamped atlas."""
     src = ROOT / "assets" / "icons.bctex"
     if not src.is_file():
         log(
@@ -919,9 +767,6 @@ _AP_ELUN_ARRIVAL_GATE_BLOCK_RE = re.compile(
 )
 
 # ODR ≥2.19 death-only HUD: move DeathCounter into the DNA row of ExtraInfoPanel.
-# Stock ODR reads DNA_Icon/DNA_Label via _Y_GetterFunction / _CenterY_GetterFunction;
-# on Ryujinx those getters often return junk/0 and park the label off-slot (below the
-# short background). Hardcode the coords from ODR's randohudcomposition.bmscp.
 _ODR_DEATH_COUNTER_REPOSITION_RE = re.compile(
     r"(?P<indent>[ \t]*)if not showDnaInHud then\n"
     r"[ \t]*-- Need to move the death counter icon and label up to where the DNA would normally be shown\n"
@@ -997,12 +842,7 @@ def _write_scenario_lc(romfs: Path, data: bytes, pkg) -> None:
 
 
 def strip_hk_autosave_from_scenario(romfs: Path) -> None:
-    """
-    Remove ProgressKeeper / HkAutosave bootstrap from scenario.lc.
-
-    That path reinjected ProgressStore on load and could wipe inventory.
-    Safe no-op when TOC/pkg or the marker is absent.
-    """
+    """Remove ProgressKeeper / HkAutosave bootstrap from scenario.lc."""
     if not (romfs / "packs" / "system" / "system.pkg").is_file():
         log("[WARN] strip HK autosave skipped — no system.pkg yet")
         return
@@ -1057,13 +897,7 @@ def _ap_death_counter_reposition_block(indent: str) -> str:
 
 
 def fix_death_counter_hud_position(romfs: Path) -> None:
-    """
-    Make ODR ≥2.19 death-only HUD match DNA-slot placement without runtime getters.
-
-    ExtraInfoPanel sits at (X=0.025, Y≈0.2019) on iconshudcomposition — same band as
-    legacy GUILib death_counter (Y=0.1975). DeathCounter_* defaults are the dual-row
-    lower slot; when DNA HUD is off, ODR moves them to DNA_Icon/DNA_Label coords.
-    """
+    """Make ODR ≥2.19 death-only HUD match DNA-slot placement without runtime getters."""
     try:
         existing, pkg = _read_scenario_lc(romfs)
     except PatchError as exc:
@@ -1133,13 +967,7 @@ def _patch_scenario_for_ap_elun_arrival_gate(romfs: Path) -> None:
 
 
 def _patch_scenario_for_ap_warp(romfs: Path) -> None:
-    """
-    Install ApWarp bootstrap at the END of scenario.lc.
-
-    Mid-file install (e.g. after death_counter) runs before ODR defines
-    CheckDebugInputs / CheckWarpToStart, so hooks never attach. Always strip any
-    prior -- AP_WARP block and re-append at EOF.
-    """
+    """Install ApWarp bootstrap at the END of scenario.lc."""
     existing, pkg = _read_scenario_lc(romfs)
     text = existing.decode("utf-8", errors="replace")
     if AP_WARP_MARKER in text:
@@ -1229,12 +1057,7 @@ def install_ap_loading_tips_scripts(romfs: Path) -> None:
 
 
 def _patch_init_for_ap_loading_tips(romfs: Path) -> None:
-    """
-    Append ApLoadingTips bootstrap at EOF of init.lc (idempotent).
-
-    Must run early (init), not scenario.lc alone — Continue/New Game show the loading
-    screen before Scenario bootstrap would run. scenario.lc also gets a backup Install.
-    """
+    """Append ApLoadingTips bootstrap at EOF of init.lc (idempotent)."""
     existing, pkg = _read_init_lc(romfs)
     text = existing.decode("utf-8", errors="replace")
     if AP_LOADING_TIPS_MARKER in text:
@@ -1261,13 +1084,7 @@ def _escape_lua_string(value: str) -> str:
 
 
 def install_ap_seed_id_bootstrap(romfs: Path, ap_seed_id: str | None) -> None:
-    """
-    Bake Init.sApSeedId into init.lc so the Hub client can compare RoomInfo.seed_name
-    against the patched RomFS (wrong-folder / stale mod guard).
-
-    Idempotent: replaces any prior -- AP_SEED_ID block. Empty/missing seed clears the
-    prior bootstrap so old values cannot linger across re-patches.
-    """
+    """Bake Init.sApSeedId into init.lc so the Hub client can compare RoomInfo.seed_name"""
     seed = (ap_seed_id or "").strip()
     existing, pkg = _read_init_lc(romfs)
     text = existing.decode("utf-8", errors="replace")
@@ -1287,6 +1104,325 @@ def install_ap_seed_id_bootstrap(romfs: Path, ap_seed_id: str | None) -> None:
     data = text.encode("utf-8")
     _write_init_lc(romfs, data, pkg)
     log(f"[OK] baked Init.sApSeedId={seed!r} into init.lc ({len(data)} bytes)")
+
+
+_STATION_WARP_LOCALES = (
+    "eu_dutch.txt",
+    "eu_french.txt",
+    "eu_german.txt",
+    "eu_italian.txt",
+    "eu_spanish.txt",
+    "japanese.txt",
+    "korean.txt",
+    "russian.txt",
+    "simplified_chinese.txt",
+    "traditional_chinese.txt",
+    "us_english.txt",
+    "us_french.txt",
+    "us_spanish.txt",
+)
+STATION_WARP_MSG_KEY = "GUI_AP_STATION_WARP"
+STATION_WARP_MSG_TEXT = "Warp to this station?"
+# U+1800 is the A-button logo used by GUI_GENERAL_LABEL_ACCEPT.
+STATION_WARP_OK_KEY = "GUI_AP_STATION_OK"
+STATION_WARP_OK_TEXT = "\u1800 OK"
+_AP_STATION_WARP_MARKER = "-- AP_STATION_WARP"
+_AP_STATION_WARP_END = "-- AP_STATION_WARP_END"
+_AP_STATION_WARP_FLAG_MARKER = "-- AP_STATION_WARP_FLAG"
+_AP_STATION_WARP_FLAG_END = "-- AP_STATION_WARP_FLAG_END"
+_AP_STATION_WARP_BOOTSTRAP = """
+-- AP_STATION_WARP
+-- Pause-map warp. Loaded only when Init.bStationMapWarp is true.
+if Init and Init.bStationMapWarp == true then
+  Game.DoFile("system/scripts/ap_station_warp.lua")
+  if ApStationWarp and ApStationWarp.Install then
+    ApStationWarp.Install()
+  end
+end
+-- AP_STATION_WARP_END
+""".lstrip()
+
+
+def _normalize_station_warp_mode(requirement: str, reach: str) -> tuple[str, str]:
+    """Clamp baked modes to the strings ap_station_warp.lua reads."""
+    req = str(requirement or "visited").strip().lower()
+    rch = str(reach or "global").strip().lower()
+    if req not in ("visible", "visited"):
+        req = "visited"
+    if rch not in ("local", "global"):
+        rch = "global"
+    return req, rch
+
+
+def _station_warp_flag_bootstrap(requirement: str, reach: str) -> str:
+    """Init flags the warp script reads. Written only when the warp is enabled."""
+    req, rch = _normalize_station_warp_mode(requirement, reach)
+    return (
+        "-- AP_STATION_WARP_FLAG\n"
+        "Init.bStationMapWarp = true\n"
+        f'Init.sStationWarpRequirement = "{_escape_lua_string(req)}"\n'
+        f'Init.sStationWarpReach = "{_escape_lua_string(rch)}"\n'
+        "-- AP_STATION_WARP_FLAG_END\n"
+    )
+
+
+def _strip_inclusive_markers(text: str, start: str, end: str) -> str:
+    """Drop every start..end block, including the marker lines."""
+    while True:
+        i = text.find(start)
+        if i < 0:
+            return text
+        j = text.find(end, i + len(start))
+        if j < 0:
+            return text[:i].rstrip() + "\n"
+        j2 = j + len(end)
+        if j2 < len(text) and text[j2] == "\n":
+            j2 += 1
+        text = text[:i] + text[j2:]
+
+
+def _write_station_warp_localization(romfs: Path) -> int:
+    """Add the confirm-dialogue string. LaunchMessage looks this key up in the bank."""
+    try:
+        from mercury_engine_data_structures.formats.txt import Txt
+        from mercury_engine_data_structures.game_check import Game
+    except ImportError as exc:
+        log(f"[WARN] station warp text skipped (mercury missing): {exc}")
+        return 0
+
+    loc_dir = romfs / "system" / "localization"
+    if not loc_dir.is_dir():
+        log(f"[WARN] station warp text skipped; missing {loc_dir}")
+        return 0
+
+    writes = 0
+    for name in _STATION_WARP_LOCALES:
+        path = loc_dir / name
+        if not path.is_file():
+            continue
+        try:
+            txt = Txt.parse(path.read_bytes(), target_game=Game.DREAD)
+        except Exception as exc:
+            log(f"[WARN] station warp text skipped {name}: {exc}")
+            continue
+        changed = False
+        if txt.strings.get(STATION_WARP_MSG_KEY) != STATION_WARP_MSG_TEXT:
+            txt.strings[STATION_WARP_MSG_KEY] = STATION_WARP_MSG_TEXT
+            changed = True
+        if txt.strings.get(STATION_WARP_OK_KEY) != STATION_WARP_OK_TEXT:
+            txt.strings[STATION_WARP_OK_KEY] = STATION_WARP_OK_TEXT
+            changed = True
+        if not changed:
+            continue
+        path.write_bytes(txt.build())
+        writes += 1
+    log(f"[OK] station warp dialogue string written to {writes} localization file(s)")
+    return writes
+
+
+def install_station_map_warp(
+    romfs: Path,
+    enabled: bool,
+    requirement: str = "visited",
+    reach: str = "global",
+) -> None:
+    """Install pause-map station warp, or remove its bootstraps when the YAML option is off.
+
+    When enabled, also bake Init.sStationWarpRequirement and Init.sStationWarpReach.
+    The script is still registered only while the master toggle is on.
+    """
+    try:
+        scenario_bytes, scenario_pkg = _read_scenario_lc(romfs)
+    except PatchError as exc:
+        log(f"[WARN] station map warp skipped: {exc}")
+        return
+
+    scenario_text = _strip_inclusive_markers(
+        scenario_bytes.decode("utf-8", errors="replace"),
+        _AP_STATION_WARP_MARKER,
+        _AP_STATION_WARP_END,
+    )
+    if enabled:
+        scenario_text = scenario_text.rstrip() + "\n\n" + _AP_STATION_WARP_BOOTSTRAP
+    scenario_data = scenario_text.encode("utf-8")
+    _write_scenario_lc(romfs, scenario_data, scenario_pkg)
+
+    try:
+        init_bytes, init_pkg = _read_init_lc(romfs)
+    except PatchError as exc:
+        log(f"[WARN] station map warp init flag skipped: {exc}")
+        return
+    init_text = _strip_inclusive_markers(
+        init_bytes.decode("utf-8", errors="replace"),
+        _AP_STATION_WARP_FLAG_MARKER,
+        _AP_STATION_WARP_FLAG_END,
+    )
+    req, rch = _normalize_station_warp_mode(requirement, reach)
+    if enabled:
+        init_text = init_text.rstrip() + "\n\n" + _station_warp_flag_bootstrap(req, rch)
+    init_data = init_text.encode("utf-8")
+    # Write init before registering the lua asset. _write_init_lc rebuilds system.pkg
+    # from the snapshot it was parsed from, which would drop a script added first.
+    _write_init_lc(romfs, init_data, init_pkg)
+
+    if enabled:
+        src = dread_paths.dread_scripts_dir() / "ap_station_warp.lua"
+        if not src.is_file():
+            raise PatchError(f"missing station warp script: {src}")
+        _register_system_script_asset(romfs, "ap_station_warp", src.read_bytes())
+        _write_station_warp_localization(romfs)
+        log(
+            "[OK] pause-map station warp installed "
+            f"(Init.bStationMapWarp, requirement={req}, reach={rch})"
+        )
+    else:
+        log("[OK] pause-map station warp off — bootstraps removed, script not loaded")
+
+
+_AP_MAP_LOGIC_MARKER = "-- AP_MAP_LOGIC"
+_AP_MAP_LOGIC_END = "-- AP_MAP_LOGIC_END"
+_AP_MAP_LOGIC_BOOTSTRAP = """
+-- AP_MAP_LOGIC
+pcall(function()
+  Game.DoFile("system/scripts/ap_map_logic.lua")
+  Game.DoFile("system/scripts/ap_map_logic_rows.lua")
+end)
+-- AP_MAP_LOGIC_END
+""".lstrip()
+
+# Seed fields the pause-map catalog reads besides logic_options.
+_MAP_LOGIC_OPTION_KEYS = (
+    "starting_missiles",
+    "starting_power_bombs",
+    "start_with_pulse_radar",
+    "missile_tank_ammo",
+    "missile_plus_tank_ammo",
+    "power_bomb_tank_ammo",
+    "energy_per_tank",
+    "required_dna",
+    "vanilla_flash_shift_behaviour",
+    "flash_shift_upgrade_amount",
+    "flash_shift_upgrade_count",
+    "flash_shift_included_ammo",
+    "flash_shift_upgrade_requires_main_item",
+)
+
+
+def map_logic_option_values(extras: dict) -> dict:
+    """Trickset and starting-gear values for the pause-map catalog."""
+    values: Dict[str, Any] = {}
+    logic = extras.get("logic_options") if isinstance(extras, dict) else None
+    if isinstance(logic, dict):
+        values.update(logic)
+    if isinstance(extras, dict):
+        for key in _MAP_LOGIC_OPTION_KEYS:
+            if key in extras and extras[key] is not None:
+                values[key] = extras[key]
+    if "start_with_pulse_radar" in values:
+        values["start_with_pulse_radar"] = 1 if values["start_with_pulse_radar"] else 0
+    return values
+
+
+def render_map_logic_rows_lua(rows: list) -> bytes:
+    """Lua that fills ApMapLogic.rows. The tick script loads before this file."""
+    body = [
+        "ApMapLogic = ApMapLogic or { rows = {}, snap = 800, _bound = false }",
+        "ApMapLogic.rows = {",
+    ]
+    for row in rows:
+        abilities = ", ".join(
+            '"' + _escape_lua_string(str(item)) + '"'
+            for item in (row.get("lines") or [])
+        )
+        body.append(
+            '  {s="%s",x=%d,y=%d,area="%s",t={%s}},'
+            % (
+                _escape_lua_string(str(row["scenario"])),
+                int(row["x"]),
+                int(row["y"]),
+                _escape_lua_string(str(row.get("area") or "")),
+                abilities,
+            )
+        )
+    body.append("}")
+    body.append("")
+    return "\n".join(body).encode("utf-8")
+
+
+def build_map_logic_rows_lua(extras: dict) -> bytes:
+    """Catalog every pickup once. Call this at patch time, not per check."""
+    from worlds.metroid_bread.dread_logic import map_panel_rows
+
+    rows = map_panel_rows(map_logic_option_values(extras))
+    if not rows:
+        raise PatchError("pause-map catalog produced no pickup rows")
+    return render_map_logic_rows_lua(rows)
+
+
+def install_map_logic_panel(romfs: Path, rows_lua: bytes | None) -> None:
+    """Show minimum check abilities in the pause-map tip lines on the next boot."""
+    if not rows_lua:
+        log("[WARN] pause-map check lines skipped — no catalog")
+        return
+    src = dread_paths.dread_scripts_dir() / "ap_map_logic.lua"
+    if not src.is_file():
+        log(f"[WARN] pause-map check lines skipped — missing {src}")
+        return
+    try:
+        scenario_bytes, scenario_pkg = _read_scenario_lc(romfs)
+    except PatchError as exc:
+        log(f"[WARN] pause-map check lines skipped: {exc}")
+        return
+    scenario_text = _strip_inclusive_markers(
+        scenario_bytes.decode("utf-8", errors="replace"),
+        _AP_MAP_LOGIC_MARKER,
+        _AP_MAP_LOGIC_END,
+    )
+    scenario_text = scenario_text.rstrip() + "\n\n" + _AP_MAP_LOGIC_BOOTSTRAP
+    # Write scenario before registering scripts. A later pkg rewrite from an
+    # older snapshot would drop the bootstrap.
+    _write_scenario_lc(romfs, scenario_text.encode("utf-8"), scenario_pkg)
+    _register_system_script_asset(romfs, "ap_map_logic", src.read_bytes())
+    _register_system_script_asset(romfs, "ap_map_logic_rows", rows_lua)
+    log(f"[OK] pause-map check lines installed ({len(rows_lua)} byte catalog)")
+
+
+_AP_MIN_LIFE_MARKER = "-- AP_MIN_LIFE"
+_AP_MIN_LIFE_END = "-- AP_MIN_LIFE_END"
+_AP_MIN_LIFE_BOOTSTRAP = """
+-- AP_MIN_LIFE
+-- Floor scenario entry and save snapshots at 1 HP. Loaded last so this
+-- OnLoadScenarioFinished wrapper runs outside ApWarp / station warp.
+Game.DoFile("system/scripts/ap_min_life.lua")
+if ApMinLife and ApMinLife.Install then
+    ApMinLife.Install()
+end
+-- AP_MIN_LIFE_END
+""".lstrip("\n")
+
+
+def install_ap_min_life_scripts(romfs: Path) -> None:
+    """Keep checkpoint / save-slot energy at least 1 after a cinematic DeathLink."""
+    src = dread_paths.dread_scripts_dir() / "ap_min_life.lua"
+    if not src.is_file():
+        log(f"[WARN] min-life skipped — missing {src}")
+        return
+    try:
+        scenario_bytes, scenario_pkg = _read_scenario_lc(romfs)
+    except PatchError as exc:
+        log(f"[WARN] min-life skipped: {exc}")
+        return
+    text = _strip_inclusive_markers(
+        scenario_bytes.decode("utf-8", errors="replace"),
+        _AP_MIN_LIFE_MARKER,
+        _AP_MIN_LIFE_END,
+    )
+    text = text.rstrip() + "\n\n" + _AP_MIN_LIFE_BOOTSTRAP
+    # Scenario bootstrap first, then the DoFile asset, so a later pkg rewrite
+    # re-reads the scenario that already calls the script.
+    _write_scenario_lc(romfs, text.encode("utf-8"), scenario_pkg)
+    _register_system_script_asset(romfs, "ap_min_life", src.read_bytes())
+    log(f"[OK] min-life floors scenario entry and save slots ({src.stat().st_size} bytes)")
 
 
 def _patch_scenario_for_ap_loading_tips(romfs: Path) -> None:
@@ -1316,16 +1452,7 @@ def _patch_scenario_for_ap_loading_tips(romfs: Path) -> None:
 
 
 def apply_ap_credits_branding(romfs: Path) -> None:
-    """
-    Post-process ODR credits.txt:
-      - Title: Metroid Bread → Metroid Bread
-      - Insert "Archipelago Implementation" / Dummydude just before Major Item Locations
-    Keeps the full Randomizer Credits block intact.
-
-    Inserted strings are scrubbed with ap_to_patcher.sanitize_credits_text (printable
-    ASCII only) so branding cannot introduce illegal glyphs into BTXT. CREDIT_R_*
-    rows are re-scrubbed on rewrite (skips whitespace-only spacers).
-    """
+    """Post-process ODR credits.txt:"""
     credits_path = romfs / "system" / "localization" / "credits.txt"
     if not credits_path.is_file():
         log(f"[WARN] credits.txt not found at {credits_path} — skipping AP credits branding")
@@ -1374,7 +1501,6 @@ def apply_ap_credits_branding(romfs: Path) -> None:
                 insert_at = i
                 break
         # Fallback when spoiler_log was empty (ODR skips Major Item Locations):
-        # insert after Randomizer Credits block, before remaining CREDIT_0_* rows.
         if insert_at is None:
             for i, (key, _value) in enumerate(ordered):
                 if key.startswith("CREDIT_0_") and i > 0:
@@ -1393,7 +1519,6 @@ def apply_ap_credits_branding(romfs: Path) -> None:
             inserted = True
 
     # Scrub any CREDIT_R_* values that still carry illegal glyphs (old patcher
-    # JSON / future ODR paths). Preserve whitespace-only spacer rows.
     scrubbed = 0
     for i, (key, value) in enumerate(ordered):
         if not key.startswith("CREDIT_R_"):
@@ -1433,6 +1558,10 @@ def finalize_mod(
     map_icon_keys_json: Optional[Path] = None,
     mod_compatibility: str = "ryujinx",
     ap_seed_id: Optional[str] = None,
+    station_map_warp: bool = False,
+    station_warp_requirement: str = "visited",
+    station_warp_reach: str = "global",
+    map_logic_rows_lua: bytes | None = None,
 ) -> None:
     """Copy client-facing extras into the mod tree (Ryujinx or Atmosphere layout)."""
     layout = mod_layout_paths(output, mod_compatibility)
@@ -1516,7 +1645,6 @@ def finalize_mod(
     overrides = dread_paths.dread_scripts_dir() / "ap_powerup_overrides.lua"
     odr_lc = lua_dst.with_suffix(".lc")
     # Prefer ODR-generated script (progressive/boss classes) + AP overrides appended.
-    # DoFile('...randomizer_powerup.lua') shadows .lc when the .lua exists.
     base_bytes: Optional[bytes] = None
     if odr_lc.is_file():
         base_bytes = odr_lc.read_bytes()
@@ -1589,7 +1717,6 @@ def finalize_mod(
     apply_ap_credits_branding(romfs)
 
     # AP context-4 tip carousel BTXT (TIP_000–TIP_004). Belt-and-suspenders with
-    # ap_to_patcher text_patches; also lets a finalize-only pass refresh a live mod.
     try:
         from dread_carousel_tip_patches import (
             apply_carousel_tip_text_patches_to_romfs,
@@ -1628,19 +1755,30 @@ def finalize_mod(
     # Bake AP seed digits for Hub client seed-mismatch checks (RoomInfo vs RomFS).
     install_ap_seed_id_bootstrap(romfs, ap_seed_id)
 
+    # Pause-map warp. Off: script is not loaded. On: bake requirement and reach too.
+    install_station_map_warp(
+        romfs,
+        station_map_warp,
+        requirement=station_warp_requirement,
+        reach=station_warp_reach,
+    )
+
+    # Pause-map tip lines: minimum abilities for the hovered check.
+    install_map_logic_panel(romfs, map_logic_rows_lua)
+
     # Death-only ExtraInfoPanel: park counter on ODR DNA-slot coords (no Ryujinx getters).
     fix_death_counter_hud_position(romfs)
 
+    # DeathLink during a save / transport must not persist 0 HP. Last so the
+    # scenario-enter wrapper sits outside the other OnLoad hooks.
+    install_ap_min_life_scripts(romfs)
+
     # Reachable minimap offline data (bounds for OdrMap.VisitBounds).
-    # Must be TOC + system.pkg (.lc), not loose-only — see install_reachable_map_script.
-    # Order: after ODR romfs write, before custom exefs overlay.
     map_src_lua = ROOT / "data" / "reachable_map_cells.lua"
     install_reachable_map_script(romfs, map_src_lua)
     install_map_unlock_region_script(romfs)
 
     # Archipelago logo + green in-logic ? cells in the minimap atlas
-    # (ODR ships progressive/DNA cells; we overwrite that same romfs path
-    # with our stamped icons.bctex).
     install_ap_map_icon_atlas(romfs)
 
     # Optional debug JSON (not used by Game.DoFile). Skip huge full-cells exports.
@@ -1664,7 +1802,6 @@ def finalize_mod(
 
     exefs = layout["exefs"]
     # If ODR wrote exefs under a different parent, prefer that tree's exefs
-    # but still fall back to the layout path so Atmosphere gets a real install.
     discovered = romfs_parent / "exefs"
     if discovered.is_dir():
         exefs = discovered
@@ -1676,9 +1813,6 @@ def finalize_mod(
         exefs.mkdir(parents=True, exist_ok=True)
 
     # ODR writes stock remote-lua exlaunch; overlay custom OdrMap binders when available.
-    # Must run AFTER ODR exefs install so VisitBounds is not overwritten by stock.
-    # Atmosphere: contents/<tid>/exefs/subsdk9 — missing this crashes push_reachability.
-    # See worlds/metroid_bread/docs/odrmap_exlaunch_binder.md.
     log(f"[INFO] Installing custom OdrMap/OdrTip subsdk9 -> {exefs} ({compat})")
     install_custom_exlaunch(exefs, custom_exlaunch_deploy)
     log(
@@ -1741,13 +1875,30 @@ def patch_from_spoiler(
     log(f"Using Python with open-dread-rando: {' '.join(py)}")
 
     # Match patcher.json to the validating ODR schema (show_dna_in_hud /
-    # has_flash_upgrades / has_speed_upgrades are ODR ≥2.19-only; older schemas
-    # reject them with additionalProperties: false).
     from ap_to_patcher import apply_upgrade_menu_flags, sanitize_patcher_for_odr
 
     apply_upgrade_menu_flags(patcher_data, py_cmd=py)
-    # Capture AP-private seed before schema sanitize / dump (ODR rejects _ap_seed_id).
+    # Capture AP-private keys before schema sanitize / dump (ODR rejects them).
     ap_seed_id = str(patcher_data.pop("_ap_seed_id", "") or "").strip() or None
+    station_map_warp = bool(patcher_data.pop("_ap_station_map_warp", False))
+    station_warp_requirement = str(
+        patcher_data.pop("_ap_station_warp_requirement", "visited") or "visited"
+    )
+    station_warp_reach = str(
+        patcher_data.pop("_ap_station_warp_reach", "global") or "global"
+    )
+    map_logic_rows_lua = b""
+    try:
+        from ap_to_patcher import parse_dread_patch_extras
+
+        log("[INFO] building pause-map check lines")
+        map_logic_rows_lua = build_map_logic_rows_lua(
+            parse_dread_patch_extras(spoiler, player)
+        )
+        log(f"[OK] pause-map catalog {len(map_logic_rows_lua)} bytes")
+    except Exception as exc:
+        log(f"[WARN] pause-map check lines not built: {exc}")
+        map_logic_rows_lua = b""
     stripped = sanitize_patcher_for_odr(patcher_data, py_cmd=py)
     if stripped:
         log(
@@ -1781,7 +1932,6 @@ def patch_from_spoiler(
     )
 
     # Validate against schema.json only (avoid importing dread_patcher → misc_patches).
-    # Print path+message (not the whole pickups dump) on failure.
     val = subprocess.run(
         py
         + [
@@ -1850,6 +2000,10 @@ def patch_from_spoiler(
         map_icon_keys_json=out_keys,
         mod_compatibility=compat,
         ap_seed_id=ap_seed_id,
+        station_map_warp=station_map_warp,
+        station_warp_requirement=station_warp_requirement,
+        station_warp_reach=station_warp_reach,
+        map_logic_rows_lua=map_logic_rows_lua,
     )
     # Optional offline dim reveal (default OFF; never fails the patch).
     maybe_reveal_minimap_save(enabled=reveal_minimap_save)

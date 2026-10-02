@@ -1,30 +1,5 @@
 #!/usr/bin/env python3
-"""
-Parse Metroid Dread ``CauseOfDeath`` (and related fields) from Ryujinx logs.
-
-PlayReport ``Room: gameover`` is **not** exposed to Lua / Blackboard. Ryujinx's
-``ServicePrepo ProcessPlayReport`` dumps the report JSON, e.g.::
-
-    PlayReport log:
-     Room: gameover
-     Report:
-     {
-         "CauseOfDeath": 2,
-         "WhichGrab": 0,
-         "WhichBoss": 1,
-         "MapWhereDeathOccurred": 0,
-         ...
-     }
-
-Use this for empirical env-vs-combat mapping (see CAUSE_OF_DEATH_MATRIX.md).
-
-CLI::
-
-    python -m cause_of_death
-    python tools/parse_cause_of_death.py --latest
-    python tools/parse_cause_of_death.py --all
-    python tools/parse_cause_of_death.py PATH\\to\\Ryujinx.log
-"""
+"""Parse Metroid Dread ``CauseOfDeath`` (and related fields) from Ryujinx logs."""
 
 from __future__ import annotations
 

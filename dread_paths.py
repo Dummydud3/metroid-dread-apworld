@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""
-Path helpers for the Metroid Bread client / direct patcher.
-
-Canonical layout (after client↔world merge):
-  worlds/metroid_bread/          ← WORLD_DIR (this package)
-    MetroidBreadClient.py
-    dread_direct_patch.py
-    dread-client-app/
-    ap_core/                     ← bundled import root for frozen installs
-    dread_scripts/
-    *.json data next to the scripts
-  <Archipelago root>/            ← install root (source *or* frozen ProgramData)
-    CommonClient.py (source) or lib/library.zip (frozen), tools/, …
-
-dread_direct_patch_config.json may hold absolute paths, %APPDATA% values, or
-paths relative to WORLD_DIR so the portable package stays movable.
-"""
+"""Path helpers for the Metroid Bread client / direct patcher."""
 
 from __future__ import annotations
 
@@ -37,11 +21,7 @@ def _is_source_ap_root(candidate: Path) -> bool:
 
 
 def _is_frozen_ap_install(candidate: Path) -> bool:
-    """
-    True for an official frozen Archipelago install (no loose CommonClient.py).
-
-    Typical layout: ArchipelagoLauncher.exe + lib/library.zip (+ python3xx.dll).
-    """
+    """True for an official frozen Archipelago install (no loose CommonClient.py)."""
     try:
         if _is_source_ap_root(candidate):
             return False
@@ -97,9 +77,7 @@ def resolve_frozen_install_root(world_dir: Optional[Path] = None) -> Optional[Pa
 
 
 def resolve_hub_install_root(world_dir: Optional[Path] = None) -> Optional[Path]:
-    """
-    Hub install root from env (source *or* frozen), then frozen climb, then source climb.
-    """
+    """Hub install root from env (source *or* frozen), then frozen climb, then source climb."""
     base = (world_dir or Path(__file__).resolve().parent).resolve()
     for key in ("DREAD_HUB_INSTALL_ROOT", "DREAD_HUB_FROZEN_ROOT"):
         raw = (os.environ.get(key) or "").strip()
@@ -143,14 +121,7 @@ def _infer_source_ap_from_configs(base: Path) -> Optional[Path]:
 
 
 def resolve_ap_roots(world_dir: Optional[Path] = None) -> Tuple[Path, Path]:
-    """
-    Resolve (import_root, install_root).
-
-    *import_root* — directory on PYTHONPATH with CommonClient.py + Options.py
-      (prefer world ``ap_core/`` so Hub clients match MetroidBreadClient's API).
-    *install_root* — Archipelago install for Players/, output/, host.yaml, logs
-      (nearby source tree or frozen ProgramData).
-    """
+    """Resolve (import_root, install_root)."""
     base = (world_dir or Path(__file__).resolve().parent).resolve()
     core = bundled_ap_core(base)
 
@@ -213,13 +184,7 @@ def resolve_ap_roots(world_dir: Optional[Path] = None) -> Tuple[Path, Path]:
 
 
 def resolve_ap_root(world_dir: Optional[Path] = None) -> Path:
-    """
-    Resolve the Archipelago root used for PYTHONPATH / CommonClient imports.
-
-    Runtime extracts live at custom_worlds/_metroid_bread_runtime — parents[1] is the
-    install folder (often frozen-only). Prefer env, then a real source tree, then the
-    bundled ``ap_core/`` next to the world package.
-    """
+    """Resolve the Archipelago root used for PYTHONPATH / CommonClient imports."""
     import_root, _install = resolve_ap_roots(world_dir)
     return import_root
 
@@ -234,15 +199,11 @@ CONFIG_NAME = "dread_direct_patch_config.json"
 UI_CONFIG_NAME = "dread_client_ui_config.json"
 
 # Folder the packaging script writes the custom subsdk9 into, relative to AP_ROOT
-# (portable package) or optionally under WORLD_DIR.
 BUNDLED_EXLAUNCH_DEPLOY = Path("exlaunch") / "deploy"
 
 
 def bind_utils_install_root(install_root: Optional[Path] = None) -> None:
-    """
-    Point Utils.local_path / user_path at the Archipelago install (ProgramData),
-    not at bundled ap_core (which only exists for imports).
-    """
+    """Point Utils.local_path / user_path at the Archipelago install (ProgramData),"""
     root = (install_root or INSTALL_ROOT).resolve()
     try:
         import Utils
@@ -262,13 +223,7 @@ def bind_utils_install_root(install_root: Optional[Path] = None) -> None:
 
 
 def _attach_world_package_spec(pkg: Any, name: str = "worlds.metroid_bread") -> None:
-    """
-    Give a synthetic package a real ModuleSpec.
-
-    Without ``__spec__``, ``pkgutil.get_data`` / ``importlib.util.find_spec`` raise
-    ``ValueError: worlds.metroid_bread.__spec__ is None`` (seen when the direct
-    patcher resolves starting locations from logic_database under ap_core).
-    """
+    """Give a synthetic package a real ModuleSpec."""
     import importlib.machinery
     import importlib.util
 
@@ -287,12 +242,7 @@ def _attach_world_package_spec(pkg: Any, name: str = "worlds.metroid_bread") -> 
 
 
 def ensure_runtime_world_namespace() -> None:
-    """
-    Expose WORLD_DIR as ``worlds.metroid_bread`` when the AP import root is ap_core.
-
-    Frozen installs use a stub ``worlds`` package (no game loaders). Patcher / client
-    helpers still do ``from worlds.metroid_bread...`` and need this namespace.
-    """
+    """Expose WORLD_DIR as ``worlds.metroid_bread`` when the AP import root is ap_core."""
     import types
 
     name = "worlds.metroid_bread"
@@ -325,13 +275,7 @@ def ensure_runtime_world_namespace() -> None:
 
 
 def ensure_import_paths() -> None:
-    """
-    Put AP import root and WORLD_DIR on sys.path so client modules + AP core import.
-
-    Re-resolves roots (env may be set after first import). Import root is inserted
-    last so it sits first on sys.path. The world package ships its own Options.py;
-    that must never shadow Archipelago's Options.
-    """
+    """Put AP import root and WORLD_DIR on sys.path so client modules + AP core import."""
     global AP_ROOT, INSTALL_ROOT
     AP_ROOT, INSTALL_ROOT = resolve_ap_roots(WORLD_DIR)
     # World first, then AP import root at 0 so AP wins for Options / CommonClient / worlds.

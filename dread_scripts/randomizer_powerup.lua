@@ -140,8 +140,6 @@ function RandomizerPowerup.OnPickedUp(actor, resources)
     RandomizerPowerup.UpdateWeapons()
     
     -- Removed calls to functions that may not exist in Archipelago context
-    -- Scenario.UpdateProgressiveItemModels()
-    -- Scenario.UpdateBlastShields()
     
     RandomizerPowerup.IncrementInventoryIndex()
     
@@ -316,7 +314,6 @@ end
 
 function RandomizerPowerup.GrantNextArtifact()
     -- Grant the first unowned ITEM_RANDO_ARTIFACT_N (N <= required DNA).
-    -- Used for AP server /give DNA when artifact slot is not fixed upfront.
     if not Init or not Init.iNumRequiredArtifacts or Init.iNumRequiredArtifacts == 0 then
         Game.LogWarn(0, "GrantNextArtifact: DNA gate disabled (iNumRequiredArtifacts=0)")
         return nil
@@ -369,9 +366,7 @@ local tItemTunableHandlers = {
         Scenario.SetTunableValue("CTunableAbilityGhostAura", "iChainDashMax", quantity)
     end,
     ["ITEM_UPGRADE_SPEED_BOOST_CHARGE"] = function(quantity)
-        -- Amount of time in seconds for SB to charge - vanilla is 1.5 seconds. Each upgrade reduces by 0.25 seconds.
-        -- Cannot be <= 0 or else all hell breaks loose.
-        -- SB activation is very buggy <= 0.5, so we clamp it a tiny bit higher.
+        -- Amount of time in seconds for SB to charge - vanilla is 1.5 seconds. Each upgrade reduces by 0.25...
         local chargeTime = math.max(0.55, 1.5 - quantity * 0.25)
         Scenario.SetTunableValue("CTunableAbilitySpeedBooster", "fTimeToActivate", chargeTime)
     end
@@ -401,7 +396,6 @@ end
 
 function RandomizerPowerup.RefreshWeaponDisplay()
     -- Force the game to refresh the weapon display
-    -- This is done by briefly disabling and re-enabling player input
     local oPlayer = Game.GetPlayer()
     if oPlayer == nil then
         return
@@ -527,8 +521,6 @@ function RandomizerPowerBomb.OnPickedUp(actor, progression)
 end
 
 -- Flash Shift: Require Main OFF → first chain unlock also grants Ghost Aura
--- and keeps the upgrade's chain grant so Flash Shift is usable (iChainDashMax).
--- Require Main ON → upgrades only stack chains (AP_FLASH_SHIFT_REQUIRES_MAIN).
 AP_FLASH_SHIFT_REQUIRES_MAIN = AP_FLASH_SHIFT_REQUIRES_MAIN or false
 
 local function ap_flash_shift_requires_main()
@@ -559,7 +551,6 @@ if not RandomizerPowerup._APFlashUpgradeHooked then
     function RandomizerPowerup.IncreaseItemAmount(item_id, quantity, capacity)
         if item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and quantity and quantity > 0 then
             -- Local pickups use RandomizerPowerup (ODR has no SPECIFIC_CLASSES
-            -- entry for chain upgrades). Unlock Ghost; still grant chains.
             ap_unlock_flash_shift_from_upgrade()
         end
         return _APIncreaseItemAmount(item_id, quantity, capacity)
@@ -763,5 +754,3 @@ function RandomizerIceMissile.OnPickedUp(actor, progression)
 end
 
 -- DeathLink detection is installed by the AP client bootstrap (RL.InstallDeathHook /
--- RL.ScheduleDeathCheck). Do not use anonymous Game.AddSF callbacks here — exlaunch
--- only reliably schedules named global functions like "RL.ScheduleDeathCheck".

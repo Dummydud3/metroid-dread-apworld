@@ -1,17 +1,4 @@
-"""Minimum starting kit needed to make a rolled starting location fillable.
-
-Randovania flags ~35 nodes as valid_starting_location, but most of them are save
-rooms tucked behind a Morph tunnel or a bomb block: with a completely empty
-inventory there is no pickup in logic at all. Archipelago's assumed fill walks
-the item pool backwards and needs a reachable, empty location for every step, so
-an empty sphere 0 makes the fill mathematically impossible and generation dies
-with "No more spots to place N items".
-
-Randovania solves this by handing out starting items with a random start. We do
-the same: grant the smallest set of items that reopens the start, precollect
-them instead of shuffling them into the pool, and mirror them into the
-open-dread-rando `starting_items` block so the game agrees with the logic.
-"""
+"""Minimum starting kit needed to make a rolled starting location fillable."""
 
 from __future__ import annotations
 
@@ -20,16 +7,12 @@ from typing import Dict, Iterable, List, Sequence, Tuple
 from .dread_logic import PROGRESSIVE_EXPAND
 
 # Sphere-0 pickups to aim for. This is a floor that makes the fill work, not a
-# difficulty knob, and every point costs the player a major item out of the
-# pool. Two keeps Artaria Intro / Start Room empty (it already has exactly two
-# in-logic checks); three forced Phantom Cloak (etc.) into the start kit there.
 MIN_START_LOCATIONS = 2
 
 # Never hand out more than this, even if the start stays cramped.
 MAX_START_KIT = 5
 
 # A kit item is just the pool item consumed; progressives may repeat, and the
-# stage the player ends up with follows from how many copies the kit holds.
 KitItem = str
 
 # Logical item -> open-dread-rando starting_items grants.
@@ -85,11 +68,7 @@ _PROGRESSIVE_OPTIONS = (
 
 
 def candidate_items(options) -> List[KitItem]:
-    """Pool items that exist for these options, repeated per progressive stage.
-
-    Second stages matter: Burenia's south save room is underwater and only
-    opens up for Gravity Suit, which is the *second* Progressive Suit.
-    """
+    """Pool items that exist for these options, repeated per progressive stage."""
     from .flash_shift import plan_from_options
 
     candidates: List[KitItem] = list(_SINGLE_CANDIDATES)
@@ -171,7 +150,6 @@ def odr_starting_items(
             )
         else:
             # Progressive: first unlocks Ghost Aura and grants upgrade_amount chains;
-            # each upgrade copy adds upgrade_amount (same as in-game grant).
             grants["ITEM_GHOST_AURA"] = max(grants.get("ITEM_GHOST_AURA", 0), 1)
             grants["ITEM_UPGRADE_FLASH_SHIFT_CHAIN"] = (
                 grants.get("ITEM_UPGRADE_FLASH_SHIFT_CHAIN", 0) + upgrade_copies * up_amt
@@ -196,14 +174,7 @@ def build_start_kit(
     base_kit: Sequence[KitItem] = (),
     max_kit: int = MAX_START_KIT,
 ) -> List[KitItem]:
-    """Greedily pick the fewest items that give the start `min_locations` checks.
-
-    `base_kit` is kept and extended, so a kit rolled against the vanilla graph
-    can be reused after door / transport rando instead of starting over.
-
-    `max_kit` caps how many items may be granted (YAML ``starting_kit_items``).
-    ``0`` returns an empty kit (no auto Start Kit).
-    """
+    """Greedily pick the fewest items that give the start `min_locations` checks."""
     max_kit = max(0, min(int(max_kit), MAX_START_KIT))
     if max_kit <= 0:
         return []
@@ -212,12 +183,7 @@ def build_start_kit(
     active = set(world.active_location_names())
 
     def score(counts: Dict[str, int]) -> Tuple[int, int]:
-        """(checks in logic, nodes in logic).
-
-        Node count is the tie-breaker: plenty of starts are behind a two-item
-        gate where the first item reaches no new pickup but does open up rooms,
-        and without that gradient the greedy search has nothing to climb.
-        """
+        """(checks in logic, nodes in logic)."""
         nodes = logic.get_reachable_nodes(logic.inventory_from_counts(counts))
         checks = sum(
             1 for name, node in logic.pickup_nodes.items()
@@ -226,13 +192,7 @@ def build_start_kit(
         return checks, len(nodes)
 
     def is_better(found: Tuple[int, int], best: Tuple[int, int]) -> bool:
-        """Climb toward min_locations, then prefer the tightest kit that makes it.
-
-        Maximizing open checks once the floor is met handed Hanubia Morph + Power
-        Bomb (26 sphere-0 checks, and Power Bomb for the Raven Beak generator)
-        instead of Morph + Bomb (4 checks). That is a fill aid turning into a
-        free endgame kit.
-        """
+        """Climb toward min_locations, then prefer the tightest kit that makes it."""
         f_checks, f_nodes = found
         b_checks, b_nodes = best
         f_ok = f_checks >= min_locations
@@ -258,7 +218,6 @@ def build_start_kit(
         if pool_item in pool:
             pool.remove(pool_item)
     # Deterministic per seed, but stops every cramped start from opening with
-    # the exact same item.
     world.random.shuffle(pool)
 
     def with_items(step: Sequence[KitItem]) -> Dict[str, int]:
@@ -268,12 +227,7 @@ def build_start_kit(
         return trial
 
     def best_step(budget: int) -> List[KitItem]:
-        """Best single item, or best pair when no single item changes anything.
-
-        Some starts sit behind a two-item AND gate — Dairon's west save room
-        only opens to a Morph Ball Launcher, which wants Morph Ball *and* Bomb —
-        and a purely one-at-a-time search sees a flat landscape and gives up.
-        """
+        """Best single item, or best pair when no single item changes anything."""
         best: List[KitItem] = []
         best_score = current
         for pool_item in pool:

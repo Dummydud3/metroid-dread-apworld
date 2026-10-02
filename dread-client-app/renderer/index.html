@@ -144,9 +144,11 @@
 
           <h3 class="subhead">Logic &amp; tricks</h3>
           <p class="hint">
-            Levels use Randovania names: Disabled, Beginner, Intermediate, Advanced, Expert, Ludicrous.
-            Each trick only lists difficulties that appear in Dread logic.
+            Dangerous Logic off (default): a check is in logic only if you can reach it and leave
+            back toward the start. On: reachable is enough, even if the room softlocks you.
+            Trick levels use Randovania names: Disabled, Beginner, Intermediate, Advanced, Expert, Ludicrous.
           </p>
+          <div class="check-grid" id="yaml-logic-flags"></div>
           <div class="trick-grid" id="yaml-tricks"></div>
 
           <p class="hint" id="yaml-status">Ready.</p>

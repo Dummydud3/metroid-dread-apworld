@@ -184,8 +184,7 @@ class MultiWorld():
         return self.player_ids + tuple(self.groups)
 
     def add_group(self, name: str, game: str, players: AbstractSet[int] = frozenset()) -> Tuple[int, Group]:
-        """Create a group with name and return the assigned player ID and group.
-        If a group of this name already exists, the set of players is extended instead of creating a new one."""
+        """Create a group with name and return the assigned player ID and group."""
         from worlds import AutoWorld
 
         for group_id, group in self.groups.items():
@@ -429,21 +428,7 @@ class MultiWorld():
 
     def get_all_state(self, use_cache: bool | None = None, allow_partial_entrances: bool = False,
                       collect_pre_fill_items: bool = True, perform_sweep: bool = True) -> CollectionState:
-        """
-        Creates a new CollectionState, and collects all precollected items, all items in the multiworld itempool, those
-        specified in each worlds' `get_pre_fill_items()`, and then sweeps the multiworld collecting any other items
-        it is able to reach, building as complete of a completed game state as possible.
-
-        :param use_cache: Deprecated and unused.
-        :param allow_partial_entrances: Whether the CollectionState should allow for disconnected entrances while
-         sweeping, such as before entrance randomization is complete.
-        :param collect_pre_fill_items: Whether the items in each worlds' `get_pre_fill_items()` should be added to this
-         state.
-        :param perform_sweep: Whether this state should perform a sweep for reachable locations, collecting any placed
-         items it can.
-
-        :return: The completed CollectionState.
-        """
+        """Creates a new CollectionState, and collects all precollected items, all items in the multiworld i..."""
         if __debug__ and use_cache is not None:
             # TODO swap to Utils.deprecate when we want this to crash on source and warn on frozen
             warnings.warn("multiworld.get_all_state no longer caches all_state and this argument will be removed.",
@@ -509,8 +494,7 @@ class MultiWorld():
                                            for player in self.regions.entrance_cache))
 
     def register_indirect_condition(self, region: Region, entrance: Entrance):
-        """Report that access to this Region can result in unlocking this Entrance,
-        state.can_reach(Region) in the Entrance's traversal condition, as opposed to pure transition logic."""
+        """Report that access to this Region can result in unlocking this Entrance,"""
         self.indirect_connections.setdefault(region, set()).add(entrance)
 
     def get_locations(self, player: Optional[int] = None) -> Iterable[Location]:
@@ -582,13 +566,7 @@ class MultiWorld():
         return False
 
     def get_spheres(self) -> Iterator[Set[Location]]:
-        """
-        yields a set of locations for each logical sphere
-
-        If there are unreachable locations, the last sphere of reachable
-        locations is followed by an empty set, and then a set of all of the
-        unreachable locations.
-        """
+        """yields a set of locations for each logical sphere"""
         state = CollectionState(self)
         locations = set(self.get_filled_locations())
 
@@ -609,12 +587,7 @@ class MultiWorld():
             locations -= sphere
 
     def get_sendable_spheres(self) -> Iterator[Set[Location]]:
-        """
-        yields a set of multiserver sendable locations (location.item.code: int) for each logical sphere
-
-        If there are unreachable locations, the last sphere of reachable locations is followed by an empty set,
-        and then a set of all of the unreachable locations.
-        """
+        """yields a set of multiserver sendable locations (location.item.code: int) for each logical sphere"""
         state = CollectionState(self)
         locations: Set[Location] = set()
         events: Set[Location] = set()
@@ -862,16 +835,10 @@ class CollectionState():
 
     def _sweep_for_advancements_impl(self, advancements_per_player: List[Tuple[int, List[Location]]],
                                      yield_each_sweep: bool) -> Iterator[None]:
-        """
-        The implementation for sweep_for_advancements is separated here because it returns a generator due to the use
-        of a yield statement.
-        """
+        """The implementation for sweep_for_advancements is separated here because it returns a generator du..."""
         all_players = {player for player, _ in advancements_per_player}
         players_to_check = all_players
-        # As an optimization, it is assumed that each player's world only logically depends on itself. However, worlds
-        # are allowed to logically depend on other worlds, so once there are no more players that should be checked
-        # under this assumption, an extra sweep iteration is performed that checks every player, to confirm that the
-        # sweep is finished.
+        # As an optimization, it is assumed that each player's world only logically depends on itself. Howe...
         checking_if_finished = False
         while players_to_check:
             next_advancements_per_player: List[Tuple[int, List[Location]]] = []
@@ -882,15 +849,12 @@ class CollectionState():
                     next_advancements_per_player.append((player, locations))
                     continue
 
-                # Accessibility of each location is checked first because a player's region accessibility cache becomes
-                # stale whenever one of their own items is collected into the state.
+                # Accessibility of each location is checked first because a player's region accessibility cache bec...
                 reachable_locations: List[Location] = []
                 unreachable_locations: List[Location] = []
                 for location in locations:
                     if location.can_reach(self):
                         # Locations containing items that do not belong to `player` could be collected immediately
-                        # because they won't stale `player`'s region accessibility cache, but, for simplicity, all the
-                        # items at reachable locations are collected in a single loop.
                         reachable_locations.append(location)
                     else:
                         unreachable_locations.append(location)
@@ -898,14 +862,6 @@ class CollectionState():
                     next_advancements_per_player.append((player, unreachable_locations))
 
                 # A previous player's locations processed in the current `while players_to_check` iteration could have
-                # collected items belonging to `player`, but now that all of `player`'s reachable locations have been
-                # found, it can be assumed that `player` will not gain any more reachable locations until another one of
-                # their items is collected.
-                # It would be clearer to not add players to `next_players_to_check` in the first place if they have yet
-                # to be processed in the current `while players_to_check` iteration, but checking if a player should be
-                # added to `next_players_to_check` would need to be run once for every item that is collected, so it is
-                # more performant to instead discard `player` from `next_players_to_check` once their locations have
-                # been processed.
                 next_players_to_check.discard(player)
 
                 # Collect the items from the reachable locations.
@@ -915,13 +871,11 @@ class CollectionState():
                     assert isinstance(item, Item), "tried to collect advancement Location with no Item"
                     if self.collect(item, True, advancement):
                         # The player the item belongs to may be able to reach additional locations in the next sweep
-                        # iteration.
                         next_players_to_check.add(item.player)
 
             if not next_players_to_check:
                 if not checking_if_finished:
                     # It is assumed that each player's world only logically depends on itself, which may not be the
-                    # case, so confirm that the sweep is finished by doing an extra iteration that checks every player.
                     checking_if_finished = True
                     next_players_to_check = all_players
             else:
@@ -945,20 +899,11 @@ class CollectionState():
 
     def sweep_for_advancements(self, locations: Optional[Iterable[Location]] = None, yield_each_sweep: bool = False,
                                checked_locations: Optional[Set[Location]] = None) -> Optional[Iterator[None]]:
-        """
-        Sweep through the locations that contain uncollected advancement items, collecting the items into the state
-        until there are no more reachable locations that contain uncollected advancement items.
-
-        :param locations: The locations to sweep through, defaulting to all locations in the multiworld.
-        :param yield_each_sweep: When True, return a generator that yields at the end of each sweep iteration.
-        :param checked_locations: Optional override of locations to filter out from the locations argument, defaults to
-        self.advancements when None.
-        """
+        """Sweep through the locations that contain uncollected advancement items, collecting the items into..."""
         if checked_locations is None:
             checked_locations = self.advancements
 
         # Since the sweep loop usually performs many iterations, the locations are filtered in advance.
-        # A list of tuples is used, instead of a dictionary, because it is faster to iterate.
         advancements_per_player: List[Tuple[int, List[Location]]]
         if locations is None:
             # `location.advancement` can only be True for filled locations, so unfilled locations are filtered out.
@@ -982,8 +927,7 @@ class CollectionState():
             # Return a generator that will yield at the end of each sweep iteration.
             return self._sweep_for_advancements_impl(advancements_per_player, True)
         else:
-            # Create the generator, but tell it not to yield anything, so it will run to completion in zero iterations
-            # once started, then start and exhaust the generator by attempting to iterate it.
+            # Create the generator, but tell it not to yield anything, so it will run to completion in zero ite...
             for _ in self._sweep_for_advancements_impl(advancements_per_player, False):
                 assert False, "Generator yielded when it should have run to completion without yielding"
             return None
@@ -992,9 +936,7 @@ class CollectionState():
     def has(self, item: str, player: int, count: int = 1) -> bool:
         return self.prog_items[player][item] >= count
 
-    # for loops are specifically used in all/any/count methods, instead of all()/any()/sum(), to avoid the overhead of
-    # creating and iterating generator instances. In `return all(player_prog_items[item] for item in items)`, the
-    # argument to all() would be a new generator instance, for example.
+    # for loops are specifically used in all/any/count methods, instead of all()/any()/sum(), to avoid...
     def has_all(self, items: Iterable[str], player: int) -> bool:
         """Returns True if each item name of items is in state at least once."""
         player_prog_items = self.prog_items[player]
@@ -1041,8 +983,7 @@ class CollectionState():
         return False
 
     def has_from_list_unique(self, items: Iterable[str], player: int, count: int) -> bool:
-        """Returns True if the state contains at least `count` items matching any of the item names from a list.
-        Ignores duplicates of the same item."""
+        """Returns True if the state contains at least `count` items matching any of the item names from a l..."""
         found: int = 0
         player_prog_items = self.prog_items[player]
         for item_name in items:
@@ -1080,9 +1021,7 @@ class CollectionState():
         return False
 
     def has_group_unique(self, item_name_group: str, player: int, count: int = 1) -> bool:
-        """Returns True if the state contains at least `count` items present in a specified item group.
-        Ignores duplicates of the same item.
-        """
+        """Returns True if the state contains at least `count` items present in a specified item group."""
         found: int = 0
         player_prog_items = self.prog_items[player]
         for item_name in self.multiworld.worlds[player].item_name_groups[item_name_group]:
@@ -1100,8 +1039,7 @@ class CollectionState():
         )
 
     def count_group_unique(self, item_name_group: str, player: int) -> int:
-        """Returns the cumulative count of items from an item group present in state.
-        Ignores duplicates of the same item."""
+        """Returns the cumulative count of items from an item group present in state."""
         player_prog_items = self.prog_items[player]
         return sum(
             player_prog_items[item_name] > 0
@@ -1123,13 +1061,7 @@ class CollectionState():
         return changed
 
     def add_item(self, item: str, player: int, count: int = 1) -> None:
-        """
-        Adds the item to state.
-
-        :param item: The item to be added.
-        :param player: The player the item is for.
-        :param count: How many of the item to add.
-        """
+        """Adds the item to state."""
         assert count > 0
         self.prog_items[player][item] += count
 
@@ -1142,26 +1074,14 @@ class CollectionState():
             self.stale[item.player] = True
 
     def remove_item(self, item: str, player: int, count: int = 1) -> None:
-        """
-        Removes the item from state.
-
-        :param item: The item to be removed.
-        :param player: The player the item is for.
-        :param count: How many of the item to remove.
-        """
+        """Removes the item from state."""
         assert count > 0
         self.prog_items[player][item] -= count
         if self.prog_items[player][item] < 1:
             del (self.prog_items[player][item])
 
     def set_item(self, item: str, player: int, count: int) -> None:
-        """
-        Sets the item in state equal to the provided count.
-
-        :param item: The item to modify.
-        :param player: The player the item is for.
-        :param count: How many of the item to now have.
-        """
+        """Sets the item in state equal to the provided count."""
         assert count >= 0
         if count == 0:
             del (self.prog_items[player][item])
@@ -1206,29 +1126,12 @@ class Entrance:
         region.entrances.append(self)
 
     def is_valid_source_transition(self, er_state: "ERPlacementState") -> bool:
-        """
-        Determines whether this is a valid source transition, that is, whether the entrance
-        randomizer is allowed to pair it to place any other regions. By default, this is the
-        same as a reachability check, but can be modified by Entrance implementations to add
-        other restrictions based on the placement state.
-
-        :param er_state: The current (partial) state of the ongoing entrance randomization
-        """
+        """Determines whether this is a valid source transition, that is, whether the entrance"""
         return self.can_reach(er_state.collection_state)
 
     def can_connect_to(self, other: Entrance, dead_end: bool, er_state: "ERPlacementState") -> bool:
-        """
-        Determines whether a given Entrance is a valid target transition, that is, whether
-        the entrance randomizer is allowed to pair this Entrance to that Entrance. By default,
-        only allows connection between entrances of the same type (one ways only go to one ways,
-        two ways always go to two ways) and prevents connecting an exit to itself in coupled mode.
-
-        :param other: The proposed Entrance to connect to
-        :param dead_end: Whether the other entrance considered a dead end by Entrance randomization
-        :param er_state: The current (partial) state of the ongoing entrance randomization
-        """
+        """Determines whether a given Entrance is a valid target transition, that is, whether"""
         # the implementation of coupled causes issues for self-loops since the reverse entrance will be the
-        # same as the forward entrance. In uncoupled they are ok.
         return self.randomization_type == other.randomization_type and (not er_state.coupled or self.name != other.name)
 
     def __repr__(self):
@@ -1266,8 +1169,6 @@ class Region:
             return iter(self._list)
 
         # This seems to not be needed, but that's a bit suspicious.
-        # def __del__(self):
-        #     self.clear()
 
         def copy(self):
             return self._list.copy()
@@ -1347,12 +1248,7 @@ class Region:
             return entrance.parent_region.get_connecting_entrance(is_main_entrance)
 
     def add_locations(self, locations: Mapping[str, int | None], location_type: type[Location] | None = None) -> None:
-        """
-        Adds locations to the Region object, where location_type is your Location class and locations is a dict of
-        location names to address.
-
-        :param locations: dictionary of locations to be created and added to this Region `{name: ID}`
-        :param location_type: Location class to be used to create the locations with"""
+        """Adds locations to the Region object, where location_type is your Location class and locations is..."""
         if location_type is None:
             location_type = Location
         for location, address in locations.items():
@@ -1367,17 +1263,7 @@ class Region:
         item_type: type[Item] | None = None,
         show_in_spoiler: bool = True,
     ) -> Item:
-        """
-        Adds an event location/item pair to the region.
-
-        :param location_name: Name for the event location.
-        :param item_name: Name for the event item. If not provided, defaults to location_name.
-        :param rule: Callable to determine access for this event location within its region.
-        :param location_type: Location class to create the event location with. Defaults to BaseClasses.Location.
-        :param item_type: Item class to create the event item with. Defaults to BaseClasses.Item.
-        :param show_in_spoiler: Will be passed along to the created event Location's show_in_spoiler attribute.
-        :return: The created Event Item
-        """
+        """Adds an event location/item pair to the region."""
         if location_type is None:
             location_type = Location
 
@@ -1402,12 +1288,7 @@ class Region:
 
     def connect(self, connecting_region: Region, name: Optional[str] = None,
                 rule: Optional[Callable[[CollectionState], bool]] = None) -> Entrance:
-        """
-        Connects this Region to another Region, placing the provided rule on the connection.
-
-        :param connecting_region: Region object to connect to path is `self -> exiting_region`
-        :param name: name of the connection being created
-        :param rule: callable to determine access of this connection to go from self to the exiting_region"""
+        """Connects this Region to another Region, placing the provided rule on the connection."""
         exit_ = self.create_exit(name if name else f"{self.name} -> {connecting_region.name}")
         if rule:
             exit_.access_rule = rule
@@ -1415,34 +1296,20 @@ class Region:
         return exit_
 
     def create_exit(self, name: str) -> Entrance:
-        """
-        Creates and returns an Entrance object as an exit of this region.
-
-        :param name: name of the Entrance being created
-        """
+        """Creates and returns an Entrance object as an exit of this region."""
         exit_ = self.entrance_type(self.player, name, self)
         self.exits.append(exit_)
         return exit_
 
     def create_er_target(self, name: str) -> Entrance:
-        """
-        Creates and returns an Entrance object as an entrance to this region
-
-        :param name: name of the Entrance being created
-        """
+        """Creates and returns an Entrance object as an entrance to this region"""
         entrance = self.entrance_type(self.player, name)
         entrance.connect(self)
         return entrance
 
     def add_exits(self, exits: Iterable[str] | Mapping[str, str | None],
                   rules: Mapping[str, Callable[[CollectionState], bool]] | None = None) -> List[Entrance]:
-        """
-        Connects current region to regions in exit dictionary. Passed region names must exist first.
-
-        :param exits: exits from the region. format is {"connecting_region": "exit_name"}. if a non dict is provided,
-                      created entrances will be named "self.name -> connecting_region"
-        :param rules: rules for the exits from this region. format is {"connecting_region": rule}
-        """
+        """Connects current region to regions in exit dictionary. Passed region names must exist first."""
         if not isinstance(exits, Mapping):
             exits = dict.fromkeys(exits)
         return [
@@ -1703,7 +1570,6 @@ class Spoiler:
         while sphere_candidates:
 
             # build up spheres of collection radius.
-            # Everything in each sphere is independent from each other in dependencies and only depends on lower spheres
 
             sphere = {location for location in sphere_candidates if state.can_reach(location)}
 
@@ -1730,7 +1596,6 @@ class Spoiler:
                     break
 
         # in the second phase, we cull each sphere such that the game is still beatable,
-        # reducing each range of influence to the bare minimum required inside it
         required_locations = {location for sphere in collection_spheres for location in sphere}
         for num, sphere in reversed(tuple(enumerate(collection_spheres))):
             to_delete: Set[Location] = set()
@@ -1752,8 +1617,7 @@ class Spoiler:
         removed_precollected: List[Item] = []
 
         for precollected_items in multiworld.precollected_items.values():
-            # The list of items is mutated by removing one item at a time to determine if each item is required to beat
-            # the game, and re-adding that item if it was required, so a copy needs to be made before iterating.
+            # The list of items is mutated by removing one item at a time to determine if each item is required...
             for item in precollected_items.copy():
                 if not item.advancement:
                     continue
@@ -1767,10 +1631,6 @@ class Spoiler:
                     removed_precollected.append(item)
 
         # we are now down to just the required progress items in collection_spheres. Unfortunately
-        # the previous pruning stage could potentially have made certain items dependant on others
-        # in the same or later sphere (because the location had 2 ways to access but the item originally
-        # used to access it was deemed not required.) So we need to do one final sphere collection pass
-        # to build up the correct spheres
 
         required_locations = {item for sphere in collection_spheres for item in sphere}
         state = CollectionState(multiworld)
@@ -1831,7 +1691,6 @@ class Spoiler:
                  if location.player == player})
             if player in multiworld.get_game_players("A Link to the Past"):
                 # If Pyramid Fairy Entrance needs to be reached, also path to Big Bomb Shop
-                # Maybe move the big bomb over to the Event system instead?
                 if any(exit_path == 'Pyramid Fairy' for path in self.paths.values()
                        for (_, exit_path) in path):
                     if multiworld.worlds[player].options.mode != 'inverted':
@@ -1928,10 +1787,7 @@ class Spoiler:
 
 
 class Tutorial(NamedTuple):
-    """Class to build website tutorial pages from a .md file in the world's /docs folder. Order is as follows.
-    Name of the tutorial as it will appear on the site. Concise description covering what the guide will entail.
-    Language the guide is written in. Name of the file ex 'setup_en.md'. Name of the link on the site; game name is
-    filled automatically so 'setup/en' etc. Author or authors."""
+    """Class to build website tutorial pages from a .md file in the world's /docs folder. Order is as fo..."""
     tutorial_name: str
     description: str
     language: str

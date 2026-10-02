@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""
-Hub Setup Wizard — local HTML UI when Hub cannot start.
-
-Serves a tiny stdlib HTTP page on 127.0.0.1 and opens the default browser.
-No tkinter / Tcl-Tk. Users can install managed Node 24 / Python 3.12, repair
-Electron, launch Hub, or escape to Kivy.
-"""
+"""Hub Setup Wizard — local HTML UI when Hub cannot start."""
 
 from __future__ import annotations
 
@@ -39,12 +33,7 @@ def invalidate_checklist_cache() -> None:
 
 
 def collect_checklist(*, force: bool = False) -> List[Tuple[str, bool, str]]:
-    """
-    Return checklist rows: (label, ok, detail).
-
-    Uses hub_launcher / ensure_client_deps helpers (no network).
-    Results are cached briefly so status polling does not flash consoles.
-    """
+    """Return checklist rows: (label, ok, detail)."""
     global _checklist_cache_mono, _checklist_cache_rows
     now = time.monotonic()
     with _checklist_cache_lock:
@@ -666,7 +655,6 @@ def _dispatch_action(
             return False, "not_ready", {}
 
         # Run in this request so the POST can return done+choice and the
-        # browser page can close before the server shuts down.
         state.set_busy(True)
         try:
             hub = helpers["find_hub_dir"]()
@@ -726,15 +714,7 @@ def run_setup_wizard(
     args: Sequence[str] = (),
     wait: bool = True,
 ) -> str:
-    """
-    Modal Hub Setup Wizard (local HTML page in the default browser).
-
-    Returns ``\"hub\"`` after a successful Hub launch from this page, or
-    ``\"python\"`` when the user chooses the Kivy escape hatch.
-
-    Hub is always spawned with ``wait=False``. The ``wait`` argument is retained
-    for call-site compatibility and is unused for Launch Hub.
-    """
+    """Modal Hub Setup Wizard (local HTML page in the default browser)."""
     _ = wait
     helpers = _import_hub_helpers()
     state = _WizardState(reason=reason, args=args)

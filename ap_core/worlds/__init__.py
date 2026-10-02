@@ -1,10 +1,4 @@
-"""
-Minimal ``worlds`` package for Hub / MetroidBreadClient under frozen Archipelago installs.
-
-Frozen ProgramData builds only ship ``CommonClient`` as Python 3.13 ``.pyc`` inside
-``lib/library.zip``, which system Python cannot import. The Hub therefore runs against
-``ap_core/`` (loose ``.py`` sources) and this stub instead of loading every AP world.
-"""
+"""Minimal ``worlds`` package for Hub / MetroidBreadClient under frozen Archipelago installs."""
 
 from __future__ import annotations
 

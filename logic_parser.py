@@ -1,7 +1,4 @@
-"""
-Randovania Logic Database Parser for Archipelago
-Parses Randovania's logic JSON files and converts them to Archipelago rules
-"""
+"""Randovania Logic Database Parser for Archipelago"""
 
 import json
 import os
@@ -13,29 +10,17 @@ from typing import Dict, List, Any, Set, Tuple, Optional
 LOGIC_DATABASE_DIRNAME = "logic_database"
 
 # Fixed list of region files that make up the logic database. Kept as an
-# explicit list (rather than directory globbing) so files can be read via
-# pkgutil, which works both from a plain folder *and* from inside a zipped
-# .apworld (globbing a directory living inside a zip is not reliably
-# supported the way filesystem globbing is).
 REGION_FILES: Tuple[str, ...] = (
     "Artaria.json", "Cataris.json", "Dairon.json", "Burenia.json",
     "Ferenia.json", "Ghavoran.json", "Hanubia.json", "Elun.json", "Itorash.json",
 )
 
 # This module's own package, e.g. "worlds.metroid_bread". When the world is
-# installed as a .apworld and loaded via zipimport, this is still set
-# correctly, and pkgutil.get_data() knows how to pull files out of the zip
-# using the loader's get_data() (unlike plain open(), which only understands
-# real filesystem paths). When this file is executed directly as a script
-# (e.g. `python logic_parser.py` from inside worlds/metroid_bread/ for local
-# tooling), __package__ is empty and we fall back to filesystem access.
 _PACKAGE = __package__ or None
 
 
 def read_database_bytes(filename: str, fallback_dir: Optional[Path]) -> bytes:
-    """Read a logic_database file in a way that works both as a loose folder
-    and packaged inside a .apworld zip.
-    """
+    """Read a logic_database file in a way that works both as a loose folder"""
     if _PACKAGE:
         try:
             data = pkgutil.get_data(_PACKAGE, f"{LOGIC_DATABASE_DIRNAME}/{filename}")
@@ -46,8 +31,6 @@ def read_database_bytes(filename: str, fallback_dir: Optional[Path]) -> bytes:
             return data
 
     # Fallback: plain filesystem read, used for standalone dev scripts that
-    # import this module outside of the `worlds` package, or point at an
-    # arbitrary logic_db_path (e.g. a Randovania checkout).
     if fallback_dir is not None:
         return (fallback_dir / filename).read_bytes()
 
@@ -103,10 +86,7 @@ class RandovaniaLogicParser:
         print(f"[OK] Loaded {len(self.templates)} requirement templates")
         
     def get_pickup_locations(self) -> List[Tuple[str, str, str, str]]:
-        """
-        Get all pickup locations across all regions
-        Returns: List of (region, area, node_name, pickup_index) tuples
-        """
+        """Get all pickup locations across all regions"""
         locations = []
         
         for region_name, region_data in self.regions.items():
@@ -127,10 +107,7 @@ class RandovaniaLogicParser:
         return locations
     
     def get_dock_connections(self) -> List[Tuple[str, str, str, str, str, str, Any]]:
-        """
-        Get all dock (door/teleporter) connections between areas/regions
-        Returns: List of (source_region, source_area, source_node, target_region, target_area, target_node, requirement) tuples
-        """
+        """Get all dock (door/teleporter) connections between areas/regions"""
         connections = []
         
         for region_name, region_data in self.regions.items():
@@ -164,14 +141,7 @@ class RandovaniaLogicParser:
         return connections
     
     def get_node_connections(self, region_name: str, area_name: str, node_name: str) -> List[Tuple[str, str, str, Any]]:
-        """
-        Get all connections FROM a specific node
-        Returns: List of (target_region, target_area, target_node, requirement) tuples
-        
-        This handles both:
-        1. Internal connections (to other nodes in same area)
-        2. Dock connections (doors/tunnels to other areas via default_connection)
-        """
+        """Get all connections FROM a specific node"""
         connections = []
         
         if region_name not in self.regions:
@@ -217,10 +187,7 @@ class RandovaniaLogicParser:
         return connections
     
     def get_starting_nodes(self) -> List[Tuple[str, str, str]]:
-        """
-        Get all valid starting locations (spawn points)
-        Returns: List of (region, area, node) tuples
-        """
+        """Get all valid starting locations (spawn points)"""
         starting_nodes = []
         
         for region_name, region_data in self.regions.items():
@@ -272,10 +239,7 @@ class RandovaniaLogicParser:
         return {"type": "trivial"}
     
     def resolve_requirement(self, req: Any, context: str = "") -> Optional[str]:
-        """
-        Convert a Randovania requirement into an Archipelago rule lambda string
-        Returns a Python expression that can be evaluated
-        """
+        """Convert a Randovania requirement into an Archipelago rule lambda string"""
         if req is None:
             return "True"
         
@@ -353,10 +317,7 @@ class RandovaniaLogicParser:
         return None
     
     def _map_resource_to_ap_item(self, resource_type: str, resource_name: str) -> Optional[str]:
-        """
-        Map Randovania resource names to Archipelago item names
-        Comprehensive mapping of all items, events, and tricks
-        """
+        """Map Randovania resource names to Archipelago item names"""
         if resource_type == "items":
             # Direct item mapping from Randovania short names to AP names
             item_mapping = {
@@ -411,8 +372,6 @@ class RandovaniaLogicParser:
                 return mapped
             
             # Check for progressive items
-            # If using progressive options, we need to map to progressive names
-            # For now, return the individual items
             return None
         
         elif resource_type == "events":

@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""
-Direct Archipelago → Dread Patcher Converter
-
-Converts Archipelago spoiler logs directly to open-dread-rando patcher.json format,
-bypassing Randovania's validation entirely.
-
-This allows foreign item names (e.g., "Monomon" from Hollow Knight) to appear in-game!
-"""
+"""Direct Archipelago → Dread Patcher Converter"""
 
 import copy
 import json
@@ -18,7 +11,6 @@ from typing import Dict, List, Optional, Tuple
 
 _ROOT = Path(__file__).resolve().parent
 # Prefer dread_paths so AP root (Options/CommonClient) wins over this world dir's Options.py.
-# Runtime extracts at custom_worlds/_metroid_bread_runtime must not shadow via parents[1].
 try:
     import dread_paths
 
@@ -78,7 +70,6 @@ def _carousel_tip_env_hint() -> str:
     return "METROID_BREAD_CAROUSEL_TIP_PATCHES=0 to disable later"
 
 # Load AP → Randovania location mapping.
-# Under frozen installs, dread_paths registers WORLD_DIR as worlds.metroid_bread.
 from worlds.metroid_bread.rdvgame_export import AP_TO_RANDOVANIA_LOCATION_MAP
 from worlds.metroid_bread.starting_locations import (
     DEFAULT_PATCHER_REF,
@@ -182,10 +173,7 @@ def detect_dread_players(spoiler_path: Path) -> List[str]:
 
 
 def resolve_dread_player(spoiler_path: Path, requested: str) -> str:
-    """
-    Use requested name if it has placements; otherwise auto-pick the sole
-    Metroid Bread player from the spoiler header.
-    """
+    """Use requested name if it has placements; otherwise auto-pick the sole"""
     if is_solo_dread_spoiler(spoiler_path):
         header_names = _spoiler_header_player_names(spoiler_path)
         if header_names:
@@ -226,10 +214,7 @@ def resolve_dread_player(spoiler_path: Path, requested: str) -> str:
 
 
 def parse_starting_location(spoiler_path: Path, our_player_name: str) -> Dict[str, str]:
-    """
-    Read Starting Location (Player): Region/Area/Node from spoiler header.
-    Falls back to Artaria Intro StartPoint0 when missing.
-    """
+    """Read Starting Location (Player): Region/Area/Node from spoiler header."""
     entries: List[Tuple[str, str]] = []
     for line in _iter_spoiler_header_lines(spoiler_path):
         match = STARTING_LOCATION_RE.match(line)
@@ -392,9 +377,6 @@ def _display_item_name(item_name: str) -> str:
 
 
 # ODR writes spoiler_log into credits.txt via null-terminated UTF-16 (CStringRobust).
-# RDV emits printable ASCII + "\n" for multi-copy majors; it does not scrub input.
-# Bread must scrub AP player/item names: nulls truncate BTXT entries, and control /
-# non-ASCII / emoji have crashed Switch text draws for some players at credits.
 _CREDITS_MAX_LINE = 64
 _CREDITS_MAX_LINES = 16
 
@@ -444,12 +426,7 @@ def sanitize_credits_text(
     max_lines: int = _CREDITS_MAX_LINES,
     allow_newlines: bool = True,
 ) -> str:
-    """
-    Scrub a string destined for Dread credits.txt / in-game localization.
-
-    Keeps printable ASCII (0x20–0x7E). Optionally keeps ``\\n`` (RDV joins
-    multi-location majors with newlines). Everything else → ``?``.
-    """
+    """Scrub a string destined for Dread credits.txt / in-game localization."""
     text = str(value if value is not None else "")
     text = text.replace("\x00", "")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -498,12 +475,7 @@ def build_credits_spoiler_log(
     *,
     our_player: Optional[str] = None,
 ) -> Dict[str, str]:
-    """
-    Build ODR ``spoiler_log`` for credits from AP placements (RDV-style).
-
-    Only our-world majors that belong to this player. Multi-copy items join
-    locations with ``\\n``. Location format: ``Region - Area``.
-    """
+    """Build ODR ``spoiler_log`` for credits from AP placements (RDV-style)."""
     del our_player  # placements already carry is_ours / item_player
     buckets: Dict[str, List[str]] = {name: [] for name in CREDITS_SPOILER_ITEMS}
     for region, area, _node, item, _item_player, is_ours in placements:
@@ -628,12 +600,7 @@ def create_special_pickup_entry(
     flash_shift_plan: Optional[dict] = None,
     yield_plan: Optional[dict] = None,
 ) -> dict:
-    """
-    Boss/EMMI death rewards for open-dread-rando.
-
-    Same shapes as Randovania: cutscene/corpius/corex/emmi with pickup_lua_callback.
-    Vanilla death grants are cleared and replaced by these resources.
-    """
+    """Boss/EMMI death rewards for open-dread-rando."""
     resources, caption, _ = _pickup_resources_and_caption(
         item_name,
         is_foreign,
@@ -692,10 +659,6 @@ def create_pickup_entry(
     }
 
     # Minimap icon actor may differ from the world pickup actor. The 12 major-item
-    # spheres (ItemSphere_ChargeBeam, IT_VARIA_GEN_001, …) live under powerup_*
-    # names in the scenario .bmmap `items` category — same map_icon_actor extras
-    # Randovania uses. Without this, ODR never replaces the vanilla major icons
-    # (world-map visible + full-zoom pulse).
     map_actor_name = actor_data.get("map_icon_actor") or actor_data["actor"]
     original_actor = {
         "scenario": actor_data["scenario"],
@@ -712,11 +675,6 @@ def create_pickup_entry(
     )
 
     # Spoiler-hide: unique ItemCustom{n} per location, ? sprite, "Unknown Item".
-    # Use coords + is_global/full_zoom_scale instead of base_icon="unknown":
-    # MapIconEditor.copy-from-base keeps unknown's True flags (world map + pulse).
-    # Tanks use False/False; majors use True/True — we want tank-like AP unknowns.
-    # ODR MapIconEditor numbers custom_icon entries in pickups-array order when
-    # original_actor is in that scenario's vanilla items list (Phase 2 sidecar).
     map_icon = {
         "custom_icon": {
             "label": "Unknown Item",
@@ -770,13 +728,7 @@ def _all_dread_pickup_indices() -> list[int]:
 
 
 def create_nothing_pad_entry(pickup_index: int) -> Optional[dict]:
-    """
-    Patch a missing pool slot as Randovania Nothing (ITEM_NONE).
-
-    Used when AP excluded the location or Boss & EMMI Pickups is off — otherwise
-    those actors/bosses would still grant vanilla items. Actor pads use ODR's
-    built-in ItemNothing icon (no unique ItemCustom / map-label slot).
-    """
+    """Patch a missing pool slot as Randovania Nothing (ITEM_NONE)."""
     special = SPECIAL_PICKUPS.get(str(pickup_index))
     if special:
         return create_special_pickup_entry(
@@ -816,12 +768,7 @@ def pad_pickups_with_nothing(
     seen_indices: set[int],
     min_items: int = ODR_PICKUPS_MIN_ITEMS,
 ) -> int:
-    """
-    Append Nothing for every unused dread pickup index.
-
-    Returns how many entries were added. After padding, ``pickups`` should be
-    the full actor+special set (>= ODR minItems).
-    """
+    """Append Nothing for every unused dread pickup index."""
     pickups = patcher_data.setdefault("pickups", [])
     added = 0
     for idx in _all_dread_pickup_indices():
@@ -897,8 +844,6 @@ def _normalize_constant_environment_damage(raw) -> dict:
     return out
 
 # Fields older ODR schemas reject via additionalProperties: false.
-# show_dna_in_hud / has_*_upgrades / enable_logging / skip_item_popups: ODR ≥2.19.
-# split_saves under cosmetic_patches: ODR ≥2.19.
 _CUSTOM_INIT_OPTIONAL_KEYS = frozenset({"show_dna_in_hud"})
 _ROOT_OPTIONAL_KEYS = frozenset({
     "has_flash_upgrades",
@@ -1041,10 +986,7 @@ def sanitize_custom_init_for_odr(
     *,
     py_cmd: Optional[List[str]] = None,
 ) -> list[str]:
-    """Drop custom_init keys the target ODR schema does not allow.
-
-    Returns the list of removed keys (empty if nothing changed).
-    """
+    """Drop custom_init keys the target ODR schema does not allow."""
     try:
         custom_init = patcher_data["cosmetic_patches"]["lua"]["custom_init"]
     except (KeyError, TypeError):
@@ -1071,11 +1013,7 @@ def sanitize_root_for_odr(
     *,
     py_cmd: Optional[List[str]] = None,
 ) -> list[str]:
-    """Drop root keys the target ODR schema rejects (additionalProperties: false).
-
-    Same skew class as show_dna_in_hud: ODR ≤2.18 has no has_flash_upgrades /
-    has_speed_upgrades / enable_logging / skip_item_popups.
-    """
+    """Drop root keys the target ODR schema rejects (additionalProperties: false)."""
     if not isinstance(patcher_data, dict):
         return []
     allowed = _load_odr_root_properties(py_cmd)
@@ -1084,7 +1022,6 @@ def sanitize_root_for_odr(
         drop = [k for k in list(patcher_data) if k in _ROOT_OPTIONAL_KEYS]
     else:
         # Keep AP-private underscore keys until we persist them for finalize;
-        # callers must pop them before dumping patcher.json for ODR.
         drop = [
             k
             for k in list(patcher_data)
@@ -1122,7 +1059,6 @@ def sanitize_cosmetic_for_odr(
             drop = [k for k in list(cosmetic) if k in _COSMETIC_OPTIONAL_KEYS]
         else:
             # Only strip known optional keys when schema omits them — never
-            # delete required keys (config/lua/shield_versions) if probe is odd.
             drop = [
                 k
                 for k in list(cosmetic)
@@ -1139,11 +1075,7 @@ def sanitize_patcher_for_odr(
     *,
     py_cmd: Optional[List[str]] = None,
 ) -> list[str]:
-    """Strip all known ODR-version-skew fields the target schema rejects.
-
-    Returns dotted paths of removed keys (e.g. ``show_dna_in_hud``,
-    ``has_flash_upgrades``, ``cosmetic_patches.split_saves``).
-    """
+    """Strip all known ODR-version-skew fields the target schema rejects."""
     removed: list[str] = []
     for key in sanitize_root_for_odr(patcher_data, py_cmd=py_cmd):
         removed.append(key)
@@ -1180,11 +1112,7 @@ def apply_upgrade_menu_flags(
     *,
     py_cmd: Optional[List[str]] = None,
 ) -> None:
-    """Set has_flash_upgrades / has_speed_upgrades when the ODR schema allows.
-
-    Mirrors Randovania patch_data_factory: these flags control Samus-menu rows.
-    Omitted on ODR ≤2.18 (root additionalProperties: false).
-    """
+    """Set has_flash_upgrades / has_speed_upgrades when the ODR schema allows."""
     if _root_field_supported("has_flash_upgrades", py_cmd):
         patcher_data["has_flash_upgrades"] = _patcher_has_item(
             patcher_data, "ITEM_UPGRADE_FLASH_SHIFT_CHAIN"
@@ -1299,12 +1227,7 @@ def _sanitize_connection_name(name: str) -> str:
 
 
 def _harden_elevator_entry(entry: dict) -> dict:
-    """Ensure elevator entries are safe for open-dread-rando + in-game use.
-
-    - Require teleporter/destination scenario+actor (non-empty strings).
-    - Ensure connection_name (ODR schema); strip '.' (E.M.M.I. → EMMI).
-    - Reject destination.actor that looks like a missing/null placeholder.
-    """
+    """Ensure elevator entries are safe for open-dread-rando + in-game use."""
     entry = dict(entry)
     tele = dict(entry.get("teleporter") or {})
     dest = dict(entry.get("destination") or {})
@@ -1325,12 +1248,7 @@ def _harden_elevator_entry(entry: dict) -> dict:
 
 
 def _apply_elevator_destination_room_names(patcher_data: dict, elevators: list) -> None:
-    """Overlay transporter collision-cameras with shuffled destination labels.
-
-    Matches Randovania: room-name HUD shows "Transport to {connection_name}" for
-    elevator/shuttle rooms. Also forces room-name display on when elevators are
-    shuffled and the cosmetic was NEVER (otherwise destination labels never appear).
-    """
+    """Overlay transporter collision-cameras with shuffled destination labels."""
     if not elevators:
         return
     cosmetic = patcher_data.setdefault("cosmetic_patches", {})
@@ -1396,10 +1314,36 @@ def _set_mass_delete_to_remove(patcher_data: dict, to_remove: list) -> None:
     patcher_data["mass_delete_actors"] = mda
 
 
+def _station_warp_from_extras(extras: dict) -> tuple[bool, str, str]:
+    """Return (enabled, requirement, reach) for the pause-map station warp.
+
+    ``station_map_warp`` is the master enable. ``warp_allow`` is accepted as an
+    alias so a caller that set only one of them still turns the warp on.
+    Missing or unknown requirement/reach fall back to the script's current
+    behavior: visited stations, any region the pause map can show (global).
+    """
+    enabled = bool(extras.get("station_map_warp")) or bool(extras.get("warp_allow"))
+    requirement = str(extras.get("warp_requirement") or "visited").strip().lower()
+    reach = str(extras.get("warp_reach") or "global").strip().lower()
+    if requirement not in ("visible", "visited"):
+        requirement = "visited"
+    if reach not in ("local", "global"):
+        reach = "global"
+    return enabled, requirement, reach
+
+
 def apply_dread_patch_extras(patcher_data: dict, extras: dict, *, our_player: str) -> None:
     """Merge door/elevator/DNA/cosmetic overrides from generation into patcher JSON."""
     if not extras:
         return
+
+    # Popped before ODR schema dump. Off leaves the pause-map warp script uninstalled.
+    # station_map_warp is the master enable. A literal warp_allow, if a caller
+    # also set one, enables too so the two keys cannot disagree into "off".
+    enabled, requirement, reach = _station_warp_from_extras(extras)
+    patcher_data["_ap_station_map_warp"] = enabled
+    patcher_data["_ap_station_warp_requirement"] = requirement
+    patcher_data["_ap_station_warp_reach"] = reach
 
     door_patches = extras.get("door_patches") or []
     if door_patches:
@@ -1452,7 +1396,6 @@ def apply_dread_patch_extras(patcher_data: dict, extras: dict, *, our_player: st
         if field not in cosmetic:
             continue
         # Skip custom_init keys the installed ODR schema rejects (e.g. show_dna_in_hud
-        # on open-dread-rando ≤2.18 — additionalProperties: false).
         if (
             len(path) >= 4
             and path[:3] == ("cosmetic_patches", "lua", "custom_init")
@@ -1473,12 +1416,10 @@ def apply_dread_patch_extras(patcher_data: dict, extras: dict, *, our_player: st
         )
 
     # RDV: Energy Per Tank only applies with Immediate Energy Parts; otherwise
-    # force 100 so part/tank Lua capacity stays vanilla.
     if "immediate_energy_parts" in cosmetic and not cosmetic.get("immediate_energy_parts"):
         patcher_data["energy_per_tank"] = 100.0
 
     # After cosmetic_combat (which may set enable_room_name_display), overlay
-    # transporter destination names and optionally force display for elevator rando.
     if elevators:
         _apply_elevator_destination_room_names(patcher_data, elevators)
 
@@ -1507,7 +1448,6 @@ def apply_dread_patch_extras(patcher_data: dict, extras: dict, *, our_player: st
             patcher_data["objective"] = obj
         obj["required_artifacts"] = int(required)
         # Prefer real required_dna for ADAM text (All Bosses may force artifacts≥1
-        # for the Itorash door while DNA is still 0).
         hint_dna = extras.get("required_dna")
         if hint_dna is None:
             hint_dna = required
@@ -1591,7 +1531,6 @@ def spoiler_seed_key(spoiler_path: Path) -> str:
 
 
 # Title-screen branding (BTXT GUI_COMPANY_TITLE_SCREEN). ODR uses `|` inside the
-# second line for its own separator; we use `\n` between the two visual lines.
 DEFAULT_ODR_VERSION = "2.18.0"
 _STALE_RDV_SEED_MARKERS = ("Slaaga Spittail Robe", "57GXBFRH")
 _DIFSELECTOR_LABEL_KEYS = (
@@ -1712,16 +1651,7 @@ def apply_company_title_screen(
     seed_id: Optional[str] = None,
     spoiler_path: Optional[Path] = None,
 ) -> str:
-    """
-    Replace GUI_COMPANY_TITLE_SCREEN entirely (no RDV leftover prepend).
-
-    Also refreshes difficulty-selector descriptors when present so they do not
-    keep the stale sample-seed word hash.
-
-    Stores the resolved display seed on patcher_data['_ap_seed_id'] for finalize
-    (Init.sApSeedId / ap_seed.json). That key is AP-only and must be stripped
-    before ODR schema validation.
-    """
+    """Replace GUI_COMPANY_TITLE_SCREEN entirely (no RDV leftover prepend)."""
     sid = resolve_title_seed_id(
         spoiler_path=spoiler_path,
         seed_id=seed_id,
@@ -1739,11 +1669,7 @@ def apply_company_title_screen(
 
 
 def normalize_ap_seed_id(value: Optional[str]) -> str:
-    """Canonical seed id for client↔game compare (title / RoomInfo / Init.sApSeedId).
-
-    Strict on purpose: crossed Lua EXEC replies (DeathLink polls, map status,
-    etc.) must never look like a seed, or Hub falsely kicks players mid-game.
-    """
+    """Canonical seed id for client↔game compare (title / RoomInfo / Init.sApSeedId)."""
     raw = (value or "").strip()
     if not raw:
         return ""
@@ -1796,15 +1722,7 @@ def resolve_layout_uuid(
     *,
     layout_uuid: Optional[str] = None,
 ) -> str:
-    """
-    Pick layout_uuid without inventing a fresh random id each run.
-
-    Priority:
-      1. Explicit override (recovery / CLI)
-      2. Existing AP_<player>_patcher.json next to the spoiler (preserve prior patch)
-      3. Non-placeholder UUID already on the template (rare intentional override)
-      4. Deterministic uuid5(seed, player)
-    """
+    """Pick layout_uuid without inventing a fresh random id each run."""
     if isinstance(layout_uuid, str) and layout_uuid.strip():
         return layout_uuid.strip()
 
@@ -1824,8 +1742,6 @@ def resolve_layout_uuid(
 
 
 # Reveal sprite per pickup_index from the most recent create_patcher_json call.
-# patcher.json cannot carry it (ODR rejects unknown keys) and only the spoiler
-# knows the AP item name, which beats the pickup `model` for progressives.
 _LAST_MAP_ICON_SPRITES: Dict[int, Tuple[int, int]] = {}
 
 
@@ -1890,7 +1806,6 @@ def create_patcher_json(
         ),
         "game_patches": {
             # Cannot include custom files here due to schema restrictions
-            # randomizer_powerup.lua must be manually copied to the mod folder
             **template_patcher.get("game_patches", {})
         },
         "show_shields_on_minimap": template_patcher.get("show_shields_on_minimap", True),
@@ -1920,8 +1835,6 @@ def create_patcher_json(
     print(f"[OK] Generated {len(patcher_data['hints'])} Adam Nav Station hints")
 
     # Credits "Major Item Locations" (ODR patch_credits). Always seed-built +
-    # sanitized — never copy sample_patcher spoiler_log (wrong locations / dirty
-    # chars). Empty is OK: branding falls back when Major Item Locations is absent.
     spoiler_log = build_credits_spoiler_log(placements, our_player=our_player_name)
     patcher_data["spoiler_log"] = spoiler_log
     print(f"[OK] Credits spoiler_log: {len(spoiler_log)} major item entries")
@@ -1962,8 +1875,6 @@ def create_patcher_json(
     seen_indices: set[int] = set()
     skipped_dupes = 0
     # pickup_index → reveal name for MAP_ICON_ItemCustom{n}_R / _R_IL text_patches.
-    # Keyed by pickup_index, never by a local counter: only the sidecar knows which
-    # pickups ODR actually numbers (via original_actor ∈ vanilla bmmap items).
     map_icon_item_by_pickup: dict[int, str] = {}
     # pickup_index → (row, col) the icon reveals to on collect / AP hint.
     map_icon_sprite_by_pickup: dict[int, tuple[int, int]] = {}
@@ -2016,8 +1927,6 @@ def create_patcher_json(
                 )
 
     # Short AP pools (Boss & EMMI off, excludes, …) must still clear every vanilla
-    # actor/boss slot — pad missing indices with RDV Nothing (ITEM_NONE). Also
-    # satisfies ODR pickups.minItems (146).
     pool_before_pad = len(patcher_data["pickups"])
     nothing_padded = pad_pickups_with_nothing(
         patcher_data, seen_indices=seen_indices
@@ -2075,7 +1984,6 @@ def create_patcher_json(
         print(f"     - {no_icon} pickups keep their vanilla map icon (no ItemCustom slot)")
 
     # AP context-4 tip carousel experiment (TIP_000–TIP_004). Default ON.
-    # Disable: METROID_BREAD_CAROUSEL_TIP_PATCHES=0 then re-patch.
     from dread_carousel_tip_patches import (
         build_carousel_tip_text_patches,
         carousel_tip_text_patches_enabled,
@@ -2101,7 +2009,6 @@ def create_patcher_json(
     apply_upgrade_menu_flags(patcher_data)
 
     # Belt-and-suspenders: strip any fields this process's ODR rejects
-    # (template leftovers, validate()-filled defaults, extras applied early).
     removed = sanitize_patcher_for_odr(patcher_data)
     if removed:
         print(

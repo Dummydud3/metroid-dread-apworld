@@ -1,9 +1,4 @@
-"""
-Metroid Bread icon registration
-
-Registers the launcher icon under the key used by launcher.py (icon="metroid_bread").
-Uses the ap: path form so the icon resolves from the world package / apworld.
-"""
+"""Metroid Bread icon registration"""
 
 from worlds.LauncherComponents import icon_paths
 

@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""
-Verify that a Ryujinx Dread mod can accept Archipelago / Randovania on TCP 6969.
-
-Checks:
-  1. patcher.json enable_remote_lua
-  2. exefs/subsdk9 + main.npdm (open-dread-rando-exlaunch)
-  3. romfs init.lc present
-  4. Whether something is currently listening on 6969
-  5. Optional live TCP connect attempt
-"""
+"""Verify that a Ryujinx Dread mod can accept Archipelago / Randovania on TCP 6969."""
 
 from __future__ import annotations
 

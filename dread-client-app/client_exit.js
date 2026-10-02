@@ -1,6 +1,4 @@
-/**
- * Decode Hub child-process exits (MetroidBreadClient / patcher) into UI text.
- */
+/* * */
 
 function formatPythonCmd(launcher) {
   if (!launcher) return "(none)";
@@ -21,10 +19,7 @@ function pythonMissingError() {
   );
 }
 
-/**
- * Explain a non-zero client exit. Maps Windows py-launcher codes and surfaces
- * the last stderr lines so users see a real error, not only a bare number.
- */
+/* * */
 function explainClientExit(code, stderrBuf) {
   const blob = String(stderrBuf || "");
   const unsigned = code == null ? null : code >>> 0;

@@ -1,9 +1,4 @@
-"""
-Regenerate Events.py from logic_database.
-
-Usage (from Archipelago-main):
-  py -3.11 -m worlds.metroid_bread._gen_events
-"""
+"""Regenerate Events.py from logic_database."""
 
 from pathlib import Path
 import json

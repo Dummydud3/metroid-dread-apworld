@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Extract Dread BMMAP terrain into dread-client-app/visualizer/terrain.json.
-
-Usage (from the Archipelago repo root):
-  py -3.12 worlds/metroid_bread/tools/build_visualizer_terrain.py
-  py -3.12 worlds/metroid_bread/tools/build_visualizer_terrain.py --romfs "C:\\Users\\dummy\\Downloads\\md rando"
-"""
+"""Extract Dread BMMAP terrain into dread-client-app/visualizer/terrain.json."""
 
 from __future__ import annotations
 

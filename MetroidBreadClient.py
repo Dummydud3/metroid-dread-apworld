@@ -1,12 +1,4 @@
-"""
-Metroid Bread Client for Archipelago
-
-Connects to Ryujinx running a patched Metroid Bread (open-dread-rando remote Lua
-on TCP port 6969) and synchronizes locations/items with the Archipelago server.
-
-Protocol adapted from Randovania's DreadExecutor / MercuryConnector / DreadRemoteConnector.
-See DREAD_TECHNICAL_REFERENCE.md for wire formats.
-"""
+"""Metroid Bread Client for Archipelago"""
 
 from __future__ import annotations
 
@@ -29,12 +21,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Colocated under worlds/metroid_bread — ensure sibling client modules + AP core import.
-# AP_ROOT must win over WORLD_DIR on sys.path (world Options.py shadows AP Options).
-# Runtime extracts live at custom_worlds/_metroid_bread_runtime (parents[1] is NOT AP root).
 _WORLD_DIR = Path(__file__).resolve().parent
 
 # Hub spawn has no stdin. Force ModuleUpdate skip before CommonClient imports it
-# (some external AP installs ignore SKIP or still prompt for pkg_resources).
 if "--electron" in sys.argv or "--nogui" in sys.argv:
     os.environ["SKIP_REQUIREMENTS_UPDATE"] = "1"
 os.environ.setdefault("SKIP_REQUIREMENTS_UPDATE", "1")
@@ -101,8 +90,6 @@ except ImportError:
         )
 
 # Hub uses a minimal venv — never run full AP requirements.txt (bsdiff4, etc.).
-# Some source installs' ModuleUpdate ignore SKIP_REQUIREMENTS_UPDATE; force-skip before
-# CommonClient imports and calls ModuleUpdate.update().
 try:
     import ModuleUpdate as _ModuleUpdate
 
@@ -159,11 +146,9 @@ DREAD_PORT = 6969
 # Structured status lines for the Electron UI (parsed from stdout).
 UI_EVENT_PREFIX = "@@APUI@@"
 # Level-tagged console lines for the Hub Log panel (parsed in dread-client-app).
-# Format: @@APLOG@@normal|debug@@<message>
 UI_LOG_PREFIX = "@@APLOG@@"
 
 # Stable, drag-into-chat diagnostic log under Archipelago's logs/ folder
-# (usually <Archipelago>/logs/metroid_bread_client.log when the install is writable).
 DREAD_DIAG_LOG_FILENAME = "metroid_bread_client.log"
 DREAD_DIAG_LOG_MAX_BYTES = 8 * 1024 * 1024  # 8 MB, then rotate
 DREAD_DIAG_LOG_BACKUP_COUNT = 2
@@ -182,12 +167,7 @@ def log_debug(msg: str, *args, **kwargs) -> None:
 
 
 def classify_dread_game_log(message: str) -> str:
-    """
-    Classify Remote Lua / SendApLog text as 'normal' or 'debug' for the Hub Log.
-
-    Normal: gameplay / AP notifications (checks, grants, death, all-bosses).
-    Debug: AP_MAP / AP_VOL / OdrMap probes and other RL diagnostic spam.
-    """
+    """Classify Remote Lua / SendApLog text as 'normal' or 'debug' for the Hub Log."""
     text = (message or "").strip()
     upper = text.upper()
     for prefix in (
@@ -260,10 +240,7 @@ def write_dread_session_header(
 
 
 def _configure_electron_stream_logging() -> None:
-    """
-    When Hub owns the UI: emit DEBUG+ on stdout with @@APLOG@@ tags, keep full
-    detail in log files, and quiet noisy third-party loggers.
-    """
+    """When Hub owns the UI: emit DEBUG+ on stdout with @@APLOG@@ tags, keep full"""
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
     logging.getLogger("websockets").setLevel(logging.WARNING)
@@ -290,15 +267,7 @@ def setup_dread_diagnostic_logging(
     dread_ip: str = "127.0.0.1",
     electron_ui: bool = False,
 ) -> str:
-    """
-    Default-on file logging for Metroid Bread client diagnostics.
-
-    Uses Archipelago's standard init_logging (timestamped session file + console)
-    and attaches a stable rotating FileHandler at logs/metroid_bread_client.log.
-
-    With --electron, stdout is level-tagged for the Hub Log filter; files still
-    receive the full debug stream regardless of the UI toggle.
-    """
+    """Default-on file logging for Metroid Bread client diagnostics."""
     global _dread_diag_log_path, _dread_diag_logging_ready
 
     log_path = get_dread_diag_log_path()
@@ -320,7 +289,6 @@ def setup_dread_diagnostic_logging(
             )
         )
         # Match Utils.init_logging filters so UI carriage-returns / NoFile records
-        # do not pollute the diagnostic file.
         handler.addFilter(lambda record: not getattr(record, "NoFile", False))
         handler.addFilter(lambda record: "\r" not in record.getMessage())
         logging.getLogger().addHandler(handler)
@@ -353,7 +321,6 @@ class DreadSocketHolder:
 
 
 # Numeric enums matching open-dread-rando-exlaunch (NOT ASCII '1'..'9').
-# Randovania IntEnum(b"1") also becomes int 1 — ord('1')=49 was a connection bug.
 class PacketType(IntEnum):
     PACKET_HANDSHAKE = 1
     PACKET_LOG_MESSAGE = 2
@@ -421,12 +388,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
 
     @mark_raw
     def _cmd_lua(self, code: str = ""):
-        """Execute Lua in Dread. Usage: /lua <code>
-
-        Uses @mark_raw so quotes in the Lua source are preserved. Without it,
-        CommandProcessor's shlex.split strips quotes and string args become nil
-        globals (e.g. SetTunableValue(\"Cat\", \"Prop\", 0.2) → bare Cat, Prop).
-        """
+        """Execute Lua in Dread. Usage: /lua <code>"""
         if not self.ctx.game_connected:
             self.output("Error: Not connected to Metroid Bread")
             return
@@ -438,12 +400,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
         asyncio.create_task(self._execute_lua(lua_code))
 
     def _cmd_give(self, *item_name: str):
-        """Locally grant an item for testing. Usage: /give <item name>
-
-        Debug-only: applies the item directly in Dread (fuzzy-matched against
-        known AP item names) without sending a LocationCheck or advancing the
-        multiworld ReceivedItems index. Requires /connect_dread first.
-        """
+        """Locally grant an item for testing. Usage: /give <item name>"""
         requested = " ".join(item_name).strip()
         if not requested:
             self.output("Usage: /give <item name> (e.g. /give Morph Ball, /give speed booster)")
@@ -467,11 +424,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
         self._run_map_smoke_bounds(" ".join(area_parts).strip())
 
     def _cmd_map_unlock_region(self, scenario: str = ""):
-        """Probe world-map AreaBox unlock. Usage: /map_unlock_region [scenario] (INGAME).
-
-        Default: s020_magma (Cataris). Accepts scenario ids or names (Dairon, Cataris).
-        Calls OdrMap.UnlockWorldRegion when present; otherwise documents proposed AABB.
-        """
+        """Probe world-map AreaBox unlock. Usage: /map_unlock_region [scenario] (INGAME)."""
         self._run_map_unlock_region(scenario)
 
     def _cmd_map_unlock_smoke(self, scenario: str = ""):
@@ -483,12 +436,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
         self._run_map_icon_smoke(actor)
 
     def _cmd_map_label_smoke(self, *parts: str):
-        """Gated map-label probe. Usage: /map_label_smoke force [key] [text...]
-
-        Disabled by default (0.1.5 LoadBank crash). With 'force': soft-fail-only
-        SetLocalized when OdrText.IsBankReady — never LoadBank/EnsureBank.
-        Durable path: patch-time BTXT.
-        """
+        """Gated map-label probe. Usage: /map_label_smoke force [key] [text...]"""
         if not parts or parts[0].strip().lower() not in ("force", "--force"):
             self.output(
                 "Map label smoke DISABLED (0.1.6-passive-bank). "
@@ -506,11 +454,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
         self._run_map_label_smoke(key, text)
 
     def _cmd_map_sprite_smoke(self, icon: str = "", row: str = "", col: str = ""):
-        """Repoint one map icon at an atlas cell. Usage: /map_sprite_smoke [ItemCustom0] [row] [col].
-
-        Defaults to ItemCustom0 → the missile tank cell. Reports the icon-def
-        table status first, so a stale subsdk9 shows up as no-SetIconSprite.
-        """
+        """Repoint one map icon at an atlas cell. Usage: /map_sprite_smoke [ItemCustom0] [row] [col]."""
         if not self.ctx.game_connected:
             self.output("Error: Not connected to Metroid Bread")
             return
@@ -533,15 +477,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
         asyncio.create_task(self.ctx.run_lua_code(lua, wait_response=False))
 
     def _cmd_tip_force(self, tip: str = "", seconds: str = ""):
-        """Force a loading tip mid-session. Usage: /tip_force [#TIP_id] [seconds]
-
-        Returns immediately (no TimeoutError from CHADO):
-          1) DoFile ap_loading_tips.lua
-          2) Visible message (raw ShowMessage + HUD toast; #TIP_* alone is often invisible)
-          3) ForcedTooltip Set/Get (live when OdrTip subsdk9 is installed; stub otherwise)
-          4) Schedule CHADO via Game.AddSF (non-blocking)
-        Reply: AP_TIP: ok|FAIL … writable=… msg=… msg_path=… chrome=scheduled
-        """
+        """Force a loading tip mid-session. Usage: /tip_force [#TIP_id] [seconds]"""
         if not self.ctx.game_connected:
             self.output("Error: Not connected to Metroid Bread. Use /connect_dread first.")
             return
@@ -642,18 +578,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
 
     @mark_raw
     def _cmd_tip_set(self, raw: str = ""):
-        """Set live tip overlay text (OdrTip 0.5.2). Usage: /tip_set <0-4|key> TITLE||BODY
-
-        Shape: TITLE||BODY with optional {c6}/{c7}/{c0}.
-        Slots boot with Metroid Bread defaults (slot 0 = CONNECT CLIENT; count 1);
-        this overwrites them at runtime.
-        Empty text restores the compile-time default (same as ClearTipText).
-        Examples:
-          /tip_set 0 {c6}LIVE{c7}||runtime override works.
-          /tip_set TIP_000_GENERAL_PARKOUR_000 Hello||World
-          /tip_set AP_TIP_0 Title||body
-        Requires OdrTip subsdk9 0.5.2-connect-first+ (0.4.1-tip-defaults also OK for text).
-        """
+        """Set live tip overlay text (OdrTip 0.5.2). Usage: /tip_set <0-4|key> TITLE||BODY"""
         if not self.ctx.game_connected:
             self.output("Error: Not connected to Metroid Bread. Use /connect_dread first.")
             return
@@ -741,15 +666,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
             )
 
     def _cmd_tip_get(self, raw: str = ""):
-        """Read live tip override text (OdrTip). Usage: /tip_get [0-4]
-
-        Prints the string currently held in that tip override slot.
-        With no args, dumps all five slots (0–4).
-        Examples:
-          /tip_get 0
-          /tip_get
-        Requires OdrTip.GetTipText (subsdk9 0.5.x+).
-        """
+        """Read live tip override text (OdrTip). Usage: /tip_get [0-4]"""
         if not self.ctx.game_connected:
             self.output("Error: Not connected to Metroid Bread. Use /connect_dread first.")
             return
@@ -847,17 +764,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
 
     @mark_raw
     def _cmd_tip_order(self, raw: str = ""):
-        """Set tip carousel display order (OdrTip 0.5.2). Usage: /tip_order 0 1 2 3 4
-
-        Args are tip ids 0–4 (TIP_000…004) for carousel slots 0..4 — a permutation.
-        Default is 0 1 2 3 4 (CONNECT CLIENT first when count is 1).
-        Takes effect immediately when the loading tip screen is up (OdrTip 0.5.12
-        ForceRefresh re-push); otherwise on the next Continue / loading tip rebuild.
-        Examples:
-          /tip_order 0 1 2 3 4
-          /tip_order 4 3 2 1 0
-        Requires OdrTip subsdk9 0.5.2-connect-first+.
-        """
+        """Set tip carousel display order (OdrTip 0.5.2). Usage: /tip_order 0 1 2 3 4"""
         if not self.ctx.game_connected:
             self.output("Error: Not connected to Metroid Bread. Use /connect_dread first.")
             return
@@ -948,14 +855,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
             )
 
     def _cmd_tip_count(self, n: str = ""):
-        """Set tip carousel size (OdrTip 0.5.2). Usage: /tip_count <1-5>
-
-        Truncates the ordered eligible list after SetTipOrder. Refresh pushes
-        that many tips (ZL/ZR wraps within them; count 1 always shows the same tip).
-        Default is 1 (CONNECT CLIENT only). Takes effect on the next tip refresh
-        (Continue / rebuild).
-        Requires OdrTip subsdk9 0.5.2-connect-first+.
-        """
+        """Set tip carousel size (OdrTip 0.5.2). Usage: /tip_count <1-5>"""
         if not self.ctx.game_connected:
             self.output("Error: Not connected to Metroid Bread. Use /connect_dread first.")
             return
@@ -1025,12 +925,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
             )
 
     def _cmd_test_hint_ghavoran(self):
-        """Simulate an AP hint on one Ghavoran check (sprite + world-map global).
-
-        Picks the first uncollected Ghavoran location from map_icon_keys, reveals
-        its icon (AP logo / item sprite) and sets bIsGlobal so it appears on the
-        pause world map. Re-run after collect to confirm the global clears.
-        """
+        """Simulate an AP hint on one Ghavoran check (sprite + world-map global)."""
         self.ctx._run_test_hint_ghavoran(self.output)
 
     def _cmd_map_hint_test(self):
@@ -1038,15 +933,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
         self._cmd_test_hint_ghavoran()
 
     def _cmd_volume_smoke(self, *args: str):
-        """Smoke-test vanilla Game volume APIs over Remote Lua.
-
-        Usage: /volume_smoke [0-100] [keep]
-          - Reads music/sfx/(env)/(master) where getters exist
-          - Sets each channel to the test level (default 20 = 0.20)
-          - Restores previous values unless 'keep' is passed
-          - Logs AP_VOL: lines with which signatures worked
-        Prefer INGAME with /connect_dread first.
-        """
+        """Smoke-test vanilla Game volume APIs over Remote Lua."""
         keep = False
         percent: Optional[float] = None
         for raw in args:
@@ -1072,13 +959,7 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
         self._run_volume_smoke(percent / 100.0, keep=keep)
 
     def _cmd_volume_set(self, channel: str = "", level: str = ""):
-        """Set one volume channel (tunable + Game). Usage: /volume_set music|sfx|env|master <0-100>
-
-        Values are slider-style 0–100 (mapped to 0.0–1.0). Writes
-        CTunableSoundSystemATK (with category pcall fallback) then Game.Set*
-        for immediate effect — same approach as /volume_tunable_smoke.
-        Logs AP_VOL: results.
-        """
+        """Set one volume channel (tunable + Game). Usage: /volume_set music|sfx|env|master <0-100>"""
         ch = (channel or "").strip().lower()
         aliases = {
             "music": "music",
@@ -1105,24 +986,11 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
         self._run_volume_set(aliases[ch], percent / 100.0)
 
     def _cmd_volume_get(self):
-        """Read Game + tunable volume values. Usage: /volume_get
-
-        Logs AP_VOL: get lines for Game.* getters and any reachable
-        CTunableSoundSystemATK fields via msemenu.GetTunableData / Scenario.
-        Prefer after pause/unpause when testing tunable persistence.
-        """
+        """Read Game + tunable volume values. Usage: /volume_get"""
         self._run_volume_get()
 
     def _cmd_volume_tunable_smoke(self, *args: str):
-        """Probe SoundSystemATK tunables + Game volume setters.
-
-        Usage: /volume_tunable_smoke [0-100]
-          - pcalls Scenario.SetTunableValue and direct msemenu.GetTunableData
-          - tries alternate category strings (short + fully-qualified)
-          - sets music/sfx/env tunables, then Game.Set* for immediate effect
-          - logs AP_VOL: for each attempt (never nil-concats / never crashes RL)
-          - ends with get-after; pause/unpause then /volume_get to check survival
-        """
+        """Probe SoundSystemATK tunables + Game volume setters."""
         percent = 20.0
         for raw in args:
             tok = (raw or "").strip().lower()
@@ -1154,7 +1022,6 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
             self.output("Error: entity name must be alphanumeric / underscore / hyphen")
             return
         # Re-inject MapPaintSmoke so diagnostics work without a full reconnect.
-        # Default: cut_fillmap_54 (Corpius Arena fillmap actor). collision_camera_* no-ops.
         default_id = "cut_fillmap_54"
         target = aid or default_id
         lua = (
@@ -1216,13 +1083,11 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
             self.output("Error: Not connected to Metroid Bread")
             return
         # Default: Artaria Freezer — full camera AABB, no fillmap actor (proves full-room path).
-        # Alt: "Corpius Arena" (has tiny fillmap; this paints the whole camera box).
         area = (area_spec or "Freezer").strip()
         if not area or any(c in area for c in "\\\"';"):
             self.output("Error: area name looks unsafe")
             return
         # Hardcoded Freezer fallback if MapAreaBounds not in romfs yet.
-        # Corpius Arena = {17800,-550,21900,800}; Freezer = {-19200,-6400,-17100,-2200}
         lua = (
             "if not RL then RL = {} end\n"
             "if not RL.ProbeVisitedCells then\n"
@@ -1368,7 +1233,6 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
             self.output("Error: scenario must be alphanumeric / underscore")
             return
         # Helpers live in romfs (ap_map_unlock_region.lua) — too large for one
-        # Remote Lua packet / connect bootstrap (>4096). DoFile then call.
         lua = (
             "pcall(function() Game.DoFile('system/scripts/ap_map_unlock_region.lua') end)\n"
             f'if RL and RL.MapUnlockRegionSmoke then RL.MapUnlockRegionSmoke("{scen}") '
@@ -1390,7 +1254,6 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
             self.output("Error: actor name must be alphanumeric / underscore / hyphen")
             return
         # Re-inject MapIconSmoke so diagnostics work without a full reconnect.
-        # Does NOT touch VisitBoundsSafe / MapNativePaintEnabled / bright paint.
         lua = (
             "if not RL then RL = {} end\n"
             "function RL.MapIconSmoke(actorName)\n"
@@ -1444,7 +1307,6 @@ class MetroidBreadClientCommandProcessor(ClientCommandProcessor):
             self.output("Error: text must not contain quotes, backslashes, or newlines")
             return
         # Re-inject MapLabelSmoke so diagnostics work without a full reconnect.
-        # Does NOT touch VisitBoundsSafe / MapNativePaintEnabled / bright paint.
         key_lua = k.replace("'", "")
         text_lua = t.replace("'", "")
         lua = (
@@ -2246,11 +2108,8 @@ class MetroidBreadContext(CommonContext):
         self._transition_until: float = 0.0
         self.game_reported_locations: Set[int] = set()
         # Wait for first PACKET_COLLECTED_INDICES before granting so reconnect
-        # does not re-apply local in-world items before game_reported_locations
-        # is populated.
         self._collected_indices_synced = False
         # True once the game reports Init.bBeatenSinceLastReboot (Raven Beak /
-        # escape). Used with 100% goal so late check clears can still send goal.
         self._game_beaten_flag: bool = False
 
         self.item_id_to_name: Dict[int, str] = dict(bridge.ap_item_id_to_name())
@@ -2316,7 +2175,6 @@ class MetroidBreadContext(CommonContext):
         self._reachable_map_debounce_s = 1.0
         self._reachable_map_force_pending = False
         # Map-icon labels: patch-time BTXT variants + OdrMap.SetIconInspectorLabel redirect.
-        # No LoadBank/EnsureBank. Requires re-patch with text_patches (4 keys per icon).
         self.map_icon_labels_enabled = True
         self._map_icon_keys: Optional[dict] = None
         self._map_icon_keys_source: Optional[str] = None
@@ -2324,8 +2182,6 @@ class MetroidBreadContext(CommonContext):
         self._map_icon_labels_sig: Optional[tuple] = None
         self._map_icon_labels_task: Optional[asyncio.Task] = None
         # Trailing debounce for label/sprite/global EXEC. Keep this ≥ reachable
-        # debounce so LocationChecks + inventory + RoomUpdate coalesce into one
-        # storm instead of 3–4 overlapping pushes (Ryujinx LockMutex InvalidHandle).
         self._map_icon_labels_debounce_s = 1.0
         self._map_icon_labels_force_pending = False
         self._map_icon_labels_extra_delay_s = 0.0
@@ -2337,20 +2193,9 @@ class MetroidBreadContext(CommonContext):
         self._map_icon_labels_last_push_mono = 0.0
         self._map_icon_labels_min_interval_s = 2.0
         # OdrText.SetLocalized soft-fails (reason=bank-not-ready) until the game
-        # itself has populated its CLanguageManager BTXT dictionary. Neither the
-        # Lua-side backoff retry nor this push's own sig-cache reliably keep
-        # re-checking that on their own, so a dedicated watcher polls the
-        # passive OdrText.IsBankReady flag (via RL.MapIconBankStatus — never
-        # forces LoadBank/EnsureBank) and force-repushes the instant it flips
-        # ready. Requires OdrText >= 0.1.11; before that the native readiness
-        # probe could never return true. See _map_icon_bank_watch_loop.
         self._map_icon_bank_watch_task: Optional[asyncio.Task] = None
         self._map_icon_bank_ready = False
         # Icon graphics (OdrMap.SetIconSprite). Independent of the language bank:
-        # this writes uSpriteRow/uSpriteCol in the parsed minimap.bmmdef, so it
-        # works even while labels are still soft-failing on bank-not-ready. Kept
-        # on its own signature because sprites only change on reveal, while
-        # labels also flip on every in-logic recompute.
         self._map_icon_sprites: Dict[str, Tuple[int, int]] = {}
         self._map_icon_sprites_sig: Optional[tuple] = None
         # Hinted (not yet checked) → bIsGlobal so the icon shows on the world map.
@@ -2361,8 +2206,6 @@ class MetroidBreadContext(CommonContext):
 
         self._lua_response_future: Optional[asyncio.Future] = None
         # EXEC replies still in flight after wait_response timeouts. Discard that
-        # many successful EXEC payloads before completing the next waiter
-        # (otherwise MapIconBankStatus can poison GetApSeedId, etc.).
         self._lua_stale_exec_responses: int = 0
         self._last_lua_error: Optional[BaseException] = None
         self.death_poll_task: Optional[asyncio.Task] = None
@@ -2508,13 +2351,7 @@ class MetroidBreadContext(CommonContext):
         )
 
     def _apply_slot_rando_to_logic(self, logic) -> None:
-        """
-        Mutate tracker logic to match shuffled doors/transports from the seed.
-
-        Without this, DreadLogic loads the vanilla graph and the Hub tracker /
-        reachable minimap disagree with the patched game (classic symptom: only
-        the local vanilla-connected region looks in-logic).
-        """
+        """Mutate tracker logic to match shuffled doors/transports from the seed."""
         extras = self._patch_extras if isinstance(self._patch_extras, dict) else {}
         if not extras:
             slot = self._slot_data if isinstance(self._slot_data, dict) else {}
@@ -2534,8 +2371,6 @@ class MetroidBreadContext(CommonContext):
                 )
             elif isinstance(extras, dict) and extras.get("elevators"):
                 # Older seeds / synthetic spoilers ship ODR elevators but not
-                # transport_matching. Must still run even when door_patches exist
-                # (previously skipped by an elif after door apply).
                 elev_n = self._apply_elevators_fallback_to_logic(
                     logic, extras["elevators"]
                 )
@@ -2618,7 +2453,6 @@ class MetroidBreadContext(CommonContext):
         here = Path(__file__).resolve().parent
         roots.append(here / "output")
         # DreadClient_fresh lives under build/dread_dist/; full generate spoilers
-        # often sit on the Archipelago-main/output sibling a few parents up.
         for parent in here.parents:
             roots.append(parent / "output")
             if (parent / "worlds" / "metroid_bread").is_dir():
@@ -2688,12 +2522,7 @@ class MetroidBreadContext(CommonContext):
         return best
 
     def _resolve_logic_options(self) -> Dict[str, int]:
-        """
-        Seed trick/ammo preset for tracker DreadLogic.
-
-        Priority: slot_data.logic_options → patch_extras.logic_options →
-        top-level slot ammo keys → local full spoiler header (legacy seeds).
-        """
+        """Seed trick/ammo preset for tracker DreadLogic."""
         try:
             from worlds.metroid_bread.logic_options import (
                 coerce_logic_options,
@@ -2841,16 +2670,7 @@ class MetroidBreadContext(CommonContext):
         )
 
     def _tracker_item_counts(self) -> Dict[str, int]:
-        """Merge start kit, AP received/precollected items, and live game inventory.
-
-        Start-kit abilities are granted via patch_extras starting_items (and
-        usually also as AP precollected → items_received). Without seeding from
-        starting_items, the Hub tracker can show 0 in-logic checks at connect
-        when items_received is still empty / game inventory not yet synced.
-
-        starting_items / game inventory use max() so precollected kits are not
-        double-counted once they also appear in items_received.
-        """
+        """Merge start kit, AP received/precollected items, and live game inventory."""
         counts: Dict[str, int] = {}
         extras = self._patch_extras if isinstance(self._patch_extras, dict) else {}
         if not extras:
@@ -2902,7 +2722,6 @@ class MetroidBreadContext(CommonContext):
         counts = self._tracker_item_counts()
         start = logic.starting_node
         # Key on logic-relevant counts only — raw ammo/energy flicker must not
-        # force a full reachability pass on every PACKET_NEW_INVENTORY.
         cache_key = (start, tuple(sorted(counts.items())))
         if cache_key == self._in_logic_cache_key:
             return self._in_logic_location_ids
@@ -3070,14 +2889,7 @@ class MetroidBreadContext(CommonContext):
             return {}
 
     def _tracker_boss_status(self) -> List[dict]:
-        """Hub tracker rows: each boss in-logic (reachable) + beaten (in-game).
-
-        Beaten must NOT use Archipelago ``checked_locations``. In multiworld,
-        another slot's Collect marks locations that held their items as checked
-        on the server — including our boss arena pickups — without this player
-        ever fighting the boss. Only trust live probes and locations the Dread
-        game itself reported via collected-indices / local LocationChecks.
-        """
+        """Hub tracker rows: each boss in-logic (reachable) + beaten (in-game)."""
         try:
             from worlds.metroid_bread import bosses
         except Exception:
@@ -3099,11 +2911,9 @@ class MetroidBreadContext(CommonContext):
                 )
 
                 # collect_events=False so "in logic" means the fight node is
-                # reachable without auto-granting the kill event mid-BFS.
                 inv = logic.inventory_from_counts(counts)
                 reachable = logic.get_reachable_nodes(inv, collect_events=False)
                 # Second pass: auto-collect most events, but withhold Quiet Robe /
-                # ElunReleaseX until confirmed (already in counts when done).
                 reachable |= logic.get_reachable_nodes(
                     inv,
                     collect_events=True,
@@ -3131,7 +2941,6 @@ class MetroidBreadContext(CommonContext):
                 beaten.add(boss.key)
                 continue
             # Event-only fallback: a *same-region* game-reported pickup that is
-            # only reachable after this event (never shared-arena / cross-region).
             if boss.event_item and logic is not None:
                 try:
                     if self._boss_event_inferred_beaten(
@@ -3141,8 +2950,6 @@ class MetroidBreadContext(CommonContext):
                 except Exception:
                     pass
             # At goal-time only: event-only bosses with no pickup / spawn probe
-            # leave no collected index — if the fight is in logic and the player
-            # has been in that region, accept beaten (see _all_bosses_beaten_for_goal).
             if (
                 boss.key not in beaten
                 and not boss.check_location
@@ -3176,17 +2983,7 @@ class MetroidBreadContext(CommonContext):
         return scenario in (getattr(self, "_visited_scenarios", set()) or set())
 
     def _boss_event_inferred_beaten(self, logic, counts: Dict[str, int], boss, local_collected: Set[int]) -> bool:
-        """True when evidence shows this event-only boss was cleared.
-
-        Only counts *game-reported* pickups in the **same region** that become
-        reachable solely after adding this boss's event (collect_events=False
-        compare). Server ``checked_locations`` are ignored so another slot's
-        Collect cannot fake this kill.
-
-        Intentionally does **not** use:
-        - Same-area pickups (Gravity Suit Tower tanks ≠ Twin Robots kill)
-        - Cross-region unlocks (BureniaRobots teleport must not claim Ghavoran kills)
-        """
+        """True when evidence shows this event-only boss was cleared."""
         from worlds.metroid_bread.Locations import location_table
 
         event = boss.event_item
@@ -3285,11 +3082,7 @@ class MetroidBreadContext(CommonContext):
         )
 
     async def _maybe_grant_all_bosses_metroidnization(self) -> None:
-        """Unlock Itorash ADAM door when All Bosses (and DNA, if any) are done.
-
-        Combo rule: Metroidnization only when DNA satisfied AND all non-RB
-        bosses beaten. DNA alone never unlocks (Lua CheckArtifacts deferral).
-        """
+        """Unlock Itorash ADAM door when All Bosses (and DNA, if any) are done."""
         if int(getattr(self, "_slot_game_goal", 0) or 0) != 2:
             return
         if not self.game_connected:
@@ -3344,16 +3137,10 @@ class MetroidBreadContext(CommonContext):
         self._tracker_ui_refresh_task = asyncio.create_task(_delayed())
 
     def _schedule_reachable_map_push(self, force: bool = False) -> None:
-        """Debounce AP reachability → in-game minimap (fire-and-forget Lua).
-
-        Waits out TRANSITION / settle hold before pushing. A plain 1s debounce
-        alone loses MAINMENU→INGAME paint (3.5s enter-world hold) and never
-        retries — VisitBoundsSafe never runs even though the binder is LIVE.
-        """
+        """Debounce AP reachability → in-game minimap (fire-and-forget Lua)."""
         if not self.reachable_minimap_enabled or not self.game_connected:
             return
         # Preserve force across debounce coalescing (inventory tick must not
-        # cancel a scenario-load force push).
         self._reachable_map_force_pending = bool(force) or bool(
             getattr(self, "_reachable_map_force_pending", False)
         )
@@ -3397,8 +3184,6 @@ class MetroidBreadContext(CommonContext):
         if not self.reachable_minimap_enabled or not self.game_connected:
             return
         # Never flood VisitBoundsSafe / fillmaps during TRANSITION or settle hold.
-        # Callers that schedule via _schedule_reachable_map_push wait this out;
-        # direct callers (connect hold) must already be settled.
         if self._game_mode != "INGAME" or self._in_transition():
             logger.debug("Reachable minimap deferred (mode=%s transition=%s)", self._game_mode, self._in_transition())
             return
@@ -3416,17 +3201,8 @@ class MetroidBreadContext(CommonContext):
             )
             sig = reachable_map.areas_signature(areas)
             # Map-icon in-logic labels are keyed on individual pickup nodes, which
-            # are finer-grained than (region, area) pairs: an item can unlock a
-            # node inside an area that was already reachable (e.g. a
-            # missile-locked pickup in an already-visited room), leaving the
-            # area signature unchanged even though the in-logic location set
-            # grew. Schedule the icon-label push on every call (its own
-            # variants-signature check makes this a cheap no-op when nothing
-            # actually changed) instead of only when areas expand — otherwise
-            # those in-logic transitions are silently dropped.
             if not force and sig == self._reachable_areas_sig:
                 # Areas unchanged — still refresh in-logic icon labels, but do
-                # not force (signature skip is a cheap no-op when nothing moved).
                 self._schedule_map_icon_labels_push(force=False)
                 return
             self._reachable_areas_sig = sig
@@ -3437,7 +3213,6 @@ class MetroidBreadContext(CommonContext):
             )
             await self.run_lua_code(lua, wait_response=False)
             # Stagger labels after a real paint (load/connect/inventory): let the
-            # VisitBounds ProcessCommand reply + socket Send finish first.
             self._schedule_map_icon_labels_push(force=bool(force), extra_delay_s=1.25)
         except Exception as exc:
             logger.warning("push_reachable_map: %s", exc)
@@ -3566,18 +3341,7 @@ class MetroidBreadContext(CommonContext):
         return out
 
     def _rebuild_map_icon_states(self) -> Tuple[Dict[str, str], Dict[str, str]]:
-        """
-        Returns (variants, texts) for every mapped location.
-
-        revealed = checked ∪ AP-hinted; in_logic from tracker/DreadLogic.
-        texts are full display strings for SetLocalized fallback on old subsdk9.
-
-        Also refreshes self._map_icon_sprites (base key → atlas cell):
-        revealed → item/AP logo cell; unrevealed → green ? (in logic) or
-        default ? (out of logic). Also refreshes self._map_icon_globals
-        (hinted & uncollected → bIsGlobal) for world-map visibility;
-        push_map_icon_labels sends both after the labels.
-        """
+        """Returns (variants, texts) for every mapped location."""
         keys = self.ensure_map_icon_keys()
         if not keys:
             return {}, {}
@@ -3615,7 +3379,6 @@ class MetroidBreadContext(CommonContext):
             if revealed:
                 sprite = revealed_sprites.get(loc_id)
                 # Pre-logo sidecars baked ItemSphere for foreign/unknown; prefer
-                # the Archipelago atlas cell whenever nothing more specific fits.
                 if sprite is None or sprite == map_icon_labels.GENERIC_ITEM_SPRITE:
                     sprite = map_icon_labels.AP_LOGO_SPRITE
                 sprites[base] = sprite
@@ -3650,16 +3413,7 @@ class MetroidBreadContext(CommonContext):
     def _schedule_map_icon_labels_push(
         self, force: bool = False, *, extra_delay_s: float = 0.0
     ) -> None:
-        """Debounce variant retarget push (fire-and-forget; never blocks item grants).
-
-        extra_delay_s: added after the usual settle+debounce — use after a real
-        VisitBounds paint so ProcessCommand reply + socket Send can drain before
-        the label EXEC storm (Ryujinx LockMutex InvalidHandle after load).
-
-        Multiple callers (LocationChecks, RoomUpdate, inventory reachable, bank
-        watch) coalesce into one trailing task. Overlapping in-flight pushes
-        set a rerun flag instead of stacking EXEC storms.
-        """
+        """Debounce variant retarget push (fire-and-forget; never blocks item grants)."""
         if not self.map_icon_labels_enabled or not self.game_connected:
             return
         pending_force = bool(force) or bool(getattr(self, "_map_icon_labels_force_pending", False))
@@ -3692,7 +3446,6 @@ class MetroidBreadContext(CommonContext):
                         break
                     await asyncio.sleep(min(0.25, settle_until - now))
                 # Pace full storms so back-to-back force schedules cannot
-                # immediately re-flood after a completed push.
                 min_gap = float(
                     getattr(self, "_map_icon_labels_min_interval_s", 2.0) or 2.0
                 )
@@ -3716,8 +3469,7 @@ class MetroidBreadContext(CommonContext):
         self._map_icon_labels_task = asyncio.create_task(_delayed())
 
     async def push_map_icon_labels(self, force: bool = False) -> None:
-        """Send RL.ApplyMapIconVariants (SetLocalized text; redirect-only is a no-op
-        while the native GetLocalized hook stays disabled — see map_hooks/text_hooks)."""
+        """Send RL.ApplyMapIconVariants (SetLocalized text; redirect-only is a no-op"""
         if not self.map_icon_labels_enabled or not self.game_connected:
             return
         if getattr(self, "_map_icon_labels_pushing", False):
@@ -3754,11 +3506,6 @@ class MetroidBreadContext(CommonContext):
                 )
                 buf = self._lua_buffer_size()
                 # Must include text: OdrMap.SetIconInspectorLabel only registers a
-                # GetLocalized redirect, and that native hook is currently disabled
-                # (crash-safety build) — a redirect-only push is visually a no-op.
-                # format_apply_map_icon_variants_chunks packs texts+variants together
-                # and keeps every chunk under buffer_size (more, smaller chunks than
-                # the old redirect-only push, never oversized).
                 chunks = map_icon_labels.format_apply_map_icon_variants_chunks(
                     variants, texts=texts, buffer_size=buf
                 )
@@ -3815,12 +3562,7 @@ class MetroidBreadContext(CommonContext):
         return 4096
 
     async def push_map_icon_sprites(self, force: bool = False) -> None:
-        """
-        Swap map-icon graphics via RL.ApplyMapIconSprites.
-
-        Sends every mapped icon: revealed → item/AP logo; unrevealed → green ?
-        when in logic, default ? when out of logic.
-        """
+        """Swap map-icon graphics via RL.ApplyMapIconSprites."""
         if not self.map_icon_labels_enabled or not self.game_connected:
             return
         if self._game_mode != "INGAME" or self._in_transition():
@@ -3856,7 +3598,6 @@ class MetroidBreadContext(CommonContext):
             return
         globals_map = dict(getattr(self, "_map_icon_globals", None) or {})
         # Only ship icons that are true, plus any previously-true clears.
-        # Sending every false every connect is wasteful; merge prior true→false.
         prev = getattr(self, "_map_icon_globals_prev_true", None) or set()
         to_send: Dict[str, bool] = {}
         true_now = {k for k, v in globals_map.items() if v}
@@ -3948,7 +3689,6 @@ class MetroidBreadContext(CommonContext):
         loc_id, base_key, entry = chosen
         self._test_hint_location_ids.add(loc_id)
         # Force sprite to AP logo when the baked sprite is generic/unknown so
-        # the atlas cell is obviously the new logo during this smoke test.
         sprite = map_icon_labels.normalize_sprite(entry.get("sprite"))
         if sprite is None or sprite in (
             map_icon_labels.GENERIC_ITEM_SPRITE,
@@ -3976,12 +3716,7 @@ class MetroidBreadContext(CommonContext):
             asyncio.create_task(self.run_lua_code(lua, wait_response=False))
 
     def _tracker_item_pool(self) -> Optional[Dict[str, int]]:
-        """Seed item types/counts for Hub Map Tracker icon filtering.
-
-        Prefer exact ``tracker_item_pool`` from slot_data / patch_extras (new seeds).
-        Older seeds: synthesize from progressive_* + tank/DNA/FS/SB option fields
-        when those are present; otherwise return None so the tracker shows all icons.
-        """
+        """Seed item types/counts for Hub Map Tracker icon filtering."""
         try:
             from worlds.metroid_bread.tracker_item_pool import (
                 merge_option_sources,
@@ -4125,7 +3860,6 @@ class MetroidBreadContext(CommonContext):
         )
         self.emit_ui_status()
         # Must NOT await self.disconnect() here — disconnect waits on server_task,
-        # and we are often called from inside server_loop (deadlock → UI stuck).
         self.disconnected_intentionally = True
         self.cancel_autoreconnect()
         self.exit_event.set()
@@ -4137,12 +3871,7 @@ class MetroidBreadContext(CommonContext):
                 pass
 
     def handle_connection_loss(self, msg: str) -> None:
-        """
-        CommonClient calls this from except blocks in server_loop.
-        Without a Kivy UI the default path only logs + opens a message box —
-        Hub never gets a structured failure. Surface every refuse/timeout/OS
-        error with the exception type/message (and abort if we never joined).
-        """
+        """CommonClient calls this from except blocks in server_loop."""
         exc_info = sys.exc_info()
         exc = exc_info[1]
         exc_name = type(exc).__name__ if exc is not None else ""
@@ -4214,7 +3943,6 @@ class MetroidBreadContext(CommonContext):
         )
         if password_requested and not self.password:
             # Hub/Electron has no stdin password prompt — surface a UI error instead of hanging.
-            # Also covers InvalidPassword: CommonClient clears password then re-calls server_auth.
             if self.electron_ui:
                 await self._electron_abort_connect(
                     "Password required",
@@ -4239,8 +3967,6 @@ class MetroidBreadContext(CommonContext):
             errors = list(args.get("errors") or [])
             log_info("AP ConnectionRefused errors=%s full=%s", errors, args)
             # InvalidSlot / InvalidGame / InvalidPassword are handled by CommonClient
-            # hooks (event_invalid_* / server_auth). Catch the raise-paths here so Hub
-            # always gets a structured error before server_loop's generic handler.
             if self.electron_ui:
                 if "IncompatibleVersion" in errors:
                     asyncio.create_task(
@@ -4377,7 +4103,6 @@ class MetroidBreadContext(CommonContext):
             # Own-world finds may clarify item names once locations_info / grants settle.
             self._schedule_map_icon_labels_push()
             # Offline / mid-session arrivals must kick catch-up immediately (do not
-            # wait for the 1s main-loop tick or a later pickup ACK).
             if self.game_connected:
                 asyncio.create_task(self.send_items_to_game(), name="ReceivedItemsGrant")
             # DNA arrivals can complete the All Bosses + DNA combo gate.
@@ -4429,10 +4154,7 @@ class MetroidBreadContext(CommonContext):
                 self._schedule_map_icon_labels_push(force=True)
 
     async def download_patch_spoiler(self, force: bool = False) -> Optional[str]:
-        """
-        Scout all Dread locations from the live Archipelago server and write a
-        synthetic spoiler the hub patcher can consume. No local AP zip required.
-        """
+        """Scout all Dread locations from the live Archipelago server and write a"""
         if self._server_spoiler_path and Path(self._server_spoiler_path).is_file() and not force:
             self.emit_ui(
                 "patch_files_ready",
@@ -4631,8 +4353,6 @@ class MetroidBreadContext(CommonContext):
             return
         source = data.get("source", "DeathLink")
         # Ignore own bounce (time filter can fail on JSON float) and any signal
-        # that arrives while we already own this death episode. Re-killing here
-        # would fire OnPlayerDead again → ODR HUD +2 and a second DeathLink.
         if self._deathlink_block_until_respawn or self.deathlink_sent_this_death:
             logger.debug(
                 "DeathLink inbound ignored (%s) — episode already active", source
@@ -4701,12 +4421,7 @@ class MetroidBreadContext(CommonContext):
             logger.debug("Death cause capture failed (%s): %s", tag, exc)
 
     async def capture_death_cause(self, *, tag: str = "death", wait_s: float = 0.0) -> str:
-        """
-        Scrape latest Ryujinx gameover PlayReport for CauseOfDeath (+ WhichGrab/Boss/Map).
-
-        PlayReport is not Lua-readable; Ryujinx ServicePrepo dumps JSON into Logs.
-        Optional Lua probe adds scenario / DeathFromRemote flags for correlation.
-        """
+        """Scrape latest Ryujinx gameover PlayReport for CauseOfDeath (+ WhichGrab/Boss/Map)."""
         if wait_s > 0:
             await asyncio.sleep(wait_s)
 
@@ -4765,12 +4480,7 @@ class MetroidBreadContext(CommonContext):
         generation: Optional[int] = None,
         deaths: Optional[int] = None,
     ) -> None:
-        """Suppress outbound DeathLinks until AP_DEATH respawn log.
-
-        Log path and poll path share this latch. When generation/deaths are
-        unknown (log path), claim at least poll_gen+1 so a later poll of the
-        same death cannot re-send after a false early respawn clear.
-        """
+        """Suppress outbound DeathLinks until AP_DEATH respawn log."""
         self.deathlink_sent_this_death = True
         self._deathlink_block_until_respawn = True
         if generation is not None:
@@ -4813,7 +4523,6 @@ class MetroidBreadContext(CommonContext):
             logger.warning("DeathLink received but not connected to Metroid Bread")
             return
         # Flag + episode latch so local-death joke tip / outbound send never
-        # overwrite a real inbound tip (covers /deathlink test and Bounce).
         self._death_episode_from_remote = True
         if not (self._deathlink_block_until_respawn or self.deathlink_sent_this_death):
             self._deathlink_begin_episode("remote-kill")
@@ -4855,13 +4564,7 @@ class MetroidBreadContext(CommonContext):
         x: float,
         y: float,
     ) -> Optional[bool]:
-        """
-        True when (region, area) at (scenario,x,y) is not AP-reachable.
-
-        Uses the same area names / DreadLogic.reachable_areas path as the
-        reachable minimap. Returns None when area or logic cannot be resolved
-        (caller falls back to generic skill-issue jokes).
-        """
+        """True when (region, area) at (scenario,x,y) is not AP-reachable."""
         area = reachable_map.area_at_position(scenario, x, y)
         if not area:
             logger.info(
@@ -4905,11 +4608,7 @@ class MetroidBreadContext(CommonContext):
         self,
         death_pos: Optional[Tuple[str, float, float]] = None,
     ) -> bool:
-        """Best-effort: die in an unreachable map area → True; unknown → False.
-
-        Prefer ``death_pos`` captured in MarkLocalDeath (AP_DEATH log). Post-death
-        Remote Lua GetPlayer often fails, which previously forced generic tips.
-        """
+        """Best-effort: die in an unreachable map area → True; unknown → False."""
         pos = death_pos
         if not pos:
             pos = await self._query_player_world_pos()
@@ -4928,21 +4627,14 @@ class MetroidBreadContext(CommonContext):
         return bool(ool)
 
     def _local_death_environmental(self) -> bool:
-        """True when CauseOfDeath maps exclusively to heat/lava/cold.
-
-        Not enabled yet — see CAUSE_OF_DEATH_MATRIX.md (COD 0/2 are not exclusive).
-        """
+        """True when CauseOfDeath maps exclusively to heat/lava/cold."""
         return False
 
     async def _pin_local_death_joke_tip(
         self,
         death_pos: Optional[Tuple[str, float, float]] = None,
     ) -> None:
-        """Pin a joke loading tip on local death (skipped for inbound DeathLink).
-
-        Tip priority for local deaths: out-of-logic → environmental (if mapped) →
-        generic skill-issue. Inbound DeathLink never reaches here.
-        """
+        """Pin a joke loading tip on local death (skipped for inbound DeathLink)."""
         if not self.game_connected or self._death_episode_from_remote:
             return
         try:
@@ -4992,7 +4684,6 @@ class MetroidBreadContext(CommonContext):
         if packet_type == PacketType.PACKET_MALFORMED:
             error_data = await asyncio.wait_for(self._socket.reader.read(9), timeout=15)
             # Game rejected a PACKET_REMOTE_LUA_EXEC (often oversized > buffer_size).
-            # Do not tear down the socket — log and continue so paint/labels can recover.
             logger.error(
                 "Dread malformed packet (oversized Lua?): %s — continuing read loop",
                 error_data.hex(),
@@ -5018,7 +4709,6 @@ class MetroidBreadContext(CommonContext):
                 if self._lua_response_future and not self._lua_response_future.done():
                     self._lua_response_future.set_exception(exc)
                 # Do NOT raise: background _read_loop must survive failed EXEC
-                # (e.g. bad /lua). Awaiters get the exception via the future.
                 self._last_lua_error = exc
                 return None
             self._last_lua_error = None
@@ -5064,14 +4754,7 @@ class MetroidBreadContext(CommonContext):
     async def run_lua_code(
         self, code: str, *, wait_response: bool = False, timeout: float = 30.0
     ) -> Optional[bytes]:
-        """
-        Send Lua over PACKET_REMOTE_LUA_EXEC.
-
-        Default is fire-and-forget so item grants are not blocked waiting on the
-        game thread. Pass wait_response=True only when the caller needs the return
-        value (bootstrap, death probe). While waiting, _run_code_lock is held so
-        only one awaited EXEC is in flight at a time.
-        """
+        """Send Lua over PACKET_REMOTE_LUA_EXEC."""
         async with self._run_code_lock:
             if not self._socket:
                 return None
@@ -5154,7 +4837,6 @@ class MetroidBreadContext(CommonContext):
         )
 
         # While an episode is open, never send. Keep absorbing gen/death ids so a
-        # false early "respawn" cannot re-send this same death later.
         if self._deathlink_block_until_respawn or self.deathlink_sent_this_death:
             self._deathlink_handled_generation = max(
                 self._deathlink_handled_generation, generation
@@ -5165,7 +4847,6 @@ class MetroidBreadContext(CommonContext):
             return
 
         # Generation already claimed (log path reserves poll_gen+1) — never re-send
-        # this death even if death-count advanced or episode was cleared early.
         if generation > 0 and generation <= self._deathlink_handled_generation:
             self._deathlink_handled_deaths = max(
                 self._deathlink_handled_deaths, deaths
@@ -5199,7 +4880,6 @@ class MetroidBreadContext(CommonContext):
         async with self._deathlink_lock:
             if self._deathlink_block_until_respawn or self.deathlink_sent_this_death:
                 # Inbound DeathLink already counted; ignore echo from death anim / log.
-                # Absorb ids so poll cannot re-arm the same death after a false clear.
                 if generation is not None:
                     self._deathlink_handled_generation = max(
                         self._deathlink_handled_generation, generation
@@ -5215,7 +4895,6 @@ class MetroidBreadContext(CommonContext):
             # Claim BEFORE await so log path + poll path share one latch / one send.
             self._deathlink_begin_episode(via, generation=generation, deaths=deaths)
             # Local skill-issue tip only — inbound / trigger_deathlink_kill sets
-            # _death_episode_from_remote and early-returns above (or skips here).
             if not self._death_episode_from_remote:
                 await self._pin_local_death_joke_tip(death_pos=death_pos)
             if not self.deathlink_enabled:
@@ -5236,7 +4915,6 @@ class MetroidBreadContext(CommonContext):
 
     async def _death_poll_loop(self) -> None:
         # Slow poll on purpose: DeathLink latency of ~1–2s is fine, and awaiting
-        # GetDeathPollStatus under _run_code_lock must not starve RL.ReceivePickup.
         while self.game_connected:
             try:
                 await asyncio.sleep(2.0)
@@ -5254,29 +4932,7 @@ class MetroidBreadContext(CommonContext):
                 logger.debug("Death poll error: %s", e)
 
     async def _map_icon_bank_watch_loop(self) -> None:
-        """
-        Poll OdrText.IsBankReady (via RL.MapIconBankStatus — passive, never
-        LoadBank/EnsureBank) and force a fresh label push the instant the
-        language bank flips ready.
-
-        OdrText.SetLocalized soft-fails with reason=bank-not-ready until the
-        game has populated its CLanguageManager BTXT dictionary. Relying only
-        on the Lua-side Game.AddSF backoff retry or on unrelated game events
-        (item grants, room changes) to eventually trigger another push left
-        labels stuck on their patch-time default indefinitely once those
-        stopped retrying. This loop is the dedicated "wait for ready, then
-        apply" path; it is cheap (one read-only Lua round trip) and never
-        touches the crashing EnsureBank/LoadBank natives.
-
-        Note that IsBankReady and SetLocalized's own gate evaluate the SAME
-        native predicate, so this loop can only ever help when readiness
-        genuinely flips over time. Up to OdrText 0.1.10 it never did — the
-        native side dereferenced the language-manager holder once instead of
-        twice and so read a fixed non-dictionary triple forever, which no
-        amount of retrying could move. That silent stall is why this loop logs
-        the observed status (including the OdrText build) rather than waiting
-        mutely: a permanently unready bank must be visible in the log.
-        """
+        """Poll OdrText.IsBankReady (via RL.MapIconBankStatus — passive, never"""
         delay = 1.5
         last_status: Optional[str] = None
         waiting_since: Optional[float] = None
@@ -5333,12 +4989,7 @@ class MetroidBreadContext(CommonContext):
 
     @staticmethod
     def _classify_game_state_token(token: str) -> str:
-        """
-        Map a GAME_STATE token to MAINMENU | INGAME | TRANSITION | UNKNOWN.
-
-        When INGAME, Lua sends the scenario id (s010_cave, …).
-        Otherwise it sends the GameMode id (MAINMENU, or load/cutscene modes).
-        """
+        """Map a GAME_STATE token to MAINMENU | INGAME | TRANSITION | UNKNOWN."""
         t = (token or "").strip()
         if not t:
             return "UNKNOWN"
@@ -5354,7 +5005,6 @@ class MetroidBreadContext(CommonContext):
         until = time.monotonic() + max(0.0, float(seconds))
         self._transition_until = max(self._transition_until, until)
         # Do not set in_cooldown here — that flag is for post-grant ACK waiting.
-        # Transition blocking is handled by _in_transition() / _ready_for_item_grants().
         if reason:
             logger.debug("Transition hold %.1fs (%s)", seconds, reason)
         else:
@@ -5394,7 +5044,6 @@ class MetroidBreadContext(CommonContext):
                 return m.group(1) if m else ""
 
         # Retry once: a timed-out DeathLink poll can steal the first EXEC reply
-        # (payload like "INGAME,100.0,100.0,0,0,0,true,nil").
         last_raw = ""
         for attempt in range(2):
             try:
@@ -5423,14 +5072,7 @@ class MetroidBreadContext(CommonContext):
         return ""
 
     async def _check_seed_mismatch(self, *, reason: str = "") -> bool:
-        """
-        Compare Archipelago RoomInfo.seed_name to RomFS Init.sApSeedId.
-
-        Runs at most once per Dread TCP session (reset on disconnect only).
-        On mismatch: Hub log + ODR-style fatal popup + return to main menu.
-        Returns True when a mismatch was handled. Soft-skips when either side
-        is unknown (old mods without Init.sApSeedId, or AP not connected yet).
-        """
+        """Compare Archipelago RoomInfo.seed_name to RomFS Init.sApSeedId."""
         if self._seed_mismatch_triggered or self._seed_checked_this_connection:
             return False
         if not self.game_connected or self._socket is None:
@@ -5495,10 +5137,7 @@ class MetroidBreadContext(CommonContext):
         return True
 
     async def _wait_for_stable_game_mode(self, timeout: float = 45.0) -> str:
-        """
-        Poll Game.GetCurrentGameModeID until MAINMENU or INGAME.
-        Avoids bootstrapping item sync mid menu↔ingame load.
-        """
+        """Poll Game.GetCurrentGameModeID until MAINMENU or INGAME."""
         deadline = time.monotonic() + timeout
         last = ""
         while time.monotonic() < deadline and self._socket:
@@ -5540,11 +5179,7 @@ class MetroidBreadContext(CommonContext):
         return self._game_mode
 
     async def ensure_dread_connected(self):
-        """
-        Passive connect (Randovania GameConnection style): keep trying until
-        RemoteLua accepts on :6969, then handshake. Does not spam fail-and-give-up
-        while the game is still booting.
-        """
+        """Passive connect (Randovania GameConnection style): keep trying until"""
         self._dread_want_connected = True
         task = self._dread_connect_task
         if task is not None and not task.done():
@@ -5583,10 +5218,7 @@ class MetroidBreadContext(CommonContext):
             delay = min(delay * 1.4, 8.0)
 
     async def connect_to_dread(self) -> bool:
-        """
-        One connect attempt. Returns True on success.
-        Prefer ensure_dread_connected() for Hub / boot (retries until port open).
-        """
+        """One connect attempt. Returns True on success."""
         # Phase 1 (locked): TCP + handshake + bootstrap + start keep-alive/read.
         try:
             async with self._connection_lock:
@@ -5918,8 +5550,6 @@ class MetroidBreadContext(CommonContext):
                 if new_amounts != self._game_inventory_amounts:
                     self._game_inventory_amounts = new_amounts
                     # Do not clear cache here: cache key is derived from logic
-                    # counts. Debounce UI emit so rapid inventory packets cannot
-                    # run sync reachability on the asyncio event loop every tick.
                     self._schedule_tracker_ui_refresh()
                     self._schedule_all_bosses_itorash_gate()
             logger.debug(
@@ -5961,9 +5591,6 @@ class MetroidBreadContext(CommonContext):
                             logger.debug("Unmapped pickup index %s (game bit set)", index)
                     elif location_id in self.locations_checked:
                         # Re-add on every poll (game_reported_locations is cleared on
-                        # each reconnect, but locations_checked persists) so tracker/UI
-                        # state relying on game_reported_locations does not lose
-                        # already-collected locations after a reconnect.
                         self.game_reported_locations.add(location_id)
                         if is_boss:
                             logger.debug(
@@ -6003,9 +5630,6 @@ class MetroidBreadContext(CommonContext):
             # May have been waiting on this sync before granting remote / catch-up items.
             await self.send_items_to_game()
             # Do NOT force a full label EXEC storm on every empty locations: poll —
-            # that was stacking 3–4 pushes per pickup and aborting Ryujinx
-            # (LockMutex InvalidHandle). Only catch up when we have never applied
-            # labels this session (reconnect) and the language bank is ready.
             if self._map_icon_labels_sig is None and self._map_icon_bank_ready:
                 self._schedule_map_icon_labels_push(force=True)
             self._schedule_all_bosses_itorash_gate()
@@ -6013,9 +5637,6 @@ class MetroidBreadContext(CommonContext):
 
         to_send = [location_id for _, location_id in pending]
         # Mark reported BEFORE await: LocationChecks yield the event loop and the
-        # server often replies with ReceivedItems in the same burst. If we wait to
-        # record game_reported_locations until after that await, send_items_to_game
-        # can re-grant the local pickup (progressive double-advance) before skip sees it.
         for _, location_id in pending:
             self.game_reported_locations.add(location_id)
         sent = await self.check_locations(to_send)
@@ -6052,7 +5673,6 @@ class MetroidBreadContext(CommonContext):
                 len(pending),
             )
         # Hold map EXEC until in-world grant Lua finishes, then one coalesced push
-        # (LocationChecks + RoomUpdate + inventory reachable all share this schedule).
         self._note_local_pickup_map_settle(2.0)
         self._schedule_map_icon_labels_push(force=True, extra_delay_s=1.5)
         self._schedule_all_bosses_itorash_gate()
@@ -6067,9 +5687,6 @@ class MetroidBreadContext(CommonContext):
 
         self.received_pickups = count
         # Always release grant-ACK cooldown here. Transition / MAINMENU gating is
-        # enforced by _ready_for_item_grants(); refusing to clear during settle
-        # hold deadlocks offline catch-up when the first sync ACK arrives mid-hold
-        # and no further ReceivedPickups packet is sent until the next room load.
         self.in_cooldown = False
         logger.debug("Received pickups from game: %s", count)
         await self.send_items_to_game()
@@ -6097,7 +5714,6 @@ class MetroidBreadContext(CommonContext):
         scenario = parts[0]
         has_beaten = len(parts) > 1 and parts[1] == "true"
         # Optional third field: comma-separated boss keys from SPAWNGROUP /
-        # GAME_PROGRESS probes (see RL.CollectBeatenBossKeys).
         newly_beaten: Set[str] = set()
         if len(parts) > 2 and parts[2].strip():
             reported = {k.strip() for k in parts[2].split(",") if k.strip()}
@@ -6168,10 +5784,6 @@ class MetroidBreadContext(CommonContext):
                     ),
                 )
                 # Seed check is once per Dread connection — not on every enter-world.
-            # RL.UpdateRDVClient / scenario load: re-push reachability so the new
-            # area's map paints without waiting for another inventory tick.
-            # force=True: MAINMENU→INGAME must paint even if sig matches a prior
-            # session, and the scheduler waits out the 3.5s enter-world hold.
             if scenario != prev_scenario and self.reachable_minimap_enabled:
                 if left_menu or scenario_changed or prev_mode == "TRANSITION":
                     self._reachable_areas_sig = None
@@ -6219,10 +5831,7 @@ class MetroidBreadContext(CommonContext):
     # ----- AP → game item delivery (RL.ReceivePickup) -----
 
     async def send_items_to_game(self):
-        """
-        Grant the next AP item when the game reports it is ready.
-        Matches Randovania MercuryConnector.receive_remote_pickups indexing.
-        """
+        """Grant the next AP item when the game reports it is ready."""
         if not self.game_connected or not self._socket:
             return
         if self.received_pickups is None or self.inventory_index is None:
@@ -6267,15 +5876,7 @@ class MetroidBreadContext(CommonContext):
         return f"Item {item_id}"
 
     def _is_solo_world(self) -> bool:
-        """
-        True when this room has exactly one real player.
-
-        Counts distinct player slots from slot_info (populated from the
-        Connected packet), excluding the always-present slot 0 "Archipelago"
-        pseudo-slot and item-link group slots (SlotType.group) — neither is
-        an actual second player. Falls back to player_names (also from the
-        Connected packet, but team-filtered) if slot_info is unavailable.
-        """
+        """True when this room has exactly one real player."""
         slot_info = getattr(self, "slot_info", None) or {}
         player_slots = {
             slot
@@ -6311,8 +5912,6 @@ class MetroidBreadContext(CommonContext):
         assert self.received_pickups is not None and self.inventory_index is not None
 
         # Direct patch leaves real resources on local (own) pickups. Collecting
-        # already grants in-world; ReceivedItems must not re-apply or progressives
-        # advance twice. Still advance ReceivedPickups so reconnect indexing works.
         if self._should_skip_local_inworld_grant(item):
             logger.info(
                 "Skipping duplicate local grant for %s "
@@ -6360,7 +5959,6 @@ class MetroidBreadContext(CommonContext):
             resources = [[{"item_id": "ITEM_NONE", "quantity": 0}]]
 
         # Reconnect race: ReceivedPickups can lag while unique upgrades are already
-        # in the inventory array (seen as Morph Ball RL.ReceivePickup again).
         if self._inventory_already_has_unique_resources(resources):
             logger.info(
                 "Skipping duplicate inventory grant for %s "
@@ -6395,7 +5993,6 @@ class MetroidBreadContext(CommonContext):
         )
         try:
             # Fire-and-forget: do not await EXEC (death poll / other waiters must
-            # not serialize behind grant replies). Read loop consumes the reply.
             await self.run_lua_code(lua, wait_response=False)
         except Exception as e:
             logger.error("Failed to send item to game: %s", e)
@@ -6404,15 +6001,7 @@ class MetroidBreadContext(CommonContext):
     # ----- /give debug command (local-only testing grant) -----
 
     async def debug_give_item(self, requested_name: str) -> None:
-        """
-        Grant an item locally for testing, outside of multiworld sync.
-
-        Fuzzy-matches `requested_name` against known AP Dread item names and
-        applies the resulting resources through the same OnPickedUp handler
-        real pickups use — but it never touches ReceivedPickups/InventoryIndex
-        and never sends a LocationCheck. Debug-only; do not call this from
-        anywhere in the normal ReceivedItems / send_items_to_game path.
-        """
+        """Grant an item locally for testing, outside of multiworld sync."""
         if not self.game_connected or not self._socket:
             logger.warning("/give: not connected to Metroid Bread")
             return
@@ -6483,7 +6072,6 @@ async def main(args):
     ctx.electron_ui = electron_ui
     if ctx.electron_ui:
         # Prefer text/CLI path; Electron owns the UI.
-        # Don't load RDV logic during startup emit (slow); status loop will compute it.
         ctx.emit_ui(
             "starting",
             ap_connected=False,

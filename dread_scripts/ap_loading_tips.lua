@@ -1,36 +1,4 @@
 -- ApLoadingTips: pin ForcedTooltip for Continue / New Game + /tip_force probe.
---
--- Retail SetForcedTooltip @0x1054d10 is a stub; GetForcedTooltip always pushed "".
--- With open-dread-rando-exlaunch OdrTip (tip_hooks), Set/Get are live and
--- SetLoadingMode re-applies tip caption to LOADING+0x68 after the retail clear.
---
--- OdrTip 0.5.2: live tip text overrides + controllable carousel order
--- (default count 1 = CONNECT CLIENT first).
---   InstallHooks seeds Metroid Bread TITLE||BODY defaults (visible before client).
---   Default carousel order is hardcoded sequential 0,1,2,3,4 (not random).
---   OdrTip.SetTipText(0-4, "TITLE||BODY") / SetTipTextByKey / ApLoadingTips.SetTipText
---   OdrTip.GetTipText(0-4) / ApLoadingTips.GetTipText / RL.GetTipText
---   ClearTipText / empty SetTipText restore defaults (not empty / BTXT).
---   OdrTip.SetTipOrder({0,1,2,3,4}) / ApLoadingTips.SetTipOrder — carousel slot order.
---   OdrTip.SetTipCount(N) / ApLoadingTips.SetTipCount — how many tips (1–5).
---   Client: /tip_set 0 {c6}LIVE{c7}||runtime override works.
---   Client: /tip_get 0   (omit slot to dump 0–4)
---   Client: /tip_order 0 1 2 3 4
---   Client: /tip_count 2
---
--- Continue pin: SetForcedTooltip ONLY via LoadGame / OnLoadScenarioRequest /
--- StartPrologue / LoadProfile wraps. Do NOT wrap ShowLoadingScreen / Hide /
--- SetLoadingScreen — that caused heavy CHADO flicker.
--- OnLoadScenarioRequest: ForceNextTip AFTER orig (orig → SetScenarioLoadingScreen
--- → ShowLoadingScreen). Pinning before Show made TipRefresh soft-fail with no
--- PoolBuild; death Continue never hits SetLoadingMode to retry (0.5.9 log).
--- ForceNextTip re-arms OdrTip ForceRefresh (SetTipCount → ArmCarouselRefresh)
--- after the pin so warp / reload / transport loads rebuild tipGUI — the first
--- New Game ForceRefresh otherwise leaves gForceRefreshDone set forever.
--- Priority: Death Link / death joke tips, then CONNECT CLIENT (pre-Hub), else
--- shuffle the active generic pool (ApTipPool + unlocked ApTipPoolSecondary)
--- up to 5 tips. Secondary tips unlock one-per-collected-check (see ap_tip_pool.lua).
--- /tip_force stays AddSF-scheduled dialogue + optional chrome probe.
 
 ApLoadingTips = ApLoadingTips or {
   enabled = true,
@@ -365,10 +333,7 @@ function ApLoadingTips.ApplyForcedTooltip(want)
   return ApLoadingTips._last_readback or ""
 end
 
---- Re-arm OdrTip ForceRefresh without changing carousel content.
--- OdrTip has no Lua ArmCarouselRefresh binder; SetTipCount(N) clears
--- gForceRefreshDone and re-runs TipRefresh (0.5.12+). Call AFTER
--- ApplyForcedTooltip so the rebuild bakes the tip just stamped.
+-- - Re-arm OdrTip ForceRefresh without changing carousel content.
 function ApLoadingTips.ArmCarouselRefresh(reason)
   if not odr_tip_live() then
     return false
@@ -419,8 +384,6 @@ function ApLoadingTips.ForceNextTip(reason)
     return false
   end
   -- Stamp ForcedTooltip first (updates gForcedTip + LOADING), then re-arm
-  -- TipRefresh. Re-arming before the stamp can rebuild tipGUI with a stale tip
-  -- and leave ForceRefresh consumed (done=1) so SetForcedTooltip skips.
   local got = ApLoadingTips.ApplyForcedTooltip(nil)
   if odr_tip_live() then
     pcall(ApLoadingTips.ArmCarouselRefresh, reason)
@@ -692,8 +655,7 @@ function ApLoadingTips.ProbeChromeShow()
   return show_status
 end
 
---- Fast probe: diagnose Forced, schedule visible message + chrome, return NOW.
---- Never call GUI.ShowMessage inline — it is modal and blocks EXEC → TimeoutError.
+-- - Fast probe: diagnose Forced, schedule visible message + chrome, return NOW.
 function ApLoadingTips.ProbeShow(tip_id, seconds, also_message)
   tip_id = tip_id or ApLoadingTips._fallback_loc
   seconds = tonumber(seconds) or 3.0
@@ -810,7 +772,6 @@ local function wrap_on_load_scenario()
   ApLoadingTips._orig["OnLoadScenarioRequest"] = orig
   guicallbacks.OnLoadScenarioRequest = function(...)
     -- Show loading chrome first, then pin/ForceRefresh. Pre-Show TipRefresh
-    -- no-ops (0.5.9 soft-fail); death checkpoint never calls SetLoadingMode.
     orig(...)
     pcall(ApLoadingTips.ForceNextTip, "OnLoadScenarioRequest")
   end
@@ -866,9 +827,7 @@ function ApLoadingTips.UninstallLoadWraps()
   return restored
 end
 
---- Runtime tip caption override (OdrTip 0.5.0 GetLocalized side table).
---- text shape: TITLE||BODY with optional {c6}/{c7}/{c0}. Empty text clears.
---- indexOrKey: 0–4, or key TIP_* / #TIP_* / AP_TIP_N.
+-- - Runtime tip caption override (OdrTip 0.5.0 GetLocalized side table).
 function ApLoadingTips.SetTipText(indexOrKey, text)
   if type(OdrTip) ~= "table" then
     log("SetTipText: OdrTip missing")

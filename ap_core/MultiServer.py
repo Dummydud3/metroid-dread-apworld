@@ -135,7 +135,6 @@ modify_functions = {
 
 def get_saving_second(seed_name: str, interval: int = 60) -> int:
     # save at expected times so other systems using savegame can expect it
-    # represents the target second of the auto_save_interval at which to save
     return int(hashlib.sha256(seed_name.encode()).hexdigest(), 16) % interval
 
 
@@ -731,10 +730,7 @@ class Context:
 
     def recheck_hints(self, team: typing.Optional[int] = None, slot: typing.Optional[int] = None,
                       changed: typing.Optional[typing.Set[team_slot]] = None) -> None:
-        """Refreshes the hints for the specified team/slot. Providing 'None' for either team or slot
-        will refresh all teams or all slots respectively. If a set is passed for 'changed', each (team,slot)
-        pair that has at least one hint modified will be added to the set.
-        """
+        """Refreshes the hints for the specified team/slot. Providing 'None' for either team or slot"""
         for hint_team, hint_slot in self.hints:
             if team != hint_team and team is not None:
                 continue  # Check specified team only, all if team is None
@@ -771,8 +767,7 @@ class Context:
         return [NetworkPlayer(t, p, self.get_aliased_name(t, p), n) for (t, p), n in self.player_names.items()]
 
     def slot_set(self, slot) -> typing.Set[int]:
-        """Returns the slot IDs that concern that slot,
-        as in expands groups out and returns back the input for solo."""
+        """Returns the slot IDs that concern that slot,"""
         return self.groups.get(slot, {slot})
 
     def _set_options(self, server_options: dict):
@@ -816,11 +811,9 @@ class Context:
             if not hint.local and data not in concerns[hint.finding_player]:
                 concerns[hint.finding_player].append(data)
 
-            # For !hint use cases, only hints that were not already found at the time of creation should be remembered
-            # For LocationScouts use-cases, all hints should be remembered
+            # For !hint use cases, only hints that were not already found at the time of creation should be rem...
             if not hint.found or persist_even_if_found:
                 # since hints are bidirectional, finding player and receiving player,
-                # we can check once if hint already exists
                 if hint not in self.hints[team, hint.finding_player]:
                     self.hints[team, hint.finding_player].add(hint)
                     new_hint_events.add(hint.finding_player)
@@ -924,7 +917,6 @@ async def on_client_connected(ctx: Context, client: Client):
         'password': bool(ctx.password),
         'games': games,
         # tags are for additional features in the communication.
-        # Name them by feature or fork, as you feel is appropriate.
         'tags': ctx.tags,
         'version': version_tuple,
         'generator_version': ctx.generator_version,
@@ -1155,7 +1147,6 @@ def register_location_checks(ctx: Context, team: int, slot: int, locations: typi
                 ctx.player_names[(team, target_player)], ctx.location_names[ctx.slot_info[slot].game][location]))
             if len(info_texts) >= 140:
                 # split into chunks that are close to compression window of 64K but not too big on the wire
-                # (roughly 1300-2600 bytes after compression depending on repetitiveness)
                 ctx.broadcast_team(team, info_texts)
                 info_texts.clear()
             info_texts.append(json_format_send_event(new_item, target_player))
@@ -1179,10 +1170,7 @@ def register_location_checks(ctx: Context, team: int, slot: int, locations: typi
 
 def collect_hints(ctx: Context, team: int, slot: int, item: typing.Union[int, str],
                   status: HintStatus | None = None) -> typing.List[Hint]:
-    """
-    Collect a new hint for a given item id or name, with a given status.
-    If status is None (which is the default value), an automatic status will be determined from the item's quality.
-    """
+    """Collect a new hint for a given item id or name, with a given status."""
 
     hints = []
     slots: typing.Set[int] = {slot}
@@ -1218,20 +1206,14 @@ def collect_hints(ctx: Context, team: int, slot: int, item: typing.Union[int, st
 
 def collect_hint_location_name(ctx: Context, team: int, slot: int, location: str,
                                status: HintStatus | None = HintStatus.HINT_UNSPECIFIED) -> typing.List[Hint]:
-    """
-    Collect a new hint for a given location name, with a given status (defaults to "unspecified").
-    If None is passed for the status, then an automatic status will be determined from the item's quality.
-    """
+    """Collect a new hint for a given location name, with a given status (defaults to "unspecified")."""
     seeked_location: int = ctx.location_names_for_game(ctx.games[slot])[location]
     return collect_hint_location_id(ctx, team, slot, seeked_location, status)
 
 
 def collect_hint_location_id(ctx: Context, team: int, slot: int, seeked_location: int,
                              status: HintStatus | None = HintStatus.HINT_UNSPECIFIED) -> typing.List[Hint]:
-    """
-    Collect a new hint for a given location id, with a given status (defaults to "unspecified").
-    If None is passed for the status, then an automatic status will be determined from the item's quality.
-    """
+    """Collect a new hint for a given location id, with a given status (defaults to "unspecified")."""
     prev_hint = ctx.get_hint(team, slot, seeked_location)
     if prev_hint:
         return [prev_hint]
@@ -1434,10 +1416,7 @@ class ClientMessageProcessor(CommonCommandProcessor):
 
     @mark_raw
     def _cmd_admin(self, command: str = ""):
-        """Allow remote administration of the multiworld server
-        Usage: "!admin login <password>" in order to log in to the remote interface.
-        Once logged in, you can then use "!admin <command>" to issue commands.
-        If you need further help once logged in.  use "!admin /help" """
+        """Allow remote administration of the multiworld server"""
 
         output = f"!admin {command}"
         if output.lower().startswith(
@@ -1491,9 +1470,7 @@ class ClientMessageProcessor(CommonCommandProcessor):
         return True
 
     def _cmd_status(self, tag:str="") -> bool:
-        """Get status information about your team.
-        Optionally mention a Tag name and get information on who has that Tag.
-        For example: DeathLink or EnergyLink."""
+        """Get status information about your team."""
         self.output(get_status_string(self.ctx, self.client.team, tag))
         return True
 
@@ -1585,8 +1562,7 @@ class ClientMessageProcessor(CommonCommandProcessor):
 
     @mark_raw
     def _cmd_missing(self, filter_text="") -> bool:
-        """List all missing location checks from the server's perspective.
-        Can be given text, which will be used as filter."""
+        """List all missing location checks from the server's perspective."""
 
         locations = get_missing_checks(self.ctx, self.client.team, self.client.slot)
 
@@ -1611,8 +1587,7 @@ class ClientMessageProcessor(CommonCommandProcessor):
 
     @mark_raw
     def _cmd_checked(self, filter_text="") -> bool:
-        """List all done location checks from the server's perspective.
-        Can be given text, which will be used as filter."""
+        """List all done location checks from the server's perspective."""
 
         locations = get_checked_checks(self.ctx, self.client.team, self.client.slot)
 
@@ -1812,16 +1787,12 @@ class ClientMessageProcessor(CommonCommandProcessor):
 
     @mark_raw
     def _cmd_hint(self, item_name: str = "") -> bool:
-        """Use !hint {item_name},
-        for example !hint Lamp to get a spoiler peek for that item.
-        If hint costs are on, this will only give you one new result,
-        you can rerun the command to get more in that case."""
+        """Use !hint {item_name},"""
         return self.get_hints(item_name)
 
     @mark_raw
     def _cmd_hint_location(self, location: str = "") -> bool:
-        """Use !hint_location {location_name},
-        for example !hint_location atomic-bomb to get a spoiler peek for that location."""
+        """Use !hint_location {location_name},"""
         return self.get_hints(location, True)
 
 
@@ -2239,9 +2210,7 @@ class ServerCommandProcessor(CommonCommandProcessor):
         return True
 
     def _cmd_status(self, tag: str = "") -> bool:
-        """Get status information about teams.
-        Optionally mention a Tag name and get information on who has that Tag.
-        For example: DeathLink or EnergyLink."""
+        """Get status information about teams."""
         for team in self.ctx.clients:
             self.output(get_status_string(self.ctx, team, tag))
         return True
@@ -2282,7 +2251,6 @@ class ServerCommandProcessor(CommonCommandProcessor):
     def resolve_player(self, input_name: str) -> typing.Optional[typing.Tuple[int, int, str]]:
         """ returns (team, slot, player name) """
         # TODO: clean up once we disallow multidata < 0.3.6, which has CI unique names
-        # first match case
         for (team, slot), name in self.ctx.player_names.items():
             if name == input_name:
                 return team, slot, name
@@ -2555,7 +2523,6 @@ async def console(ctx: Context):
     while not ctx.exit_event.is_set():
         try:
             # I don't get why this while loop is needed. Works fine without it on clients,
-            # but the queue.get() for server never fulfills if the queue is empty when entering the await.
             while queue.qsize() == 0:
                 await asyncio.sleep(0.05)
                 if not worker.is_alive():

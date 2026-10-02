@@ -28,7 +28,6 @@ contextBridge.exposeInMainWorld("dreadHub", {
   pickFolder: (title) => ipcRenderer.invoke("pick-folder", title),
   pickFile: (opts) => ipcRenderer.invoke("pick-file", opts),
   // Singleplayer dropzone: drag/drop or Browse a generated AP output .zip
-  // straight into the same patch flow used by the direct patcher.
   loadSingleplayerZip: (zipPath) => ipcRenderer.invoke("load-singleplayer-zip", zipPath),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   loadYaml: (path) => ipcRenderer.invoke("load-yaml", path),

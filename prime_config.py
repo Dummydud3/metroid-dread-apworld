@@ -1,5 +1,4 @@
 # Complete Prime 1 configuration extracted from working multiworld
-# This is the FULL configuration from a real Randovania Prime 1 multiworld preset
 import json
 import os
 

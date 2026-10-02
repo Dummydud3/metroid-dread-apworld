@@ -1,15 +1,4 @@
-"""Dock-rando pools and config loaded from logic_database/header.json.
-
-Source of truth for RDV Individual Doors parameters (change_from / change_to /
-unlocked / locked / to_shuffle_proportion / force_change_two_way). AP intersects
-``change_to`` with ODR-addable types (Phase 2: beams / missiles / grapple /
-blast / Ice / Storm / Diffusion). Access Permanently Closed is deferred.
-
-Reads header.json via ``logic_parser.read_database_bytes`` so this works from a
-loose ``worlds/metroid_bread`` folder *and* from ``metroid_bread.apworld``
-(zipimport). Plain ``Path.open`` fails inside .apworld and aborts world load,
-which hides the Metroid Bread Client from the Archipelago Launcher.
-"""
+"""Dock-rando pools and config loaded from logic_database/header.json."""
 from __future__ import annotations
 
 import json
@@ -24,8 +13,6 @@ from .logic_parser import read_database_bytes
 _LOGIC_DB = Path(__file__).resolve().parent / "logic_database"
 
 # ODR door_type strings AP may emit as Individual Doors targets (Phase 2).
-# Includes blast / Ice / Storm / Diffusion. Excludes closed (deferred) and
-# anything with can_be_added=False (see ODR_CANNOT_ADD_DOOR_TYPES).
 BASIC_ODR_DOOR_TYPES: FrozenSet[str] = frozenset({
     "power_beam",
     "charge_beam",
@@ -58,9 +45,6 @@ DEFERRED_CHANGE_TO_DOOR_TYPES: FrozenSet[str] = frozenset({
 })
 
 # Mercury actordef bases ODR ``DoorType`` / ``ActorData`` can identify as doors.
-# Source: open_dread_rando.door_locks.door_patcher.ActorData (DOOR_* only).
-# ``doorshutter`` / ``doorheat`` are deliberately absent — ``door_actor_to_type``
-# raises ``ValueError: ... is not a patchable door!`` for those actors.
 ODR_PATCHABLE_DOOR_ACTORDEFS: FrozenSet[str] = frozenset({
     "doorframe",
     "doorpowerpower",
@@ -116,16 +100,7 @@ def is_odr_patchable_door_actor(
     actor_name: str,
     actor_def: Optional[str] = None,
 ) -> bool:
-    """True when Mercury *instance* name is one ODR ``door_actor_to_type`` can ID.
-
-    Requires the actor instance family (``doorpowerpower_000`` → ``doorpowerpower``)
-    to be in ``ODR_PATCHABLE_DOOR_ACTORDEFS``. Symbolic labels like
-    ``Door006 (CG-CG)`` are rejected even if ``actor_def`` points at a real door —
-    ODR patches need the Mercury instance name, not the logic display label.
-
-    When ``actor_def`` is provided, it must also resolve to an allowlisted
-    basename (defense against mislabeled props).
-    """
+    """True when Mercury *instance* name is one ODR ``door_actor_to_type`` can ID."""
     family = actor_def_family(actor_name)
     if family not in ODR_PATCHABLE_DOOR_ACTORDEFS:
         return False
@@ -234,12 +209,7 @@ def to_shuffle_proportion() -> float:
 
 
 def reroute_shuffle_proportion() -> float:
-    """
-    Fraction of non-assist eligible docks that enter the reroute (lock) set.
-
-    Phase 1 AP default is higher than RDV header 0.6 so more of the map
-    actually changes after post-fill.
-    """
+    """Fraction of non-assist eligible docks that enter the reroute (lock) set."""
     return 0.85
 
 

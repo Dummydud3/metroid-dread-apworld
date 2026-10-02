@@ -1,5 +1,4 @@
 -- ActorConsistency: after ProgressKeeper reinject, make world entities match flags.
--- Prevents duplicate pickups / stale doors when Continue rebuilt actors from stale BB.
 
 ActorConsistency = ActorConsistency or {
   enabled = true,

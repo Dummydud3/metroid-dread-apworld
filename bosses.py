@@ -1,42 +1,4 @@
-"""
-All Bosses goal — canonical combat/story boss list for Metroid Bread.
-
-Exact list (verified against Events.py / Locations.py / RDV logic DB):
-
-Arena / major bosses
-  1. Corpius              — event ``Event - Corpius``
-  2. Kraid                — event ``Event - Kraid``
-  3. Drogyga              — event ``Event - Drogyga``
-  4. Escue                — event ``Event - Escue``
-  5. Golzuna              — event ``Event - Golzuna``
-  6. Z-57                 — no kill event; win via checking
-                            ``Cataris - Above Z-57 Fight - Pickup (Z-57)``
-  7. Raven Beak           — victory item ``Raven Beak Defeated`` /
-                            client ``Init.bBeatenSinceLastReboot`` (final)
-
-Story / additional bosses (user requested every RDV boss fight)
-  8. Quiet Robe           — ``Event - Quiet Robe``
-  9. Elun Chozo Soldier   — ``Event - Elun - Chozo Soldier Fight``
- 10. Chozo-X              — ``Event - Ghavoran - Chozo-X``
- 11. Hanubia Gold Chozo   — ``Event - Hanubia - Gold Chozo Fight``
- 12. Hanubia Red Chozo    — ``Event - Hanubia - Red Chozo Fight``
- 13. Burenia Twin Robots  — ``Event - Burenia - Twin Robot Fight``
- 14. Ferenia Twin Robots  — ``Event - Ferenia - Twin Robot Fight``
- 15. Ghavoran Gold Robot  — ``Event - Ghavoran - Gold Robot Fight``
-
-Client beaten detection (Hub tracker / All Bosses gate), in priority order:
-  - Raven Beak: ``Init.bBeatenSinceLastReboot`` / finished_game
-  - Spawn-group probe: scenario ``SPAWNGROUP.iNumDeaths`` → ``AP_BossBeaten_<key>``
-  - Progress prop: ``GAME_PROGRESS`` boolean (Quiet Robe ``PROFESSOR_MET``)
-  - Pickup-backed: location reported by *this* Dread session
-    (``game_reported_locations`` / collected-indices bit) — NOT Archipelago
-    ``checked_locations``. Remote Collect/Release from another slot can mark
-    our boss pickups checked on the server without us fighting them.
-  - Fallback: same-region event unlock inference only against game-reported
-    pickups (never shared-arena / cross-region; that previously marked
-    Burenia Twin Robots when Ghavoran Gold Robot died)
-
-"""
+"""All Bosses goal — canonical combat/story boss list for Metroid Bread."""
 
 from __future__ import annotations
 
@@ -242,17 +204,7 @@ def check_location_ids() -> Dict[str, int]:
 
 
 def state_has_all_bosses(state, player: int) -> bool:
-    """
-    Generation completion helper: Raven Beak defeated and every All-Bosses
-    node reachable under current inventory.
-
-    Boss event items are ``ItemClassification.filler`` and are never recorded in
-    ``CollectionState.prog_items`` (``World.collect`` skips them). RDV logic
-    auto-grants those events when their nodes open (``collect_events=True``),
-    so node reachability is the correct generation proxy — not ``state.has``.
-    Z-57 has no event item; its pickup node is included in
-    ``boss_nodes_for_access``.
-    """
+    """Generation completion helper: Raven Beak defeated and every All-Bosses"""
     if not state.has(RAVEN_BEAK_ITEM, player):
         return False
     world = state.multiworld.worlds[player]

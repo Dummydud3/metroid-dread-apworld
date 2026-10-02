@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""
-Stress-test Metroid Bread victory-implies-90% clearance across extreme YAMLs.
-
-Usage (from Archipelago repo root):
-  py -3.12 worlds/metroid_bread/tools/stress_victory_clearance.py
-  py -3.12 worlds/metroid_bread/tools/stress_victory_clearance.py --count 40 --seed 100
-"""
+"""Stress-test Metroid Bread victory-implies-90% clearance across extreme YAMLs."""
 
 from __future__ import annotations
 

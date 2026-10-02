@@ -1,10 +1,4 @@
-"""
-Logic-relevant option values for generation ↔ client tracker parity.
-
-The Hub / map tracker builds a lightweight DreadLogic world. Without these
-values (especially trick difficulties), it silently assumes Disabled and
-disagrees with the spoiler playthrough for Expert / trick-heavy seeds.
-"""
+"""Logic-relevant option values for generation ↔ client tracker parity."""
 
 from __future__ import annotations
 
@@ -21,7 +15,9 @@ _EXTRA_LOGIC_OPTIONS = (
     "power_bomb_tank_ammo",
     "nerf_power_bombs",
     "door_lock_rando",
+    "randovania_door_rando",
     "transport_rando",
+    "dangerous_logic",
 )
 
 LOGIC_OPTION_NAMES: tuple[str, ...] = tuple(
@@ -29,7 +25,6 @@ LOGIC_OPTION_NAMES: tuple[str, ...] = tuple(
 )
 
 # Spoiler header labels (Options.display_name / RDV long_name) → option field.
-# Legacy AP labels kept so older spoilers still parse.
 _SPOILER_LABEL_TO_OPTION: Dict[str, str] = {
     # Current RDV long_name / Options.display_name
     "Knowledge": "knowledge_tricks",
@@ -75,7 +70,9 @@ _SPOILER_LABEL_TO_OPTION: Dict[str, str] = {
     "Starting Power Bombs": "starting_power_bombs",
     "Power Bomb Tank Ammo": "power_bomb_tank_ammo",
     "Nerf Power Bombs": "nerf_power_bombs",
+    "Dangerous Logic": "dangerous_logic",
     "Door Lock Randomizer": "door_lock_rando",
+    "Randovania Door Rando Algorithm": "randovania_door_rando",
     "Transport Randomizer": "transport_rando",
 }
 
@@ -131,12 +128,7 @@ def coerce_logic_options(raw: Any) -> Dict[str, int]:
 
 
 def parse_logic_options_from_spoiler_text(text: str) -> Dict[str, int]:
-    """
-    Parse trick / ammo settings from a full Archipelago spoiler header.
-
-    Synthetic server spoilers often omit this block; full generate spoilers include
-    lines like ``Knowledge:                Expert``.
-    """
+    """Parse trick / ammo settings from a full Archipelago spoiler header."""
     if not text:
         return {}
     out: Dict[str, int] = {}
@@ -169,12 +161,7 @@ def parse_logic_options_from_spoiler_text(text: str) -> Dict[str, int]:
 def merge_logic_option_sources(
     *sources: tuple[str, Mapping[str, int]],
 ) -> tuple[Dict[str, int], Optional[str]]:
-    """
-    Merge option dicts in priority order (first non-empty source wins per key).
-
-    Returns (merged, primary_source_name) where primary is the first source that
-    contributed any trick option (not just ammo defaults).
-    """
+    """Merge option dicts in priority order (first non-empty source wins per key)."""
     trick_names = set(TRICK_TO_OPTION.values())
     merged: Dict[str, int] = {}
     primary: Optional[str] = None

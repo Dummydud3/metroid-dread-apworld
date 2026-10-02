@@ -1,8 +1,4 @@
-"""
-Metroid Bread world implementation for Archipelago
-
-Uses Randovania logic_database as the live reachability engine (see dread_logic.py).
-"""
+"""Metroid Bread world implementation for Archipelago"""
 
 from __future__ import annotations
 
@@ -10,7 +6,6 @@ import json
 from typing import Dict, List, Optional
 
 # Register launcher component before heavy world imports so a later import
-# failure cannot hide "Metroid Bread Client" from the Archipelago Launcher.
 try:
     from . import launcher  # noqa: F401
 except ImportError:
@@ -28,6 +23,7 @@ from .dread_logic import DreadLogic
 from .starting_locations import get_by_option_key, get_default, load_starting_locations
 from . import DoorRando
 from . import DoorRandoAssigner
+from . import RdvDoorRando
 from . import StartKit
 from . import TransportRando
 from . import victory_clearance
@@ -38,16 +34,12 @@ DREAD_PATCH_EXTRAS_MARKER = "DREAD_PATCH_EXTRAS_JSON:"
 _GOAL_NODE = ("Itorash", "Raven Beak Arena", "Boss - Raven Beak")
 
 # With combat_tricks disabled, RDV fight templates fall back to raw Damage/energy
-# gates. Gold Chozo-X and Raven Beak both require 799 energy on the no-Combat path.
 _COMBAT_OFF_MIN_ENERGY = 799
 
 # Share of the world a start has to reach with a full inventory to be usable.
 _MIN_START_COVERAGE = 0.8
 
 # Checks that have to be in logic on the starting kit alone. The assumed fill
-# needs somewhere to put the very first progression item, and a single check
-# leaves it no room to manoeuvre. Starts the kit cannot lift this high get
-# relocated rather than handed an ever-growing pile of items.
 _MIN_START_CHECKS = StartKit.MIN_START_LOCATIONS
 
 # Graph repair ladder: full re-rolls, then density-biased door softening, then vanilla.
@@ -105,7 +97,6 @@ _BOSS_DNA_SUBSTR = (
 )
 
 # Arena / EMMI-defeat sinks (true DNA homes). Central Unit Access is preferred
-# for DNA theming but also holds Morph / Speed / Magnet — use it after arenas.
 _ARENA_DNA_SUBSTR = (
     "Corpius Arena",
     "Kraid Arena",
@@ -118,7 +109,6 @@ _ARENA_DNA_SUBSTR = (
 )
 
 # Vanilla intro checks that look "late" vs a non-Artaria start kit sphere but
-# are terrible locked-DNA sinks (Ferenia start + Artaria tutorials, etc.).
 _STALE_INTRO_DNA_SUBSTR = (
     "Charge Tutorial",
     "Melee Tutorial Room",
@@ -142,9 +132,7 @@ class MetroidBreadWeb(WebWorld):
 
 
 class MetroidBreadWorld(World):
-    """
-    Metroid Bread is a 2D action-adventure game and the fifth main installment in the Metroid series.
-    """
+    """Metroid Bread is a 2D action-adventure game and the fifth main installment in the Metroid series."""
     game = "Metroid Bread"
     options_dataclass = MetroidBreadOptions
     options: MetroidBreadOptions
@@ -169,6 +157,10 @@ class MetroidBreadWorld(World):
     door_fill_assist_keys: list
     # Start-frontier docks left vanilla.
     door_protected_keys: list
+    # Randovania Individual Doors: pair list and pre-fill Power Beam nodes.
+    rdv_door_pairs: list
+    rdv_unlock_nodes: list
+    rdv_door_stats: dict
     transport_matching: dict
     elevator_patches: list
     patch_extras: dict
@@ -184,6 +176,9 @@ class MetroidBreadWorld(World):
         self.door_shuffled_keys = []
         self.door_fill_assist_keys = []
         self.door_protected_keys = []
+        self.rdv_door_pairs = []
+        self.rdv_unlock_nodes = []
+        self.rdv_door_stats = {}
         self.transport_matching = {}
         self.elevator_patches = []
         self.patch_extras = {}
@@ -193,16 +188,6 @@ class MetroidBreadWorld(World):
         self.early_expand_pins: List[str] = []
 
         # Raven Beak's access rule already requires >=90% of clearable checks
-        # (100% when game_goal is one_hundred_percent; see Rules.py /
-        # victory_clearance). Do NOT force accessibility:full — several
-        # pickup/event nodes are trick-gated (Speedbooster Conservation,
-        # Knowledge, etc.) and stay unreachable with default tricks disabled.
-        # Full would make fulfills_accessibility demand those nodes and fail
-        # every seed. Coerce Minimal→Items so progression cannot hide behind
-        # unreachable checks, while filler/trick-only locations may remain out
-        # of logic (ItemsAccessibility). Full is re-checked after the graph is
-        # final (tricks + start + door/transport) and downgraded if needed.
-        # For 100% goal, non-clearable checks are dropped from the pool instead.
         if self.options.accessibility == "minimal":
             self.options.accessibility.value = self.options.accessibility.option_items
             goal_val = int(self.options.game_goal.value)
@@ -218,19 +203,17 @@ class MetroidBreadWorld(World):
             )
 
         # Combat-off + tiny energy_per_tank leaves Gold Chozo / Raven Beak
-        # logically impossible even with every tank collected.
         self._ensure_combat_energy_viable()
 
         self._resolve_starting_location()
 
         # Most valid_starting_location nodes have no pickup in logic on an empty
-        # inventory, which the assumed fill cannot work with. Roll the kit that
-        # reopens the start (see StartKit) before door rando, so the doors it
-        # needs are part of the frontier that stays vanilla.
         self._roll_start_kit()
         vanilla_kit = list(self.start_kit)
 
-        want_doors = self.options.door_lock_rando.value == 1
+        want_doors = (
+            self.options.door_lock_rando.value == 1 or self._uses_rdv_door_algo()
+        )
         want_transports = self.options.transport_rando.value == 1
         if want_doors or want_transports:
             accepted, last_preflight = self._try_graph_rerolls(vanilla_kit)
@@ -252,13 +235,10 @@ class MetroidBreadWorld(World):
                     )
 
         # Final guard: never ship a kit that can already touch Raven Beak,
-        # or a start whose sphere 0 cannot expand under the settled graph.
         if self._start_kit_reaches_goal() or not self._kit_is_ok():
             self._roll_start_kit()
 
         # Cramped sphere-0 (exactly MIN checks): fill can park non-opening
-        # progression in every early slot and softlock. Pin the openers that
-        # actually expand the start into local_early_items (see create_items).
         self._compute_early_expand_pins()
 
         self._compute_forced_boss_locations()
@@ -274,7 +254,6 @@ class MetroidBreadWorld(World):
         required = int(self.options.required_dna.value)
         goal = int(self.options.game_goal.value)
         # ODR installs the Itorash ADAM door only when required_artifacts > 0.
-        # All Bosses reuses that door even with DNA=0 (client grants Metroidnization).
         patch_artifacts = max(required, 1) if goal == 2 else required
         self.patch_extras = {
             "door_patches": self.door_patches,
@@ -316,6 +295,9 @@ class MetroidBreadWorld(World):
                 "default_x_released": bool(self.options.x_starts_released.value),
                 "energy_per_tank": int(self.options.energy_per_tank.value),
             },
+            "station_map_warp": bool(self.options.station_map_warp.value),
+            "warp_requirement": self.options.warp_requirement.current_key,
+            "warp_reach": self.options.warp_reach.current_key,
             "disabled_lights": sorted(self.options.disabled_lights.value),
             "starting_missiles": int(self.options.starting_missiles.value),
             "starting_power_bombs": int(self.options.starting_power_bombs.value),
@@ -332,7 +314,6 @@ class MetroidBreadWorld(World):
             "start_with_pulse_radar": bool(self.options.start_with_pulse_radar.value),
             "starting_items": StartKit.odr_starting_items(self.start_kit, options=self.options),
             # Logic-graph form for the client tracker (elevators alone use arrival
-            # spawn actors, which are awkward to map back to dock nodes).
             "transport_matching": dict(self.transport_matching or {}),
             "door_assignments": [
                 {"scenario": scenario, "actor": actor, "weakness": weakness}
@@ -360,13 +341,7 @@ class MetroidBreadWorld(World):
         return name
 
     def _start_sphere_expands(self) -> bool:
-        """
-        True when assumed fill can grow past sphere 0.
-
-        Some save rooms only expose two local checks; placing Morph (etc.) there
-        still leaves the player trapped (one-ways, door locks, transport cuts).
-        Artaria Intro expands; Artaria Save East / Burenia South often do not.
-        """
+        """True when assumed fill can grow past sphere 0."""
         counts = StartKit.kit_counts(self.start_kit)
         early = self.logic.reachable_pickup_names(counts)
         if len(early) < _MIN_START_CHECKS:
@@ -385,15 +360,7 @@ class MetroidBreadWorld(World):
         return len(expanded) >= len(early) + _MIN_START_CHECKS
 
     def _compute_early_expand_pins(self) -> None:
-        """
-        When sphere-0 has only ``_MIN_START_CHECKS`` slots, pin the openers that
-        expand it into ``local_early_items``.
-
-        Assumed fill may otherwise place Progressive Beam / DNA-adjacent junk in
-        every early check (fuzz 434 Artaria Save East + Morph; fuzz 53 Burenia
-        South + Screw Attack), leaving Morph/Bomb/Charge nowhere to go.
-        Spacious starts (> MIN early checks) leave fill enough room to stumble.
-        """
+        """When sphere-0 has only ``_MIN_START_CHECKS`` slots, pin the openers that"""
         self.early_expand_pins = []
         counts = StartKit.kit_counts(self.start_kit)
         early = self.logic.reachable_pickup_names(counts)
@@ -480,12 +447,7 @@ class MetroidBreadWorld(World):
         )
 
     def _roll_start_kit(self) -> None:
-        """Pick the starting kit, relocating if this start cannot be opened.
-
-        YAML ``starting_kit_items`` caps how many majors may be precollected.
-        When the budget is too low for the chosen start but a full Start Kit
-        would work, log clearly (and FillError for a specific start).
-        """
+        """Pick the starting kit, relocating if this start cannot be opened."""
         self._assign_start_kit()
         if self._kit_is_ok():
             return
@@ -568,7 +530,6 @@ class MetroidBreadWorld(World):
             if node is not None and node not in nodes:
                 return True
         # One event_item may have several nodes (e.g. normal vs Ledge Warp).
-        # Full only needs some path to each event item — not every alternate.
         by_item: dict = defaultdict(list)
         for ev in event_locations:
             by_item[ev.event_item].append((ev.game_region, ev.area, ev.node))
@@ -599,25 +560,44 @@ class MetroidBreadWorld(World):
         self.door_shuffled_keys = []
         self.door_fill_assist_keys = []
         self.door_protected_keys = []
+        self.rdv_door_pairs = []
+        self.rdv_unlock_nodes = []
+        self.rdv_door_stats = {}
         self.transport_matching = {}
         self.elevator_patches = []
         self.start_kit = list(kit)
 
     def _roll_door_and_transport_rando(self) -> None:
-        """Apply one door-lock / transport shuffle onto the current vanilla graph.
-
-        Individual Doors: classify docks → fill-assist unlocks + reroute unlocks;
-        interesting locks are assigned in ``post_fill`` on the reroute set only.
-        """
+        """Apply one door-lock / transport shuffle onto the current vanilla graph."""
         self.door_assignments = {}
         self.door_patches = []
         self.door_shuffled_keys = []
         self.door_fill_assist_keys = []
         self.door_protected_keys = []
+        self.rdv_door_pairs = []
+        self.rdv_unlock_nodes = []
+        self.rdv_door_stats = {}
         self.transport_matching = {}
         self.elevator_patches = []
 
-        if self.options.door_lock_rando.value == 1:
+        if self._uses_rdv_door_algo():
+            pre = RdvDoorRando.pre_fill(
+                self.logic,
+                doors_to_change=self.options.doors_to_change.value,
+            )
+            self.rdv_door_pairs = list(pre.pairs)
+            self.rdv_unlock_nodes = list(pre.unlock_nodes)
+            self.door_assignments = dict(pre.assignments)
+            self.door_patches = DoorRando.assignments_to_door_patches(
+                self.door_assignments
+            )
+            print(
+                f"[Metroid Bread Player {self.player}] Randovania door pre-fill: "
+                f"pairs={len(self.rdv_door_pairs)} "
+                f"unlocked_nodes={len(self.rdv_unlock_nodes)} "
+                f"power_beam_patches={len(self.door_patches)}"
+            )
+        elif self.options.door_lock_rando.value == 1:
             active = set(self.active_location_names())
             result = DoorRandoAssigner.pre_fill_roll(
                 self.logic,
@@ -653,6 +633,16 @@ class MetroidBreadWorld(World):
                     matching, transports
                 )
 
+    def _uses_rdv_door_algo(self) -> bool:
+        """True when door locks should use Randovania's Individual Doors placer."""
+        opt = getattr(self.options, "randovania_door_rando", None)
+        if opt is None:
+            return False
+        try:
+            return int(opt.value) > 0
+        except Exception:
+            return bool(getattr(opt, "value", False))
+
     def _reapply_door_and_transport(self, vanilla_kit: list) -> None:
         """Reset to vanilla logic, then re-apply stored transport + door assignments."""
         matching = dict(self.transport_matching or {})
@@ -660,12 +650,18 @@ class MetroidBreadWorld(World):
         shuffled = list(self.door_shuffled_keys or [])
         assist = list(self.door_fill_assist_keys or [])
         protected = list(self.door_protected_keys or [])
+        rdv_pairs = list(self.rdv_door_pairs or [])
+        rdv_unlock = list(self.rdv_unlock_nodes or [])
+        rdv_stats = dict(self.rdv_door_stats or {})
         self._reset_logic_graph(vanilla_kit)
         self.transport_matching = matching
         self.door_assignments = doors
         self.door_shuffled_keys = shuffled
         self.door_fill_assist_keys = assist
         self.door_protected_keys = protected
+        self.rdv_door_pairs = rdv_pairs
+        self.rdv_unlock_nodes = rdv_unlock
+        self.rdv_door_stats = rdv_stats
         if matching:
             transports = TransportRando.collect_transports(self.logic.parser)
             TransportRando.apply_matching(self.logic.parser, transports, matching)
@@ -674,16 +670,32 @@ class MetroidBreadWorld(World):
             )
         else:
             self.elevator_patches = []
-        if doors:
+        if self._uses_rdv_door_algo() and (rdv_unlock or doors):
+            RdvDoorRando.reapply_unlocked(self.logic, rdv_unlock, doors)
+            self.door_patches = DoorRando.assignments_to_door_patches(doors)
+        elif doors:
             DoorRando.apply_assignments(self.logic.parser, doors)
             self.door_patches = DoorRando.assignments_to_door_patches(doors)
+            self.logic.rebuild_graph()
         else:
             self.door_patches = []
-        self.logic.rebuild_graph()
+            self.logic.rebuild_graph()
         self._assign_start_kit(base_kit=vanilla_kit)
 
     def _graph_state_acceptable(self) -> Optional[FillError]:
         """None when start kit + preflight are OK; otherwise the failure reason."""
+        if self._uses_rdv_door_algo():
+            # Every eligible door is Power Beam during fill. A start kit that
+            # can already reach Raven Beak is repaired after this check.
+            try:
+                victory_clearance.assert_graph_preflight(self)
+            except FillError as exc:
+                return exc
+            if self._start_checks() < _MIN_START_CHECKS or not self._start_sphere_expands():
+                return FillError(
+                    "start sphere does not expand under Randovania door pre-fill"
+                )
+            return None
         if self._start_checks() < _MIN_START_CHECKS or self._start_kit_reaches_goal():
             return FillError(
                 "start kit too weak or already reaches Raven Beak "
@@ -724,13 +736,7 @@ class MetroidBreadWorld(World):
         return False, last_preflight
 
     def _try_door_soften_passes(self, vanilla_kit: list) -> bool:
-        """
-        Density-biased door softening after re-rolls failed.
-
-        Softens doors that unlock the most new checks (start-kit inventory first,
-        full inventory as tie-break context via goal bonus) then re-applies the
-        graph. Returns True when preflight accepts.
-        """
+        """Density-biased door softening after re-rolls failed."""
         if not self.door_assignments:
             return False
 
@@ -760,7 +766,6 @@ class MetroidBreadWorld(World):
                 protected=protected,
             )
             # If start-kit scoring is flat, retry scoring with a fuller inventory
-            # so we still bias opens toward clearable density / Raven Beak.
             if not scored or all(score <= 0 for score, _key in scored):
                 scored = DoorRando.score_doors_by_new_checks(
                     self.logic,
@@ -796,14 +801,7 @@ class MetroidBreadWorld(World):
         return False
 
     def attempt_fill_with_door_repair(self, distribute_fn) -> None:
-        """
-        Run assumed fill; on FillError, soften density doors and retry fill.
-
-        `distribute_fn` should be ``lambda: distribute_items_restrictive(mw)``.
-        Only safe when this world still owns mutable door assignments and the
-        multiworld itempool/locations can be refilled (tests/stress helpers).
-        Stock Archipelago Generate relies on generate_early softening instead.
-        """
+        """Run assumed fill; on FillError, soften density doors and retry fill."""
         last_exc: Optional[BaseException] = None
         vanilla_kit = list(self.start_kit)
         for attempt in range(1 + _DOOR_SOFTEN_PASSES):
@@ -844,7 +842,6 @@ class MetroidBreadWorld(World):
                 if not DoorRando.soften_assignments(self.door_assignments, keys):
                     break
                 # Door mutations after regions exist still update logic + patches;
-                # fill retry requires the caller to reset placement state.
                 DoorRando.apply_assignments(self.logic.parser, self.door_assignments)
                 self.door_patches = DoorRando.assignments_to_door_patches(
                     self.door_assignments
@@ -870,10 +867,7 @@ class MetroidBreadWorld(World):
         )
 
     def _compute_forced_boss_locations(self) -> None:
-        """
-        When boss/EMMI pickups are excluded, still keep enough preferred DNA
-        sinks active so prefer_emmi / prefer_bosses can place (any DNA count).
-        """
+        """When boss/EMMI pickups are excluded, still keep enough preferred DNA"""
         self.forced_boss_locations = set()
         if self.options.include_boss_pickups:
             return
@@ -902,15 +896,7 @@ class MetroidBreadWorld(World):
         return int((ept - 1) + tanks * ept + parts * (ept / 4.0))
 
     def _ensure_combat_energy_viable(self) -> None:
-        """
-        Combat tricks disabled → fights use raw Damage/energy gates.
-
-        Gold Chozo-X and Raven Beak need 799 energy on that path. Raise
-        energy_per_tank so *base* HP (no tanks collected) clears the gate —
-        otherwise assumed fill can bury every Energy Tank behind those fights
-        and softlock. If the option cap still cannot reach the threshold, fall
-        back to combat beginner.
-        """
+        """Combat tricks disabled → fights use raw Damage/energy gates."""
         if int(self.options.combat_tricks.value) > 0:
             return
         need = _COMBAT_OFF_MIN_ENERGY
@@ -933,11 +919,7 @@ class MetroidBreadWorld(World):
             )
 
     def _full_inventory_counts(self) -> dict:
-        """Every real item at quantities past progressive / DNA thresholds.
-
-        Energy tanks/parts use the YAML pool sizes so preflight matches the
-        energy the seed can actually obtain (important when combat is off).
-        """
+        """Every real item at quantities past progressive / DNA thresholds."""
         counts = {
             name: 12 for name, data in item_table.items() if data.id is not None
         }
@@ -949,13 +931,7 @@ class MetroidBreadWorld(World):
         return counts
 
     def start_coverage(self, node) -> float:
-        """Fraction of active checks in logic from `node` with everything collected.
-
-        Returns 0.0 when Raven Beak is unreachable. A few RDV
-        valid_starting_location nodes (Elun, Cataris Save Station East, the
-        Itorash elevator) sit behind one-way transitions, so a seed started
-        there can never be completed no matter how the items fall.
-        """
+        """Fraction of active checks in logic from `node` with everything collected."""
         previous = self.logic.starting_node
         try:
             self.logic.set_starting_node(node)
@@ -1097,7 +1073,6 @@ class MetroidBreadWorld(World):
             items_to_create["Metroid DNA"] = required_dna
 
         # The start kit is handed to the player instead of being shuffled; the
-        # filler top-up below refills the freed locations.
         granted = []
         for pool_item in self.start_kit:
             if items_to_create.get(pool_item, 0) <= 0:
@@ -1111,8 +1086,6 @@ class MetroidBreadWorld(World):
         )
 
         # Guarantee Flash Shift Upgrade placement: displace Missile Tank filler 1:1
-        # for every upgrade still going into the shuffled pool (not start-kit).
-        # Upgrades are never optional leftovers that padding/trim can drop.
         fs_upgrades_in_pool = int(items_to_create.get("Flash Shift Upgrade", 0) or 0)
         if fs_upgrades_in_pool > 0:
             mt = int(items_to_create.get("Missile Tank", 0) or 0)
@@ -1123,15 +1096,12 @@ class MetroidBreadWorld(World):
                 itempool.append(self.create_item(item_name))
 
         # Combat-off: Energy Tanks/Parts gate Gold Chozo / Raven Beak (Damage
-        # requirements). Treat them as progression so assumed fill cannot bury
-        # them behind those fights.
         if int(self.options.combat_tricks.value) == 0:
             for item in itempool:
                 if item.name in ("Energy Tank", "Energy Part"):
                     item.classification = ItemClassification.progression
 
         # Progressive Flash Shift (no main): first upgrade unlocks the ability, so it
-        # must be advancement. Later upgrades stay filler chain-ammo like missiles.
         if (
             not fs_plan["vanilla"]
             and not fs_plan["require_main"]
@@ -1146,7 +1116,6 @@ class MetroidBreadWorld(World):
             self.multiworld.local_early_items[self.player]["Morph Ball"] = 1
 
         # Cramped sphere-0: force the openers that expand the start into early
-        # spheres so fill cannot fill both early slots with Progressive Beam etc.
         for name in getattr(self, "early_expand_pins", []) or []:
             if items_to_create.get(name, 0) > 0:
                 self.multiworld.local_early_items[self.player][name] = max(
@@ -1155,8 +1124,6 @@ class MetroidBreadWorld(World):
                 )
 
         # Exclude boss/EMMI checks → fewer locations, trim/pad filler accordingly.
-        # Never trim Flash Shift Upgrade — only Missile Tank (padding bucket), then
-        # Power Bomb Tank as a last resort.
         active_locations = self.active_location_names()
         total_locations = len(active_locations)
         items_created = len(itempool)
@@ -1216,7 +1183,6 @@ class MetroidBreadWorld(World):
                 if n in forced or not any(s in n for s in _BOSS_EMMI_LOCATION_SUBSTR)
             ]
         # 100% goal: only ship checks reachable with a full inventory under the
-        # rolled logic so the client can require every slot check without softlock.
         if int(self.options.game_goal.value) == 1 and getattr(self, "logic", None):
             reachable = self.logic.get_reachable_nodes(
                 self.logic.inventory_from_counts(self._full_inventory_counts())
@@ -1251,9 +1217,56 @@ class MetroidBreadWorld(World):
         self._pre_place_dna()
         victory_clearance.assert_location_capacity(self)
 
+    def _publish_door_extras(self) -> None:
+        if self.patch_extras is None:
+            return
+        self.patch_extras["door_patches"] = self.door_patches
+        self.patch_extras["door_assignments"] = [
+            {"scenario": scenario, "actor": actor, "weakness": weakness}
+            for (scenario, actor), weakness in sorted(
+                (self.door_assignments or {}).items()
+            )
+        ]
+        self.patch_extras["randovania_door_rando"] = self._uses_rdv_door_algo()
+
+    def _post_fill_rdv_doors(self) -> None:
+        """Randovania Individual Doors lock step. Bread's placer does not run."""
+        assignments = dict(self.door_assignments or {})
+        stats = RdvDoorRando.post_fill_locks(
+            self,
+            list(self.rdv_door_pairs or []),
+            self.random,
+            doors_to_change=self.options.doors_to_change.value,
+            change_doors_to=self.options.change_doors_to.value,
+            assignments=assignments,
+        )
+        self.door_assignments = assignments
+        self.door_patches = DoorRando.assignments_to_door_patches(assignments)
+        self.rdv_door_stats = stats
+        from collections import Counter
+
+        type_counts = Counter(
+            entry.get("door_type") for entry in self.door_patches
+        )
+        non_power = sum(
+            count for door_type, count in type_counts.items() if door_type != "power_beam"
+        )
+        print(
+            f"[Metroid Bread Player {self.player}] Randovania door post-fill: "
+            f"pairs={stats.get('pairs', 0)} kept={stats.get('kept', 0)} "
+            f"patches={len(self.door_patches)} non_power={non_power} "
+            f"unreachable={stats.get('unreachable', 0)} "
+            f"actor_conflicts_fixed={stats.get('actor_conflicts_fixed', 0)} "
+            f"open_solved={stats.get('solved_open')} "
+            f"in {stats.get('seconds', 0):.1f}s"
+        )
+        self._publish_door_extras()
+
     def post_fill(self) -> None:
         """Assign reach-gated door locks (Individual Doors), then clearance check."""
-        if self.options.door_lock_rando.value == 1 and (
+        if self._uses_rdv_door_algo():
+            self._post_fill_rdv_doors()
+        elif self.options.door_lock_rando.value == 1 and (
             self.door_shuffled_keys or self.door_fill_assist_keys
         ):
             self.door_assignments = DoorRandoAssigner.post_fill_assign(
@@ -1280,13 +1293,7 @@ class MetroidBreadWorld(World):
                 f"{openish} still Power Beam/Open among assigned"
             )
             if self.patch_extras is not None:
-                self.patch_extras["door_patches"] = self.door_patches
-                self.patch_extras["door_assignments"] = [
-                    {"scenario": scenario, "actor": actor, "weakness": weakness}
-                    for (scenario, actor), weakness in sorted(
-                        (self.door_assignments or {}).items()
-                    )
-                ]
+                self._publish_door_extras()
                 self.patch_extras["door_fill_assist"] = [
                     {"scenario": s, "actor": a}
                     for (s, a) in (self.door_fill_assist_keys or [])
@@ -1306,13 +1313,7 @@ class MetroidBreadWorld(World):
         return ()
 
     def _dna_frontier_names(self) -> set:
-        """
-        Start-kit sphere plus a one-step opener expansion.
-
-        DNA must not consume these when alternatives exist: they are the fill
-        frontier for Morph / early progression. Sphere-0 alone is not enough —
-        Artaria tutorials are outside a Ferenia start sphere yet still starve fill.
-        """
+        """Start-kit sphere plus a one-step opener expansion."""
         counts = StartKit.kit_counts(self.start_kit)
         frontier = set(self.logic.reachable_pickup_names(counts))
         sim = dict(counts)
@@ -1368,10 +1369,7 @@ class MetroidBreadWorld(World):
         return stale
 
     def _dna_candidate_locations(self) -> List[str]:
-        """
-        Ordered DNA targets: eventually-reachable preferred sinks first, then
-        other eventually-reachable actives. Unreachable / inactive checks omitted.
-        """
+        """Ordered DNA targets: eventually-reachable preferred sinks first, then"""
         mode = int(self.options.dna_placement.value)
         active = set(self.active_location_names())
         full = set(self.logic.reachable_pickup_names(self._full_inventory_counts()))
@@ -1484,6 +1482,7 @@ class MetroidBreadWorld(World):
             },
             "energy_per_tank": int(self.options.energy_per_tank.value),
             "door_lock_rando": int(self.options.door_lock_rando.value),
+            "randovania_door_rando": int(self._uses_rdv_door_algo()),
             "transport_rando": int(self.options.transport_rando.value),
             "logic_options": dict(logic_options),
             # Exact seed pool for Hub Map Tracker icon filtering (also in patch_extras).

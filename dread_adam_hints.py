@@ -1,9 +1,4 @@
-"""
-Adam Nav Station hints for open-dread-rando (DIAG_ADAM_* via patcher hints[]).
-
-Matches Randovania's 11 access-point terminals. Texts use Dread color codes:
-  {c1} item  {c5} region  {c0} reset  {c4} joke
-"""
+"""Adam Nav Station hints for open-dread-rando (DIAG_ADAM_* via patcher hints[])."""
 
 from __future__ import annotations
 
@@ -94,15 +89,11 @@ def pick_hint_candidates(
     *,
     our_player: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
-    """
-    Return up to N (item_name, region) pairs for Adam hints.
-    Prefers our player's majors when present; otherwise any Dread major on the map.
-    """
+    """Return up to N (item_name, region) pairs for Adam hints."""
     scored: List[Tuple[int, str, str]] = []
     seen_items = set()
     for region, area, node, item, item_player, is_ours in placements:
         # Hint where the item sits (location region), for items that matter to us
-        # or are Dread majors for this world.
         if our_player and item_player != our_player and not is_ours:
             # Still hint foreign majors that landed in our world? Prefer ours.
             pass
