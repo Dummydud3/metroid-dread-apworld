@@ -1,0 +1,3116 @@
+"""Shared Metroid Bread client↔game bridge helpers."""
+
+from __future__ import annotations
+
+import json
+import os
+import random
+import re
+import zipfile
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
+# The world folder contains the logic and client data.
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _find_containing_apworld(start: Optional[Path] = None) -> Optional[Path]:
+    here = Path(start) if start is not None else ROOT
+    for candidate in (here, *here.parents):
+        if candidate.suffix.lower() == ".apworld" and candidate.is_file():
+            return candidate
+    parts = list(here.parts)
+    for i, part in enumerate(parts):
+        if part.lower().endswith(".apworld"):
+            zipped = Path(*parts[: i + 1])
+            if zipped.is_file():
+                return zipped
+    return None
+
+
+def _read_world_text(filename: str) -> str:
+    """Read a world-package text file from disk, extracted runtime, or .apworld zip."""
+    candidates: list[Path] = [ROOT / filename]
+    # Use the same extracted files as the Electron Hub.
+    raw = (os.environ.get("DREAD_HUB_WORLD_DIR") or "").strip()
+    if raw:
+        candidates.append(Path(raw) / filename)
+    try:
+        from Utils import user_path  # type: ignore
+
+        candidates.append(
+            Path(user_path("custom_worlds", "_metroid_bread_runtime")) / filename
+        )
+    except Exception:
+        pass
+
+    seen: set[Path] = set()
+    for path in candidates:
+        try:
+            key = path.resolve()
+        except OSError:
+            key = path
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            if path.is_file():
+                return path.read_text(encoding="utf-8")
+        except (NotADirectoryError, OSError):
+            continue
+
+    apworld = _find_containing_apworld()
+    if apworld is not None:
+        member = f"metroid_bread/{filename}".replace("\\", "/")
+        with zipfile.ZipFile(apworld, "r") as zf:
+            try:
+                return zf.read(member).decode("utf-8")
+            except KeyError as exc:
+                raise FileNotFoundError(
+                    f"{filename} not found in {apworld} ({member})"
+                ) from exc
+
+    raise FileNotFoundError(f"{filename} not found next to {ROOT}")
+
+# Use a valid Lua name for the pickup handler class.
+ITEM_PARENT_BY_ID: Dict[str, str] = {
+    "ITEM_WEAPON_WIDE_BEAM": "RandomizerWideBeam",
+    "ITEM_WEAPON_PLASMA_BEAM": "RandomizerPlasmaBeam",
+    "ITEM_WEAPON_WAVE_BEAM": "RandomizerWaveBeam",
+    "ITEM_WEAPON_MISSILE_LAUNCHER": "RandomizerMissileLauncher",
+    "ITEM_WEAPON_SUPER_MISSILE": "RandomizerSuperMissile",
+    "ITEM_WEAPON_ICE_MISSILE": "RandomizerIceMissile",
+    "ITEM_MULTILOCKON": "RandomizerStormMissile",
+    "ITEM_OPTIC_CAMOUFLAGE": "RandomizerPhantomCloak",
+    "ITEM_GHOST_AURA": "RandomizerFlashShift",
+    "ITEM_UPGRADE_FLASH_SHIFT_CHAIN": "RandomizerFlashShiftUpgrade",
+    "ITEM_SPEED_BOOSTER": "RandomizerSpeedBooster",
+    "ITEM_LIFE_SHARDS": "RandomizerEnergyPart",
+    "ITEM_WEAPON_POWER_BOMB": "RandomizerPowerBomb",
+    "ITEM_WEAPON_POWER_BOMB_MAX": "RandomizerPowerBomb",
+}
+
+# Handle AP item names missing from the item mapping.
+DNA_ITEM_NAME = "Metroid DNA"
+DNA_DYNAMIC_ITEM_ID = "__AP_DNA_NEXT__"
+
+EXTRA_ITEM_RESOURCES: Dict[str, List[dict]] = {
+    "Storm Missile": [{"item_id": "ITEM_MULTILOCKON", "quantity": 1}],
+    "Slide": [{"item_id": "ITEM_SPECIAL_SLIDE", "quantity": 1}],
+    "Omega Cannon": [{"item_id": "ITEM_WEAPON_POWER_BEAM", "quantity": 1}],
+    "Omega Stream Beam": [{"item_id": "ITEM_WEAPON_POWER_BEAM", "quantity": 1}],
+    "Missile Launcher": [{"item_id": "ITEM_WEAPON_MISSILE_LAUNCHER", "quantity": 1}],
+    DNA_ITEM_NAME: [{"item_id": DNA_DYNAMIC_ITEM_ID, "quantity": 1}],
+    # Use the ODR item ID; ITEM_SPEED_BOOSTER_UPGRADE is invalid.
+    "Speed Booster Upgrade": [{"item_id": "ITEM_UPGRADE_SPEED_BOOST_CHARGE", "quantity": 1}],
+}
+
+
+def is_dna_item(item_name: str) -> bool:
+    """True for AP Metroid DNA (numbered Randovania variants included for /give)."""
+    name = (item_name or "").strip()
+    return name == DNA_ITEM_NAME or name.startswith(f"{DNA_ITEM_NAME} ")
+
+
+def _ap_location_key(location_name: str) -> str:
+    parts = location_name.split(" - ", 2)
+    if len(parts) != 3:
+        return location_name
+    return f"{parts[0]}/{parts[1]}/{parts[2]}"
+
+
+@lru_cache(maxsize=1)
+def pickup_index_to_ap_location() -> Dict[int, int]:
+    """Randovania pickup bitfield index → Archipelago location ID."""
+    import re
+
+    export_text = _read_world_text("patcher/rdvgame_export.py")
+    start = export_text.index("AP_TO_RANDOVANIA_LOCATION_MAP = {")
+    end = export_text.index("\n}", start) + 2
+    ns: dict = {}
+    exec(export_text[start:end], ns)  # noqa: S102 - Load only the trusted local mapping.
+    loc_map: Dict[str, tuple] = ns["AP_TO_RANDOVANIA_LOCATION_MAP"]
+
+    locations_text = _read_world_text("Locations.py")
+    entries = re.findall(r'"([^"]+)": LocationData\((\d+),', locations_text)
+
+    mapping: Dict[int, int] = {}
+    for name, ap_id in entries:
+        key = _ap_location_key(name)
+        mapped = loc_map.get(key)
+        if mapped is None:
+            continue
+        mapping[int(mapped[1])] = int(ap_id)
+    return mapping
+
+
+@lru_cache(maxsize=1)
+def load_pickup_actors() -> Dict[str, dict]:
+    path = ROOT / "data" / "patcher" / "dread_pickup_actors.json"
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+@lru_cache(maxsize=1)
+def load_special_pickups() -> Dict[str, dict]:
+    """Boss/EMMI death pickups keyed by PickupIndex (callback-based, not actors)."""
+    path = ROOT / "data" / "patcher" / "dread_special_pickups.json"
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def ap_location_for_pickup_index(pickup_index: int) -> Optional[int]:
+    return pickup_index_to_ap_location().get(pickup_index)
+
+
+@lru_cache(maxsize=1)
+def ap_item_id_to_name() -> Dict[int, str]:
+    """Archipelago item ID → name from worlds/metroid_bread/Items.py."""
+    import re
+
+    text = _read_world_text("Items.py")
+    mapping: Dict[int, str] = {}
+    for name, offset in re.findall(r'"([^"]+)": ItemData\(base_id \+ (\d+)', text):
+        mapping[84000 + int(offset)] = name
+    return mapping
+
+
+ResourceStage = List[dict]
+ResourceProgression = List[ResourceStage]
+
+
+def _normalize_progression(resources: Union[List[dict], ResourceProgression]) -> ResourceProgression:
+    if not resources:
+        return []
+    if isinstance(resources[0], dict):
+        return [list(resources)]  # type: ignore[list-item]
+    return [list(stage) for stage in resources]  # type: ignore[union-attr]
+
+
+def _resources_for_item_name(item_name: str) -> Optional[ResourceProgression]:
+    """Return multi-stage resource progression for an AP item name."""
+    try:
+        from worlds.metroid_bread.patcher.dread_item_mapping import get_resource_progression
+    except ImportError:
+        get_resource_progression = None  # type: ignore
+
+    if get_resource_progression:
+        progression = get_resource_progression(item_name)
+        if progression:
+            return progression
+
+    extra = EXTRA_ITEM_RESOURCES.get(item_name)
+    if extra:
+        return _normalize_progression(extra)
+    return None
+
+
+def get_item_resources(
+    item_name: str,
+    item_id: Optional[int] = None,
+    *,
+    extras: Optional[Dict[str, Any]] = None,
+) -> Optional[ResourceProgression]:
+    """Return resource progression [[{item_id, quantity}, ...], ...] for an AP item name or ID."""
+    if item_name in ("Flash Shift", "Flash Shift Upgrade"):
+        try:
+            from worlds.metroid_bread.logic.flash_shift import main_resources, plan_from_extras, upgrade_resources
+
+            plan = plan_from_extras(extras)
+            if item_name == "Flash Shift":
+                return _normalize_progression(
+                    main_resources(int(plan.get("included_ammo", 2) or 2))
+                )
+            return _normalize_progression(
+                upgrade_resources(int(plan.get("upgrade_amount", 1) or 1))
+            )
+        except Exception:
+            pass
+    if item_name in (
+        "Missile Tank",
+        "Missile+ Tank",
+        "Power Bomb Tank",
+        "Energy Tank",
+        "Energy Part",
+    ):
+        try:
+            from worlds.metroid_bread.patcher.dread_item_mapping import apply_yield_overrides, get_dread_item_data, yields_from_extras
+
+            raw = get_dread_item_data(item_name)
+            if raw:
+                adjusted = apply_yield_overrides(
+                    item_name, raw, yields_from_extras(extras)
+                )
+                return _normalize_progression(adjusted["resources"])
+        except Exception:
+            pass
+    progression = _resources_for_item_name(item_name)
+    if progression:
+        return progression
+
+    resolved_id = item_id
+    if resolved_id is None and item_name.startswith("Item "):
+        try:
+            resolved_id = int(item_name.split(" ", 1)[1])
+        except ValueError:
+            resolved_id = None
+
+    if resolved_id is not None:
+        local_name = ap_item_id_to_name().get(resolved_id)
+        if local_name and local_name != item_name:
+            return get_item_resources(local_name, extras=extras)
+
+    return None
+
+
+def resources_to_lua_progression(progression: Union[List[dict], ResourceProgression]) -> str:
+    """Build a Lua progression table string for RL.ReceivePickup."""
+    stages = _normalize_progression(progression)
+    parts = []
+    for stage in stages:
+        entries = []
+        for resource in stage:
+            item_id = resource["item_id"]
+            qty = int(resource["quantity"])
+            entries.append(f'{{item_id = "{item_id}", quantity = {qty}}}')
+        parts.append("{" + ", ".join(entries) + "}")
+    return "{" + ", ".join(parts) + "}"
+
+
+def parent_for_resources(progression: Union[List[dict], ResourceProgression]) -> str:
+    stages = _normalize_progression(progression)
+    if not stages or not stages[0]:
+        return "RandomizerPowerup"
+    return ITEM_PARENT_BY_ID.get(stages[0][0]["item_id"], "RandomizerPowerup")
+
+
+@lru_cache(maxsize=1)
+def known_ap_item_names() -> Tuple[str, ...]:
+    """All known AP item display names, for /give-style fuzzy matching."""
+    try:
+        from worlds.metroid_bread.patcher.dread_item_mapping import DREAD_ITEM_MAPPING
+    except ImportError:
+        DREAD_ITEM_MAPPING = {}
+    names: Set[str] = set(DREAD_ITEM_MAPPING.keys())
+    names.update(EXTRA_ITEM_RESOURCES.keys())
+    names.update(ap_item_id_to_name().values())
+    return tuple(sorted(names))
+
+
+def resolve_debug_item_name(
+    requested: str, limit: int = 5
+) -> Tuple[Optional[str], List[str]]:
+    """Resolve a user-typed /give argument against known AP Dread item names."""
+    import difflib
+
+    query = requested.strip()
+    if not query:
+        return None, []
+
+    names = known_ap_item_names()
+    by_lower = {name.lower(): name for name in names}
+
+    exact = by_lower.get(query.lower())
+    if exact:
+        return exact, []
+
+    query_lower = query.lower()
+    substring_hits = [name for name in names if query_lower in name.lower()]
+    if len(substring_hits) == 1:
+        return substring_hits[0], []
+
+    fuzzy = difflib.get_close_matches(query, names, n=limit, cutoff=0.5)
+    candidates = substring_hits or fuzzy
+    if len(candidates) == 1:
+        return candidates[0], []
+
+    suggestions = list(dict.fromkeys(substring_hits + fuzzy))[:limit]
+    if not suggestions:
+        # Check more names when suggesting fixes, but do not pick one automatically.
+        suggestions = difflib.get_close_matches(query, names, n=limit, cutoff=0.2)
+    return None, suggestions
+
+
+def _lua_ensure_grant_next_artifact() -> str:
+    """Inline GrantNextArtifact when romfs still has stock ODR powerup (no AP"""
+    return (
+        "if not RandomizerPowerup then error('RandomizerPowerup missing') end; "
+        "if type(RandomizerPowerup.GrantNextArtifact) ~= 'function' then "
+        "  local function ap_hud_dna() "
+        "    if Scenario and type(Scenario.UpdateHudDnaCount) == 'function' then "
+        "      pcall(Scenario.UpdateHudDnaCount) "
+        "    end "
+        "  end; "
+        "  function RandomizerPowerup.GrantNextArtifact() "
+        "    if not Init or not Init.iNumRequiredArtifacts or Init.iNumRequiredArtifacts == 0 then "
+        "      Game.LogWarn(0, 'GrantNextArtifact: DNA gate disabled (iNumRequiredArtifacts=0)'); "
+        "      return nil "
+        "    end; "
+        "    for i = 1, Init.iNumRequiredArtifacts do "
+        "      local artifact_id = 'ITEM_RANDO_ARTIFACT_' .. i; "
+        "      if RandomizerPowerup.GetItemAmount(artifact_id) == 0 then "
+        "        Game.LogWarn(0, 'GrantNextArtifact: granting ' .. artifact_id); "
+        "        RandomizerPowerup.IncreaseItemAmount(artifact_id, 1); "
+        "        local resource = {item_id = artifact_id, quantity = 1}; "
+        "        if type(RandomizerPowerup.CheckArtifacts) == 'function' then "
+        "          pcall(RandomizerPowerup.CheckArtifacts, resource) "
+        "        end; "
+        "        ap_hud_dna(); "
+        "        return resource "
+        "      end "
+        "    end; "
+        "    Game.LogWarn(0, 'GrantNextArtifact: all required artifacts already owned'); "
+        "    return nil "
+        "  end; "
+        "  if RL and RL.SendApLog then "
+        "    RL.SendApLog('AP_DNA: installed runtime GrantNextArtifact fallback') "
+        "  end "
+        "end; "
+    )
+
+
+def format_dna_debug_give_lua(item_name: str) -> str:
+    """Local /give Metroid DNA — grants next ITEM_RANDO_ARTIFACT_N in-game."""
+    safe_name = item_name.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        "do "
+        + _lua_ensure_grant_next_artifact()
+        + "local ok, err = pcall(function() "
+        "  local granted = RandomizerPowerup.GrantNextArtifact(); "
+        "  if granted == nil then "
+        "    error('all required artifacts already owned (or DNA gate disabled)') "
+        "  end "
+        "end); "
+        "if ok then "
+        f'if RL.SendApLog then RL.SendApLog("AP_GIVE: granted {safe_name}") end; '
+        "if Scenario and Scenario.IsUserInteractionEnabled and Scenario.QueueAsyncPopup "
+        "and Scenario.IsUserInteractionEnabled(true) then "
+        f'pcall(function() Scenario.QueueAsyncPopup("Debug: received {safe_name}.", 5.0) end) '
+        "end "
+        "else "
+        f'if RL.SendApLog then RL.SendApLog("AP_GIVE_FAIL: {safe_name} - "..tostring(err)) end '
+        "end "
+        "end"
+    )
+
+
+def format_dna_receive_lua(message: str, received_pickups: int, inventory_index: int) -> str:
+    """Grant Metroid DNA from the AP server via the next free artifact slot."""
+    safe_message = message.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        "do "
+        + _lua_ensure_grant_next_artifact()
+        + f'local msg = "{safe_message}"; '
+        f"local idx = {int(received_pickups)}; "
+        f"local inv = {int(inventory_index)}; "
+        "if RL and RL.ReceivedPickups and RL.InventoryIndex "
+        "and idx == RL.ReceivedPickups() and inv == RL.InventoryIndex() "
+        "and not RL.PendingPickup then "
+        "  local granted = nil; "
+        "  local ok, err = pcall(function() "
+        "    granted = RandomizerPowerup.GrantNextArtifact() "
+        "  end); "
+        "  if not ok then "
+        "    Game.LogWarn(0, 'AP DNA grant failed: '..tostring(err)); "
+        "    if RL.SendApLog then RL.SendApLog('AP_DNA_FAIL: '..tostring(err)) end "
+        "  elseif granted == nil then "
+        "    Game.LogWarn(0, 'AP DNA: all artifacts already collected') "
+        "  end; "
+        # Confirm DNA grants even on error so the item queue can continue.
+        '  Scenario.WriteToPlayerBlackboard("ReceivedPickups","f",idx + 1); '
+        "  if RL.SendReceivedPickups then RL.SendReceivedPickups(tostring(idx + 1)) end; "
+        "  if ok and Scenario and Scenario.IsUserInteractionEnabled and Scenario.QueueAsyncPopup "
+        "and Scenario.IsUserInteractionEnabled(true) then "
+        "    pcall(function() Scenario.QueueAsyncPopup(msg, 5.0) end) "
+        "  end "
+        "elseif RL and RL.GetReceivedPickupsAndSend then "
+        '  Game.AddSF(0.05, "RL.GetReceivedPickupsAndSend", "b", false); '
+        "end "
+        "end"
+    )
+
+
+def format_metroidnization_grant_lua(*, reason: str = "All Bosses") -> str:
+    """Grant ITEM_METROIDNIZATION so ODR's Itorash ADAM door unlocks."""
+    safe_reason = str(reason or "All Bosses").replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        "do "
+        "local ok, err = pcall(function() "
+        "  if not RandomizerPowerup or not RandomizerPowerup.SetItemAmount then "
+        "    error('RandomizerPowerup.SetItemAmount missing') "
+        "  end "
+        "  if RandomizerPowerup.HasItem and RandomizerPowerup.HasItem('ITEM_METROIDNIZATION') then "
+        "    return "
+        "  end "
+        "  if RandomizerPowerup.GetItemAmount "
+        "and (RandomizerPowerup.GetItemAmount('ITEM_METROIDNIZATION') or 0) > 0 then "
+        "    return "
+        "  end "
+        "  RandomizerPowerup.SetItemAmount('ITEM_METROIDNIZATION', 1) "
+        f'  Game.LogWarn(0, "AP: granted ITEM_METROIDNIZATION ({safe_reason})") '
+        "  if RL and RL.SendApLog then "
+        f'    RL.SendApLog("AP_ALL_BOSSES: Metroidnization granted ({safe_reason})") '
+        "  end "
+        "end); "
+        "if not ok then "
+        "  Game.LogWarn(0, 'AP Metroidnization grant failed: '..tostring(err)) "
+        "end "
+        "end"
+    )
+
+
+def format_debug_give_lua(item_name: str, progression: Union[List[dict], ResourceProgression]) -> str:
+    """Build Lua for the client's local /give debug command."""
+    if is_dna_item(item_name):
+        return format_dna_debug_give_lua(item_name)
+    parent = parent_for_resources(progression)
+    progression_lua = resources_to_lua_progression(progression)
+    safe_name = item_name.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        "do "
+        f"local cls = {parent} or RandomizerPowerup; "
+        f"local progression = {progression_lua}; "
+        "local ok, err = pcall(function() cls.OnPickedUp(nil, progression) end); "
+        "if ok then "
+        f'if RL.SendApLog then RL.SendApLog("AP_GIVE: granted {safe_name}") end; '
+        "if Scenario and Scenario.IsUserInteractionEnabled and Scenario.QueueAsyncPopup "
+        "and Scenario.IsUserInteractionEnabled(true) then "
+        f'pcall(function() Scenario.QueueAsyncPopup("Debug: received {safe_name}.", 5.0) end) '
+        "end "
+        "else "
+        f'if RL.SendApLog then RL.SendApLog("AP_GIVE_FAIL: {safe_name} - "..tostring(err)) end '
+        "end "
+        "end"
+    )
+
+
+def inventory_item_ids() -> List[str]:
+    """Ordered inventory item_id list for RL.InventoryItems bootstrap."""
+    try:
+        from worlds.metroid_bread.patcher.dread_item_mapping import DREAD_ITEM_MAPPING
+    except ImportError:
+        DREAD_ITEM_MAPPING = {}
+
+    seen = set()
+    ordered: List[str] = []
+    for entry in DREAD_ITEM_MAPPING.values():
+        for stage in _normalize_progression(entry.get("resources", [])):
+            for resource in stage:
+                item_id = resource["item_id"]
+                if item_id not in seen and item_id != "ITEM_NONE":
+                    seen.add(item_id)
+                    ordered.append(item_id)
+    for resources in EXTRA_ITEM_RESOURCES.values():
+        for resource in resources:
+            item_id = resource["item_id"]
+            if item_id not in seen and item_id != "ITEM_NONE":
+                seen.add(item_id)
+                ordered.append(item_id)
+    return ordered
+
+
+@lru_cache(maxsize=1)
+def _item_id_to_ap_rules() -> Dict[str, Tuple[str, int]]:
+    """Map game item_id -> (AP item name, quantity-per-copy)."""
+    try:
+        from worlds.metroid_bread.patcher.dread_item_mapping import DREAD_ITEM_MAPPING
+    except ImportError:
+        DREAD_ITEM_MAPPING = {}
+
+    rules: Dict[str, Tuple[str, int]] = {}
+
+    def consider(ap_name: str, item_id: str, qty: int) -> None:
+        if not item_id or item_id == "ITEM_NONE" or qty <= 0:
+            return
+        # Use specific item names instead of progressive aliases for the same ID.
+        prev = rules.get(item_id)
+        if prev is None or str(prev[0]).startswith("Progressive"):
+            rules[item_id] = (ap_name, int(qty))
+
+    for ap_name, entry in DREAD_ITEM_MAPPING.items():
+        resources = entry.get("resources", [])
+        stages = _normalize_progression(resources)
+        for stage in stages:
+            for resource in stage:
+                consider(ap_name, resource.get("item_id", ""), int(resource.get("quantity", 1) or 1))
+    for ap_name, resources in EXTRA_ITEM_RESOURCES.items():
+        for resource in resources:
+            consider(ap_name, resource.get("item_id", ""), int(resource.get("quantity", 1) or 1))
+
+    # Use the item aliases required by DreadLogic.
+    rules["ITEM_GHOST_AURA"] = ("Flash Shift", 1)
+    rules["ITEM_UPGRADE_FLASH_SHIFT_CHAIN"] = ("Flash Shift Upgrade", 1)
+    return rules
+
+
+def counts_from_inventory_amounts(
+    amounts: List[int],
+    *,
+    extras: Optional[Dict[str, Any]] = None,
+) -> Dict[str, int]:
+    """Convert RL inventory quantity array into AP item-name counts for logic."""
+    ids = inventory_item_ids()
+    rules = _item_id_to_ap_rules()
+    counts: Dict[str, int] = {}
+    for i, item_id in enumerate(ids):
+        if i >= len(amounts):
+            break
+        try:
+            amount = int(amounts[i] or 0)
+        except Exception:
+            amount = 0
+        if amount <= 0:
+            continue
+        rule = rules.get(item_id)
+        if not rule:
+            continue
+        ap_name, unit = rule
+        unit = max(1, int(unit))
+        if item_id == "ITEM_ENERGY_TANKS":
+            # Count tanks as items; IncreaseEnergy handles health.
+            n = amount // unit
+        elif item_id == "ITEM_MAX_LIFE":
+            # Older builds added tank energy to ITEM_MAX_LIFE directly.
+            n = max(0, (amount - 99) // 100)
+        elif item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN":
+            # Flash Shift chain counts are not pickup counts.
+            continue
+        else:
+            n = amount // unit
+        if n <= 0:
+            continue
+        counts[ap_name] = max(counts.get(ap_name, 0), n)
+    apply_flash_shift_logic_counts(counts, extras=extras)
+    return counts
+
+
+def apply_flash_shift_logic_counts(
+    counts: Dict[str, int],
+    *,
+    extras: Optional[Dict[str, Any]] = None,
+) -> Dict[str, int]:
+    """Set Flash Shift ability from inventory counts using seed Flash Shift options."""
+    try:
+        from worlds.metroid_bread.logic.flash_shift import logical_ability_and_chains, plan_from_extras
+    except ImportError:
+        if counts.get("Flash Shift Upgrade", 0) >= 1:
+            counts["Flash Shift"] = max(counts.get("Flash Shift", 0), 1)
+        return counts
+    plan = plan_from_extras(extras)
+    main_qty = int(counts.get("Flash Shift", 0) or 0)
+    has_ability, _chains = logical_ability_and_chains(counts, plan)
+    if has_ability:
+        counts["Flash Shift"] = max(main_qty, 1)
+    elif main_qty <= 0:
+        counts.pop("Flash Shift", None)
+    return counts
+
+
+def counts_from_starting_items(
+    starting_items: Dict[str, int],
+    *,
+    extras: Optional[Dict[str, Any]] = None,
+) -> Dict[str, int]:
+    """Convert ODR patch_extras starting_items {ITEM_*: qty} → AP logic counts."""
+    rules = _item_id_to_ap_rules()
+    counts: Dict[str, int] = {}
+    if not isinstance(starting_items, dict):
+        return counts
+    ghost = 0
+    chains = 0
+    for item_id, qty in starting_items.items():
+        try:
+            amount = int(qty or 0)
+        except Exception:
+            amount = 0
+        if amount <= 0:
+            continue
+        iid = str(item_id)
+        if iid == "ITEM_GHOST_AURA":
+            ghost = max(ghost, amount)
+            continue
+        if iid == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN":
+            chains = max(chains, amount)
+            continue
+        rule = rules.get(iid)
+        if not rule:
+            continue
+        ap_name, unit = rule
+        unit = max(1, int(unit))
+        n = amount // unit
+        if n <= 0:
+            continue
+        counts[ap_name] = max(counts.get(ap_name, 0), n)
+
+    try:
+        from worlds.metroid_bread.logic.flash_shift import plan_from_extras
+
+        plan = plan_from_extras(extras)
+    except ImportError:
+        plan = {
+            "vanilla": False,
+            "require_main": False,
+            "included_ammo": 2,
+            "upgrade_amount": 1,
+        }
+    included = int(plan.get("included_ammo", 2) or 0)
+    up_amt = max(1, int(plan.get("upgrade_amount", 1) or 1))
+    if ghost > 0:
+        counts["Flash Shift"] = max(counts.get("Flash Shift", 0), 1)
+    if plan.get("vanilla"):
+        pass
+    elif plan.get("require_main"):
+        extra_chains = max(0, chains - (included if ghost > 0 else 0))
+        if extra_chains > 0:
+            counts["Flash Shift Upgrade"] = max(
+                counts.get("Flash Shift Upgrade", 0), extra_chains // up_amt
+            )
+        elif chains > 0 and ghost <= 0:
+            counts["Flash Shift Upgrade"] = max(
+                counts.get("Flash Shift Upgrade", 0), max(1, chains // up_amt)
+            )
+    else:
+        # Each progressive upgrade adds up_amt chains, including the first.
+        if ghost > 0:
+            counts["Flash Shift Upgrade"] = max(
+                counts.get("Flash Shift Upgrade", 0), max(1, chains // up_amt)
+            )
+        elif chains > 0:
+            counts["Flash Shift Upgrade"] = max(
+                counts.get("Flash Shift Upgrade", 0), max(1, chains // up_amt)
+            )
+    apply_flash_shift_logic_counts(counts, extras=extras)
+    return counts
+
+
+def _lua_toplevel_split_indices(code: str) -> List[int]:
+    """Return exclusive end indices of top-level Lua statements."""
+    n = len(code)
+    ends: List[int] = []
+    i = 0
+    block = 0
+    braces = 0
+    parens = 0
+    ignore_next_do = False
+
+    def is_ident_char(ch: str) -> bool:
+        return ch.isalnum() or ch == "_"
+
+    def at_word_boundary(pos: int) -> bool:
+        return pos <= 0 or not is_ident_char(code[pos - 1])
+
+    while i < n:
+        c = code[i]
+
+        # Skip a line comment.
+        if c == "-" and i + 1 < n and code[i + 1] == "-":
+            if i + 3 < n and code[i + 2] == "[" and code[i + 3] == "[":
+                i += 4
+                while i + 1 < n and not (code[i] == "]" and code[i + 1] == "]"):
+                    i += 1
+                i = min(i + 2, n)
+                continue
+            while i < n and code[i] not in "\r\n":
+                i += 1
+            continue
+
+        # Skip quoted strings.
+        if c == '"' or c == "'":
+            quote = c
+            i += 1
+            while i < n:
+                ch = code[i]
+                if ch == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                i += 1
+                if ch == quote:
+                    break
+            continue
+
+        # Skip Lua long strings such as [[...]] and [=[...]=].
+        if c == "[" and i + 1 < n and code[i + 1] in "=[":
+            j = i + 1
+            eq = 0
+            while j < n and code[j] == "=":
+                eq += 1
+                j += 1
+            if j < n and code[j] == "[":
+                close = "]" + ("=" * eq) + "]"
+                i = j + 1
+                idx = code.find(close, i)
+                i = n if idx < 0 else idx + len(close)
+                continue
+
+        # Track open brackets.
+        if c == "{":
+            braces += 1
+            i += 1
+            continue
+        if c == "}":
+            braces = max(0, braces - 1)
+            i += 1
+            continue
+        if c == "(":
+            parens += 1
+            i += 1
+            continue
+        if c == ")":
+            parens = max(0, parens - 1)
+            i += 1
+            continue
+
+        # Track words that open or close Lua blocks.
+        if at_word_boundary(i) and (c.isalpha() or c == "_"):
+            start = i
+            i += 1
+            while i < n and is_ident_char(code[i]):
+                i += 1
+            word = code[start:i]
+            if word in ("function", "if", "for", "while", "repeat"):
+                block += 1
+                if word in ("for", "while"):
+                    ignore_next_do = True
+            elif word == "do":
+                if ignore_next_do:
+                    ignore_next_do = False
+                else:
+                    block += 1
+            elif word == "end":
+                block = max(0, block - 1)
+                if block == 0 and braces == 0 and parens == 0:
+                    ends.append(i)
+            elif word == "until":
+                block = max(0, block - 1)
+                if block == 0 and braces == 0 and parens == 0:
+                    ends.append(i)
+            continue
+
+        # Find where top-level statements end.
+        if block == 0 and braces == 0 and parens == 0:
+            if c == ";":
+                ends.append(i + 1)
+            elif c == "\n":
+                # Split only after a non-empty statement.
+                ends.append(i + 1)
+
+        i += 1
+
+    if n and (not ends or ends[-1] != n):
+        ends.append(n)
+    return ends
+
+
+def split_lua_for_buffer(code: str, buffer_size: int) -> List[str]:
+    """Split one Lua source unit into buffer-sized, independently executable pieces."""
+    code = code.strip()
+    if not code:
+        return []
+    if len(code) <= buffer_size:
+        return [code]
+
+    ends = _lua_toplevel_split_indices(code)
+    segments: List[str] = []
+    prev = 0
+    for end in ends:
+        seg = code[prev:end].strip()
+        prev = end
+        if seg:
+            segments.append(seg)
+
+    pieces: List[str] = []
+    buf = ""
+    for seg in segments:
+        if not buf:
+            if len(seg) > buffer_size:
+                raise ValueError(
+                    f"Lua statement length {len(seg)} exceeds buffer_size {buffer_size}; "
+                    "refusing to hard-split mid-statement"
+                )
+            buf = seg
+            continue
+        candidate = f"{buf}\n{seg}"
+        if len(candidate) <= buffer_size:
+            buf = candidate
+        else:
+            pieces.append(buf)
+            if len(seg) > buffer_size:
+                raise ValueError(
+                    f"Lua statement length {len(seg)} exceeds buffer_size {buffer_size}; "
+                    "refusing to hard-split mid-statement"
+                )
+            buf = seg
+    if buf:
+        pieces.append(buf)
+    return pieces
+
+
+def pack_lua_chunks(chunks: List[str], buffer_size: int = 4096) -> List[str]:
+    """Pack Lua source fragments into send units each <= buffer_size."""
+    packed: List[str] = []
+    current = ""
+    for code in chunks:
+        for piece in split_lua_for_buffer(code, buffer_size):
+            if not current:
+                current = piece
+                continue
+            # Join complete statements with semicolons.
+            candidate = f"{current};{piece}"
+            if len(candidate) <= buffer_size:
+                current = candidate
+            else:
+                packed.append(current)
+                current = piece
+    if current:
+        packed.append(current)
+    return packed
+
+
+def lua_chunk_has_balanced_quotes(code: str) -> bool:
+    """True if double/single quotes are balanced outside -- comments."""
+    in_dq = in_sq = False
+    i = 0
+    n = len(code)
+    while i < n:
+        c = code[i]
+        if not in_dq and not in_sq and c == "-" and i + 1 < n and code[i + 1] == "-":
+            while i < n and code[i] not in "\r\n":
+                i += 1
+            continue
+        if in_dq:
+            if c == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if c == '"':
+                in_dq = False
+            i += 1
+            continue
+        if in_sq:
+            if c == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if c == "'":
+                in_sq = False
+            i += 1
+            continue
+        if c == '"':
+            in_dq = True
+        elif c == "'":
+            in_sq = True
+        i += 1
+    return not in_dq and not in_sq
+
+
+def build_bootstrap_chunks(buffer_size: int = 4096) -> List[str]:
+    """Build Lua bootstrap chunks compatible with Randovania's DreadExecutor."""
+    actors = load_pickup_actors()
+    specials = load_special_pickups()
+    # Add one to the bit index when reading Lua's Pickups table.
+    max_index = 0
+    for key in actors:
+        max_index = max(max_index, int(key))
+    for key in specials:
+        max_index = max(max_index, int(key))
+    # Include boss and special pickups even when the actor list omits them.
+    for pickup_index in pickup_index_to_ap_location():
+        max_index = max(max_index, pickup_index)
+    num_nodes = max_index + 1
+
+    inventory = "{" + ",".join(repr(i) for i in inventory_item_ids()) + "}"
+
+    boss_index_entries: List[str] = []
+    for index_str, data in specials.items():
+        loc_key = f'{data["scenario"]}_{data["callback_function"]}'
+        boss_index_entries.append(f'["{loc_key}"]={int(index_str)}')
+    boss_index_lua = "{" + ",".join(boss_index_entries) + "}"
+
+    # Add the progressive Flash Shift item after loading the scripts.
+    part0 = f"""
+Game.DoFile('actors/items/randomizer_powerup/scripts/randomizer_powerup.lua')
+if not RL then RL = {{}} end
+if RL.FlashShiftRequiresMain == nil then
+    RL.FlashShiftRequiresMain = AP_FLASH_SHIFT_REQUIRES_MAIN or false
+end
+local function ap_flash_shift_requires_main()
+    if RL and RL.FlashShiftRequiresMain ~= nil then
+        return RL.FlashShiftRequiresMain and true or false
+    end
+    return AP_FLASH_SHIFT_REQUIRES_MAIN and true or false
+end
+local function ap_unlock_flash_shift_from_upgrade()
+    if RandomizerPowerup.HasItem("ITEM_GHOST_AURA") then
+        return false
+    end
+    if ap_flash_shift_requires_main() then
+        return false
+    end
+    RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
+    Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
+    if RandomizerPowerup.DisableInput then
+        RandomizerPowerup.DisableInput()
+    end
+    return true
+end
+if RandomizerPowerup and not RandomizerPowerup._APFlashUpgradeHooked then
+    RandomizerPowerup._APFlashUpgradeHooked = true
+    local _APIncreaseItemAmount = RandomizerPowerup.IncreaseItemAmount
+    function RandomizerPowerup.IncreaseItemAmount(item_id, quantity, capacity)
+        if item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and quantity and quantity > 0 then
+            -- Keep the chain count so Flash Shift remains usable.
+            ap_unlock_flash_shift_from_upgrade()
+        end
+        return _APIncreaseItemAmount(item_id, quantity, capacity)
+    end
+end
+RandomizerFlashShiftUpgrade = RandomizerFlashShiftUpgrade or {{}}
+setmetatable(RandomizerFlashShiftUpgrade, {{__index = RandomizerPowerup}})
+function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
+    progression = progression or {{{{{{item_id = "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", quantity = 1}}}}}}
+    local first = not RandomizerPowerup.HasItem("ITEM_GHOST_AURA")
+    if first and not ap_flash_shift_requires_main() then
+        ap_unlock_flash_shift_from_upgrade()
+    elseif first and ap_flash_shift_requires_main() then
+        Game.LogWarn(0, "Flash Shift Upgrade stacked (waiting for main Flash Shift)")
+    end
+    RandomizerPowerup.OnPickedUp(actor, progression)
+end
+if not RL then RL = {{}} end
+-- Check for missing tunable categories and properties.
+-- A missing GetTunableData result must not stop the Lua command.
+if Scenario and not Scenario._APSafeSetTunable then
+    Scenario._APSafeSetTunable = true
+    function Scenario.SetTunableValue(category, property, value)
+        if category == nil or property == nil then
+            error("SetTunableValue: category/property must be strings, got "
+                .. tostring(category) .. ", " .. tostring(property))
+        end
+        if type(msemenu) ~= "table" or type(msemenu.GetTunableData) ~= "function" then
+            error("SetTunableValue: msemenu.GetTunableData missing")
+        end
+        local ok, td = pcall(msemenu.GetTunableData, category, property)
+        if (not ok) or td == nil or td.category == nil or td.property == nil then
+            error("SetTunableValue: GetTunableData failed for "
+                .. tostring(category) .. "." .. tostring(property)
+                .. " (" .. tostring(td) .. ")")
+        end
+        td.category[td.property] = value
+    end
+end
+RL.Pickups = {{}}
+RL.BossPickupIndexByLocation = {boss_index_lua}
+function RL.GetCollectedIndicesAndSend()
+    -- Boss and EMMI callbacks can run without INGAME or a scenario ID.
+    -- Check for the player's saved state instead.
+    local p = Game.GetPlayerBlackboardSectionName()
+    if not p then return "not-in-game" end
+    local r,v,i = {{}},0,1
+    for _,t in ipairs(RL.Pickups) do
+        if t ~= '' and Blackboard.GetProp(p,t) then v=v+i end
+        i=i*2;if i>=256 then table.insert(r,string.char(v));v=0;i=1 end
+    end
+    if i>1 then table.insert(r,string.char(v)) end
+    RL.SendIndices("locations:"..table.concat(r))
+end
+for i=1,{num_nodes} do RL.Pickups[i]='' end
+""".strip()
+
+    part1 = f"""
+function RL.GetInventoryAndSend()
+    local r={{}}
+    for i,n in ipairs(RL.InventoryItems) do
+        r[i]=RandomizerPowerup.GetItemAmount(n)
+    end
+    local inventory = string.format("[%s]",table.concat(r,","))
+    local currentIndex = string.format('"index": %s', RL.InventoryIndex())
+    RL.SendInventory(string.format('{{%s,"inventory":%s}}', currentIndex, inventory))
+end
+RL.InventoryItems={inventory}
+""".strip()
+
+    part2 = """
+function RL.InventoryIndex()
+    local playerSection =  Game.GetPlayerBlackboardSectionName()
+    return Blackboard.GetProp(playerSection, "InventoryIndex") or 0
+end
+function RL.ReceivedPickups()
+    local playerSection =  Game.GetPlayerBlackboardSectionName()
+    return Blackboard.GetProp(playerSection, "ReceivedPickups") or 0
+end
+function RL.GetReceivedPickupsAndSend(reset)
+    if reset then
+        RL.PendingPickup = nil
+    end
+    RL.SendReceivedPickups(tostring(RL.ReceivedPickups()))
+end
+function RL.GivePendingPickup()
+    if Scenario.IsUserInteractionEnabled(true) then
+        Scenario.QueueAsyncPopup(RL.PendingPickup.msg, 5.0)
+        Game.AddSF(7.5, "RL.GetReceivedPickupsAndSend", "b", true)
+        RL.ConfirmPickup()
+    else
+        Game.AddSF(0.5, "RL.GivePendingPickup", "")
+    end
+end
+function RL.ConfirmPickup()
+    -- Advance ReceivedPickups even when the grant fails.
+    -- Otherwise the client resends the same item and popup forever.
+    local ok, err = pcall(function()
+        local cls = RL.PendingPickup.cls
+        if cls == nil or type(cls) ~= "table" or cls.OnPickedUp == nil then
+            cls = RandomizerPowerup
+        end
+        cls.OnPickedUp(nil, RL.PendingPickup.progression)
+    end)
+    if not ok then
+        Game.LogWarn(0, "AP ConfirmPickup grant failed: " .. tostring(err))
+    end
+    Scenario.WriteToPlayerBlackboard("ReceivedPickups","f",RL.ReceivedPickups()+1)
+end
+function RL.ReceivePickup(msg,cls,progression_string,receivedPickupIndex,inventoryIndex)
+    if not RL.PendingPickup then
+        if receivedPickupIndex == RL.ReceivedPickups() and inventoryIndex == RL.InventoryIndex() then
+            if cls == nil then
+                cls = RandomizerPowerup
+            end
+            progression = assert(loadstring("return " .. progression_string))()
+            RL.PendingPickup={cls=cls,progression=progression,msg=msg}
+            Game.AddSF(0, "RL.GivePendingPickup", "")
+        else
+            Game.AddSF(0, "RL.GetInventoryAndSend", "")
+            Game.AddSF(0.05, "RL.GetReceivedPickupsAndSend", "b", false)
+        end
+    end
+end
+""".strip()
+
+    # Save boss deaths from spawn groups and game progress.
+    try:
+        from worlds.metroid_bread.logic import bosses as _bosses_mod
+    except Exception:
+        try:
+            from worlds.metroid_bread.logic import bosses as _bosses_mod  # type: ignore
+        except Exception:
+            _bosses_mod = None  # type: ignore
+
+    spawn_entries: List[str] = []
+    progress_entries: List[str] = []
+    bb_keys: List[str] = []
+    if _bosses_mod is not None:
+        for boss in _bosses_mod.boss_spawn_checks():
+            bb = _bosses_mod.boss_blackboard_prop(boss.key)
+            bb_keys.append(boss.key)
+            spawn_entries.append(
+                "{"
+                f'key="{boss.key}",'
+                f'scenario="{boss.spawn_scenario}",'
+                f'actor="{boss.spawn_group}",'
+                f"min={int(boss.min_deaths)},"
+                f'bb="{bb}"'
+                "}"
+            )
+        for boss in _bosses_mod.boss_progress_prop_checks():
+            bb = _bosses_mod.boss_blackboard_prop(boss.key)
+            bb_keys.append(boss.key)
+            progress_entries.append(
+                "{"
+                f'key="{boss.key}",'
+                f'prop="{boss.progress_prop}",'
+                f'bb="{bb}"'
+                "}"
+            )
+    seen_bb: Set[str] = set()
+    bb_key_lua: List[str] = []
+    for key in bb_keys:
+        if key in seen_bb:
+            continue
+        seen_bb.add(key)
+        bb_key_lua.append(f'"{key}"')
+
+    # Track Quiet Robe and X release as separate story events.
+    story_entries: List[str] = []
+    story_keys_lua: List[str] = []
+    try:
+        from worlds.metroid_bread.tracker import tracker_gate_events as _gate_mod
+    except Exception:
+        try:
+            from worlds.metroid_bread.tracker import tracker_gate_events as _gate_mod  # type: ignore
+        except Exception:
+            _gate_mod = None  # type: ignore
+    if _gate_mod is not None:
+        for gate in _gate_mod.story_progress_checks():
+            story_keys_lua.append(f'"{gate.key}"')
+            story_entries.append(
+                "{"
+                f'key="{gate.key}",'
+                f'prop="{gate.progress_prop}",'
+                f'bb="{gate.blackboard_prop}"'
+                "}"
+            )
+
+    spawn_lua = "{" + ",".join(spawn_entries) + "}"
+    progress_lua = "{" + ",".join(progress_entries) + "}"
+    bb_keys_lua = "{" + ",".join(bb_key_lua) + "}"
+    story_lua = "{" + ",".join(story_entries) + "}"
+    story_keys_joined = "{" + ",".join(story_keys_lua) + "}"
+
+    # Insert boss tables separately; keep the DeathLink Lua as plain text.
+    part3_boss = f"""
+RL.BossSpawnChecks = {spawn_lua}
+RL.BossProgressChecks = {progress_lua}
+RL.BossBlackboardKeys = {bb_keys_lua}
+RL.StoryProgressChecks = {story_lua}
+RL.StoryBlackboardKeys = {story_keys_joined}
+function RL.BossBlackboardProp(key)
+    return "AP_BossBeaten_" .. tostring(key)
+end
+function RL.IsElunXReleased()
+    -- Read Elun's saved X_RELEASE_TRUE flag.
+    -- Also check game progress, opened quarantine, and seed defaults.
+    if Init and Init.bDefaultXRelease then return true end
+    if Blackboard.GetProp("GAME_PROGRESS", "X_RELEASE_TRUE") then return true end
+    if Blackboard.GetProp("GAME_PROGRESS", "QUARENTINE_OPENED") then return true end
+    if Scenario and Scenario.RandoTrueXRelease and Scenario.ReadFromBlackboard then
+        local ok, v = pcall(Scenario.ReadFromBlackboard, Scenario.RandoTrueXRelease, false)
+        if ok and v then return true end
+    end
+    if Game.GetScenarioBlackboardSectionID then
+        local sec = Game.GetScenarioBlackboardSectionID("s060_quarantine")
+        if sec and Blackboard.GetProp(sec, "X_RELEASE_TRUE") then return true end
+    end
+    return false
+end
+function RL.SyncBossSpawnDeaths()
+    -- Save each boss's own spawn-group or progress result.
+    -- Do not let shared regions or pickups mark another boss beaten.
+    if Game.GetCurrentGameModeID() ~= "INGAME" then return end
+    local p = Game.GetPlayerBlackboardSectionName()
+    if not p then return end
+    local scen = Game.GetScenarioID() or ""
+    for _,c in ipairs(RL.BossSpawnChecks or {{}}) do
+        if scen == c.scenario then
+            local a = Game.GetActor(c.actor)
+            local deaths = 0
+            if a and a.SPAWNGROUP and a.SPAWNGROUP.iNumDeaths then
+                deaths = a.SPAWNGROUP.iNumDeaths
+            end
+            if deaths >= c.min then
+                Blackboard.SetProp(p, c.bb, "b", true)
+            end
+        end
+    end
+    for _,c in ipairs(RL.BossProgressChecks or {{}}) do
+        local v = Blackboard.GetProp("GAME_PROGRESS", c.prop)
+        if v then
+            Blackboard.SetProp(p, c.bb, "b", true)
+        end
+    end
+    -- Track story events such as Elun releasing X.
+    for _,c in ipairs(RL.StoryProgressChecks or {{}}) do
+        local hit = false
+        if c.key == "elun_release_x" then
+            hit = RL.IsElunXReleased()
+        else
+            local v = Blackboard.GetProp("GAME_PROGRESS", c.prop)
+            hit = not not v
+        end
+        if hit then
+            Blackboard.SetProp(p, c.bb, "b", true)
+        end
+    end
+end
+function RL.CollectBeatenBossKeys()
+    local p = Game.GetPlayerBlackboardSectionName()
+    local out = {{}}
+    if not p then return out end
+    for _,key in ipairs(RL.BossBlackboardKeys or {{}}) do
+        local prop = RL.BossBlackboardProp(key)
+        if Blackboard.GetProp(p, prop) then
+            table.insert(out, key)
+        end
+    end
+    return out
+end
+function RL.CollectStoryKeys()
+    local p = Game.GetPlayerBlackboardSectionName()
+    local out = {{}}
+    if not p then return out end
+    for _,c in ipairs(RL.StoryProgressChecks or {{}}) do
+        if Blackboard.GetProp(p, c.bb) then
+            table.insert(out, c.key)
+        end
+    end
+    return out
+end
+function RL.GetGameStateAndSend()
+    local current_state = Game.GetCurrentGameModeID()
+    local current_scenario = ""
+    local has_beaten = Init.bBeatenSinceLastReboot
+    if current_state == 'INGAME' then
+        current_scenario = Game.GetScenarioID()
+        pcall(RL.SyncBossSpawnDeaths)
+    else
+        current_scenario = current_state
+    end
+    local boss_part = table.concat(RL.CollectBeatenBossKeys(), ",")
+    local story_part = table.concat(RL.CollectStoryKeys(), ",")
+    RL.SendNewGameState(current_scenario .. ";" .. tostring(has_beaten) .. ";" .. boss_part .. ";" .. story_part)
+end
+function RL.UpdateRDVClient(new_scenario)
+    RL.GetGameStateAndSend()
+    -- Sync collected checks even when boss callbacks run outside INGAME.
+    if RL.GetCollectedIndicesAndSend then
+        pcall(RL.GetCollectedIndicesAndSend)
+    end
+    Game.AddSF(0.05, "RL.GetCollectedIndicesAndSend", "")
+    Game.AddSF(1.0, "RL.GetCollectedIndicesAndSend", "")
+    if Game.GetCurrentGameModeID() == 'INGAME' then
+        if new_scenario == true then
+            RL.PendingPickup = nil
+        end
+        -- Repaint reachable areas after loading the scenario.
+        if RL.LastReachable and next(RL.LastReachable) ~= nil and RL.ApplyReachableMap then
+            Game.AddSF(3.0, "RL.ReapplyLastReachable", "")
+        end
+        -- Restore icon labels after loading or respawning.
+        if RL.ReapplyLastMapIconLabels then
+            if (RL.LastMapIconVariants and next(RL.LastMapIconVariants) ~= nil)
+                or (RL.LastMapIconLabels and next(RL.LastMapIconLabels) ~= nil) then
+                Game.AddSF(3.0, "RL.ReapplyLastMapIconLabels", "")
+            end
+        end
+        -- Restore sprites after the minimap definition reloads.
+        if RL.ReapplyLastMapIconSprites and RL.LastMapIconSprites
+            and next(RL.LastMapIconSprites) ~= nil then
+            Game.AddSF(3.0, "RL.ReapplyLastMapIconSprites", "")
+        end
+        if RL.ReapplyLastMapIconGlobals and RL.LastMapIconGlobals
+            and next(RL.LastMapIconGlobals) ~= nil then
+            Game.AddSF(3.0, "RL.ReapplyLastMapIconGlobals", "")
+        end
+        -- Check boss spawn groups again after changing rooms.
+        pcall(RL.SyncBossSpawnDeaths)
+        Game.AddSF(0.5, "RL.SyncBossSpawnDeaths", "")
+        Game.AddSF(2.0, "RL.GetGameStateAndSend", "")
+        RL.CheckDeath()
+        local playerSection =  Game.GetPlayerBlackboardSectionName()
+        local currentSaveRandoIdentifier = Blackboard.GetProp(playerSection, "THIS_RANDO_IDENTIFIER")
+        if currentSaveRandoIdentifier ~= Init.sThisRandoIdentifier then
+            return
+        end
+        Game.AddSF(0, "RL.GetInventoryAndSend", "")
+        if RL.PendingPickup == nil then
+            Game.AddSF(0.05, "RL.GetReceivedPickupsAndSend", "b", false)
+        end
+    end
+end
+""".strip()
+
+    part3_rest = """
+-- Keep DeathHookInstalled and DeathCheckScheduled during reconnects.
+-- Reinstalling them would add duplicate death handlers and timers.
+-- That would send DeathLink and count deaths twice.
+if RL.DeathHookInstalled == nil then RL.DeathHookInstalled = false end
+if RL.DeathCheckScheduled == nil then RL.DeathCheckScheduled = false end
+if RL.DeathPollGeneration == nil then RL.DeathPollGeneration = 0 end
+if RL.LastKnownDeathCount == nil then RL.LastKnownDeathCount = nil end
+-- Reset death flags only when the player is not already dying.
+if not RL.DeathSent then
+    RL.DeathFromRemote = false
+    RL.WasAlive = true
+    RL.DeathPending = false
+end
+function RL.SendApLog(message)
+    if RL.SendLog then
+        RL.SendLog(message)
+    else
+        Game.LogWarn(0, message)
+    end
+end
+function RL.GetApSeedId()
+    if Init ~= nil and Init.sApSeedId ~= nil then
+        return tostring(Init.sApSeedId)
+    end
+    return ""
+end
+-- Return to the menu if the Hub detects the wrong patch.
+function RL.SeedMismatchBootToMenu()
+    if RL._SeedMismatchArmed then
+        return
+    end
+    RL._SeedMismatchArmed = true
+    RL.SendApLog("AP_SEED: mismatch — showing fatal popup and returning to title")
+    if Scenario ~= nil and Scenario.ShowFatalErrorMessage ~= nil then
+        Scenario.ShowFatalErrorMessage({
+            "{c2}Seed mismatch!{c0}|Please make sure to patch the game to the right folder.",
+            "Returning to title screen.",
+        })
+        return
+    end
+    if Scenario ~= nil and Scenario.FadeOutAndGoToMainMenu ~= nil then
+        Scenario.FadeOutAndGoToMainMenu(0.3)
+        return
+    end
+    if Game ~= nil and Game.GoToMainMenu ~= nil then
+        Game.GoToMainMenu()
+    end
+end
+function RL.GetEffectiveHealth()
+    local playerSection = Game.GetPlayerBlackboardSectionName()
+    local bb_health = Blackboard.GetProp(playerSection, "ITEM_CURRENT_LIFE")
+    local item_health = Game.GetItemAmount(Game.GetPlayerName(), "ITEM_CURRENT_LIFE")
+    local life_health = nil
+    local player = Game.GetPlayer()
+    if player ~= nil and player.LIFE ~= nil then
+        life_health = player.LIFE.fCurrentLife
+    end
+    local effective = nil
+    for _, value in ipairs({bb_health, item_health, life_health}) do
+        if value ~= nil then
+            value = tonumber(value)
+            if value ~= nil then
+                if effective == nil or value < effective then
+                    effective = value
+                end
+            end
+        end
+    end
+    return effective or 100.0
+end
+function RL.GetMaxHealth()
+    local playerSection = Game.GetPlayerBlackboardSectionName()
+    return Blackboard.GetProp(playerSection, "ITEM_MAX_LIFE") or 100.0
+end
+function RL.GetPlayerDeathCount()
+    local count = Blackboard.GetProp("GAME", "ProgressStat_PlayerDeaths")
+    if type(count) == "number" then
+        return count
+    end
+    count = Blackboard.GetProp("GAME", "Rando_PlayerDeathCount")
+    if type(count) == "number" then
+        return count
+    end
+    return 0
+end
+function RL.CapturePlayerWorldPos()
+    -- Return scenario;x;y for unreachable-area death tips.
+    -- Read it before the player actor disappears; prefer GetScenarioID.
+    local scen = ""
+    pcall(function()
+        if Game.GetScenarioID then
+            scen = tostring(Game.GetScenarioID() or "")
+        end
+    end)
+    if scen == "" or scen == "nil" or scen == "None" then
+        pcall(function()
+            if Game.GetCurrentScenarioID then
+                scen = tostring(Game.GetCurrentScenarioID() or "")
+            end
+        end)
+    end
+    if scen == "" or scen == "nil" or scen == "None" then
+        pcall(function()
+            scen = tostring(Blackboard.GetProp("GAME", "CurrentScenarioID") or "")
+        end)
+    end
+    local p = Game.GetPlayer and Game.GetPlayer() or nil
+    if p == nil or p.vPos == nil then
+        return ""
+    end
+    local x = tonumber(p.vPos[1]) or tonumber(p.vPos.x)
+    local y = tonumber(p.vPos[2]) or tonumber(p.vPos.y)
+    if x == nil or y == nil then
+        return ""
+    end
+    if scen == "" or scen == "nil" or scen == "None"
+        or scen == "MAINMENU" or scen == "TRANSITION" then
+        return ""
+    end
+    return tostring(scen) .. ";" .. tostring(x) .. ";" .. tostring(y)
+end
+function RL.MarkLocalDeath(reason)
+    -- Log each death once and mark remote kills first.
+    -- Share the death flag between the hook and the poll.
+    if RL.DeathFromRemote then
+        return false
+    end
+    if RL.DeathSent then
+        return false
+    end
+    RL.DeathSent = true
+    RL.WasAlive = false
+    RL.DeathPending = true
+    RL.DeathPollGeneration = (RL.DeathPollGeneration or 0) + 1
+    -- Save the player's position before death removes the actor.
+    -- The client reads AP_DEATH: Player died|scen;x;y.
+    local pos = ""
+    pcall(function() pos = tostring(RL.CapturePlayerWorldPos() or "") end)
+    RL.LastDeathWorldPos = pos
+    if pos ~= nil and pos ~= "" then
+        RL.SendApLog("AP_DEATH: Player died|" .. pos)
+    else
+        RL.SendApLog("AP_DEATH: Player died")
+    end
+    -- Return scenario and death flags to match Ryujinx's reports.
+    pcall(RL.LogDeathCauseProbe, tostring(reason or "local"))
+    -- Restore changed map labels after respawning.
+    if RL.ReapplyLastMapIconLabels then
+        if (RL.LastMapIconVariants and next(RL.LastMapIconVariants) ~= nil)
+            or (RL.LastMapIconLabels and next(RL.LastMapIconLabels) ~= nil) then
+            Game.AddSF(1.0, "RL.ReapplyLastMapIconLabels", "")
+            Game.AddSF(3.0, "RL.ReapplyLastMapIconLabels", "")
+        end
+    end
+    if RL.ReapplyLastMapIconSprites and RL.LastMapIconSprites
+        and next(RL.LastMapIconSprites) ~= nil then
+        Game.AddSF(1.0, "RL.ReapplyLastMapIconSprites", "")
+        Game.AddSF(3.0, "RL.ReapplyLastMapIconSprites", "")
+    end
+    if RL.ReapplyLastMapIconGlobals and RL.LastMapIconGlobals
+        and next(RL.LastMapIconGlobals) ~= nil then
+        Game.AddSF(1.0, "RL.ReapplyLastMapIconGlobals", "")
+        Game.AddSF(3.0, "RL.ReapplyLastMapIconGlobals", "")
+    end
+    return true
+end
+function RL.InstallDeathHook()
+    -- Install the death hook only once across reconnects.
+    -- Call ODR's existing death handler once, without nesting ours.
+    if RL.DeathHookInstalled then
+        return
+    end
+    if DamagePlants == nil or DamagePlants.OnPlayerDead == nil then
+        return
+    end
+    if RL._APDeathHookFn ~= nil and DamagePlants.OnPlayerDead == RL._APDeathHookFn then
+        RL.DeathHookInstalled = true
+        return
+    end
+    local original_OnPlayerDead = DamagePlants.OnPlayerDead
+    local hook = function(...)
+        -- Call the previous death handler once.
+        -- Let ODR update its HUD death count.
+        original_OnPlayerDead(...)
+        RL.MarkLocalDeath("OnPlayerDead")
+    end
+    RL._APDeathHookFn = hook
+    DamagePlants.OnPlayerDead = hook
+    RL.DeathHookInstalled = true
+    RL.SendApLog("AP: Death hook installed (DamagePlants.OnPlayerDead)")
+end
+function RL.GetDeathPollStatus()
+    RL.InstallDeathHook()
+    local mode = Game.GetCurrentGameModeID()
+    local health = RL.GetEffectiveHealth()
+    local max_health = RL.GetMaxHealth()
+    local deaths = RL.GetPlayerDeathCount()
+    local pending = RL.DeathPending and 1 or 0
+    local gen = RL.DeathPollGeneration or 0
+    return string.format(
+        "%s,%.1f,%.1f,%d,%d,%d,%s,%s",
+        mode,
+        health,
+        max_health,
+        deaths,
+        pending,
+        gen,
+        tostring(RL.WasAlive),
+        tostring(RL.DeathSent)
+    )
+end
+-- Game report death causes are not available through Lua saved state.
+-- Return only the scenario and flags for matching Ryujinx logs.
+-- Read cause, grab, boss, and map details from ServicePrepo JSON.
+function RL.GetDeathCauseProbe()
+    RL.InstallDeathHook()
+    local scenario = nil
+    pcall(function()
+        scenario = Game.GetScenarioID and Game.GetScenarioID() or nil
+    end)
+    if scenario == nil or scenario == "" then
+        pcall(function()
+            scenario = Game.GetCurrentScenarioID and Game.GetCurrentScenarioID() or nil
+        end)
+    end
+    if scenario == nil or scenario == "" then
+        pcall(function()
+            scenario = Blackboard.GetProp("GAME", "CurrentScenarioID")
+        end)
+    end
+    if (scenario == nil or scenario == "") and RL.LastDeathWorldPos then
+        local s = tostring(RL.LastDeathWorldPos)
+        local semi = string.find(s, ";", 1, true)
+        if semi then
+            scenario = string.sub(s, 1, semi - 1)
+        end
+    end
+    local mode = Game.GetCurrentGameModeID()
+    local deaths = RL.GetPlayerDeathCount()
+    local gen = RL.DeathPollGeneration or 0
+    -- Return nil explicitly for fields Lua cannot read.
+    local bb_cause = Blackboard.GetProp("GAME", "CauseOfDeath")
+    local bb_grab = Blackboard.GetProp("GAME", "WhichGrab")
+    local bb_boss = Blackboard.GetProp("GAME", "WhichBoss")
+    return string.format(
+        "scenario=%s|mode=%s|deaths=%d|gen=%d|remote=%s|sent=%s|bbCause=%s|bbGrab=%s|bbBoss=%s",
+        tostring(scenario or "?"),
+        tostring(mode or "?"),
+        deaths,
+        gen,
+        tostring(RL.DeathFromRemote and true or false),
+        tostring(RL.DeathSent and true or false),
+        tostring(bb_cause),
+        tostring(bb_grab),
+        tostring(bb_boss)
+    )
+end
+function RL.LogDeathCauseProbe(tag)
+    local ok, probe = pcall(RL.GetDeathCauseProbe)
+    if not ok then
+        RL.SendApLog("AP_DEATH_CAUSE: probe_err=" .. tostring(probe) .. " tag=" .. tostring(tag or "?"))
+        return
+    end
+    RL.SendApLog("AP_DEATH_CAUSE: " .. tostring(probe) .. " tag=" .. tostring(tag or "?"))
+end
+function RL.CheckDeath()
+    RL.InstallDeathHook()
+    local mode = Game.GetCurrentGameModeID()
+    local current_health = RL.GetEffectiveHealth()
+    local max_health = RL.GetMaxHealth()
+    local death_count = RL.GetPlayerDeathCount()
+    if RL.LastKnownDeathCount == nil then
+        RL.LastKnownDeathCount = death_count
+    elseif death_count > RL.LastKnownDeathCount then
+        RL.LastKnownDeathCount = death_count
+        -- Do not log another death if OnPlayerDead already handled it.
+        RL.MarkLocalDeath("death_count")
+    end
+    if current_health <= 0 and RL.WasAlive then
+        RL.MarkLocalDeath("health")
+    elseif (
+        current_health > (max_health * 0.5)
+        and not RL.WasAlive
+        and mode == "INGAME"
+        and RL.DeathSent
+    ) then
+        -- Clear the death flag only after health is restored.
+        RL.DeathSent = false
+        RL.DeathFromRemote = false
+        RL.WasAlive = true
+        RL.DeathPending = false
+        RL.SendApLog("AP_DEATH: Player respawned")
+    elseif current_health > 0 and mode == "INGAME" and RL.WasAlive and not RL.DeathSent then
+        RL.DeathPending = false
+    end
+end
+function RL.ScheduleDeathCheck()
+    RL.CheckDeath()
+    Game.AddSF(0.25, "RL.ScheduleDeathCheck", "")
+end
+RL.InstallDeathHook()
+if not RL.DeathCheckScheduled then
+    RL.DeathCheckScheduled = true
+    Game.AddSF(0.25, "RL.ScheduleDeathCheck", "")
+end
+-- Reload ApLoadingTips from romfs on every connection.
+-- Keep the loading hooks in the installed script's order.
+-- Mark AP connected before installing tips.
+-- Use normal AP tips on later loads instead of connection help.
+RL.APConnected = true
+pcall(function()
+  Game.DoFile("system/scripts/ap_tip_pool.lua")
+  Game.DoFile("system/scripts/ap_loading_tips.lua")
+  if ApLoadingTips then
+    ApLoadingTips._client_connected = true
+    if ApLoadingTips.Install then
+      ApLoadingTips.Install()
+    end
+    if ApLoadingTips.PrepareGenericCarousel then
+      pcall(ApLoadingTips.PrepareGenericCarousel, "APConnect")
+    end
+  end
+end)
+RL.SendApLog("AP: DeathLink detection active (poll + OnPlayerDead hook)")
+RL.Bootstrap = true
+""".strip()
+    part3 = (part3_boss + "\n" + part3_rest).strip()
+    min_life = ap_min_life_install_lua()
+    if min_life:
+        part3 = part3 + "\n" + min_life
+
+
+    # Paint reachable map areas with flag 4.
+    fillmap_lua_path = ROOT / "data" / "fillmap_actors.lua"
+    fillmap_embed = ""
+    if fillmap_lua_path.is_file():
+        # Remove generated header comments before sending the code.
+        fillmap_embed = "\n".join(
+            ln
+            for ln in fillmap_lua_path.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.lstrip().startswith("--")
+        )
+    part_map_head = f"""
+if not RL then RL = {{}} end
+RL.MapBinderWarned = RL.MapBinderWarned or false
+RL.MapBoundsLoadedLogged = RL.MapBoundsLoadedLogged or false
+RL.MapFillmapLogged = RL.MapFillmapLogged or false
+RL.MapBoundsPaintLastSig = RL.MapBoundsPaintLastSig or ""
+RL.LastReachable = RL.LastReachable or {{}}
+-- Keep the older VisitBounds function disabled because it can crash.
+-- Use VisitBoundsSafe for whole-room painting.
+if RL.MapNativePaintEnabled == nil then RL.MapNativePaintEnabled = false end
+-- Leave bright fillmap painting off for reachable areas.
+-- Keep manual fillmap tests, but use VisitBoundsSafe for dim painting.
+if RL.MapFillmapPaintEnabled == nil then RL.MapFillmapPaintEnabled = false end
+-- Use flag 4 for dim reachable areas; keep flag 6 for manual tests.
+-- Skip this on older builds without the helper.
+if OdrMap and OdrMap.SetVisitBoundsSafeFlag then
+    pcall(OdrMap.SetVisitBoundsSafeFlag, 4)
+end
+-- Map areas to fillmap actors, not collision-camera names.
+{fillmap_embed}
+-- Test bright painting by looking up the actor and using flag 6.
+-- Default to cut_fillmap_54 in the Corpius arena.
+-- Collision-camera asset IDs are not usable actor names.
+function RL.MapPaintSmoke(assetId)
+    local id = assetId
+    if id == nil or id == "" then
+        id = "cut_fillmap_54"
+    end
+    local mode, scen = "?", "?"
+    pcall(function() mode = tostring(Game.GetCurrentGameModeID()) end)
+    pcall(function() scen = tostring(Game.GetScenarioID()) end)
+    if not Game.SetMinimapRegionVisited then
+        RL.SendApLog("AP_MAP: region-visit smoke FAIL no-api id="..tostring(id).." mode="..mode.." scen="..scen)
+        return "no-api"
+    end
+    local before = RL.ProbeVisitedCells(scen)
+    local actor_found = "?"
+    pcall(function()
+        if Game.GetActor then
+            local a = Game.GetActor(id)
+            actor_found = (a ~= nil) and "yes" or "no"
+        else
+            actor_found = "no-GetActor"
+        end
+    end)
+    local ret = nil
+    local ok, err = pcall(function()
+        ret = Game.SetMinimapRegionVisited(id)
+    end)
+    local after = RL.ProbeVisitedCells(scen)
+    pcall(function()
+        if minimap and minimap.SetProfileDataDirty then
+            minimap.SetProfileDataDirty()
+        end
+    end)
+    local delta = "?"
+    if before ~= nil and after ~= nil then
+        delta = tostring(after - before)
+    end
+    if not ok then
+        RL.SendApLog("AP_MAP: region-visit smoke FAIL id="..tostring(id).." mode="..mode.." scen="..scen.." err="..tostring(err).." visited="..tostring(before).."->"..tostring(after).." actor="..actor_found)
+        return "fail"
+    end
+    local verdict = "ok"
+    if before ~= nil and after ~= nil and after == before then
+        verdict = "noop"
+    end
+    RL.SendApLog("AP_MAP: region-visit smoke "..verdict.." id="..tostring(id).." mode="..mode.." scen="..scen.." ret="..tostring(ret).." visited="..tostring(before).."->"..tostring(after).." d="..delta.." actor="..actor_found)
+    return verdict
+end
+-- Load the region-unlock test script from romfs.
+-- Do not send it inline because it exceeds 4,096 bytes.
+-- Test showing one icon with ForceEntityIconVisible.
+-- Default to the Charge Tutorial Energy Tank; leave map painting unchanged.
+function RL.MapIconSmoke(actorName)
+    local id = actorName
+    if id == nil or id == "" then
+        id = "Item_EnergyTank001"
+    end
+    local mode, scen = "?", "?"
+    pcall(function() mode = tostring(Game.GetCurrentGameModeID()) end)
+    pcall(function() scen = tostring(Game.GetScenarioID()) end)
+    if not Game.ForceEntityIconVisible then
+        RL.SendApLog("AP_MAP: icon-smoke FAIL no-api actor="..tostring(id).." mode="..mode.." scen="..scen)
+        return "no-api"
+    end
+    local actor_found = "?"
+    pcall(function()
+        if Game.GetActor then
+            local a = Game.GetActor(id)
+            actor_found = (a ~= nil) and "yes" or "no"
+        else
+            actor_found = "no-GetActor"
+        end
+    end)
+    local ret = nil
+    local ok, err = pcall(function()
+        ret = Game.ForceEntityIconVisible(id)
+    end)
+    if not ok then
+        RL.SendApLog("AP_MAP: icon-smoke FAIL actor="..tostring(id).." mode="..mode.." scen="..scen.." err="..tostring(err).." found="..actor_found)
+        return "fail"
+    end
+    RL.SendApLog("AP_MAP: icon-smoke ok actor="..tostring(id).." mode="..mode.." scen="..scen.." ret="..tostring(ret).." found="..actor_found)
+    return "ok"
+end
+-- Set collected map-icon labels through OdrText.
+-- Save label text and restore it after loading, death, or reconnecting.
+-- Leave map painting and item grants unchanged.
+RL.LastMapIconLabels = RL.LastMapIconLabels or {{}}
+RL.LastMapIconVariants = RL.LastMapIconVariants or {{}}
+RL.MapIconLabelsRetryLeft = RL.MapIconLabelsRetryLeft or 0
+-- Map icon IDs to sprite rows and columns.
+RL.LastMapIconSprites = RL.LastMapIconSprites or {{}}
+RL.MapIconSpritesRetryLeft = RL.MapIconSpritesRetryLeft or 0
+function RL.WarmLanguageBank()
+    -- Wait for the game to load its text bank; forced loading can crash Ryujinx.
+    -- WarmBank only checks readiness; do not force it with GetLocalized.
+    if OdrText and OdrText.IsBankReady then
+        local pack = {{pcall(OdrText.IsBankReady)}}
+        if pack[1] and pack[2] then
+            return true
+        end
+    end
+    return false
+end
+function RL.MapIconBankStatus()
+    -- Return version|ready|reason for the client's bank check.
+    
+    -- Include the OdrText version with the readiness result.
+    -- Older builds could report not ready forever.
+    -- They read the wrong language-manager pointer.
+    -- The version helps distinguish loading from an outdated subsdk9.
+    -- Log both values on each check.
+    if not OdrText then
+        return "no-OdrText|false|no-api"
+    end
+    local version = tostring(OdrText.Version or "?")
+    if not OdrText.IsBankReady then
+        return version.."|false|no-IsBankReady"
+    end
+    local pack = {{pcall(OdrText.IsBankReady)}}
+    if not pack[1] then
+        return version.."|false|err="..tostring(pack[2])
+    end
+    local ready = pack[2] and true or false
+    return version.."|"..tostring(ready).."|"..tostring(pack[3] or "-")
+end
+function RL.CallSetLocalized(key, text)
+    -- Store all pcall return values in a table.
+    -- Some game Lua builds otherwise lose the reason value.
+    -- Double braces in the Python template produce a Lua table.
+    -- Wait for the game to load the bank; do not force it.
+    local pack = {{pcall(function()
+        return OdrText.SetLocalized(key, text)
+    end)}}
+    return pack[1], pack[2], pack[3]
+end
+function RL.SetMapIconLabel(key, text)
+    if key == nil or key == "" then
+        return "bad-key"
+    end
+    local t = text
+    if t == nil then
+        t = ""
+    end
+    if not OdrText or not OdrText.SetLocalized then
+        return "no-api"
+    end
+    RL.LastMapIconLabels[key] = t
+    local ok, ret, reason = RL.CallSetLocalized(key, t)
+    if not ok then
+        RL.SendApLog("AP_MAP: label FAIL key="..tostring(key).." text="..tostring(t).." err="..tostring(ret))
+        return "fail"
+    end
+    if ret == true then
+        RL.SendApLog("AP_MAP: label ok key="..tostring(key).." text="..tostring(t).." ret=true")
+        return "ok"
+    end
+    RL.SendApLog("AP_MAP: label FAIL key="..tostring(key).." text="..tostring(t).." ret="..tostring(ret).." reason="..tostring(reason or "soft-fail"))
+    return tostring(reason or "soft-fail")
+end
+function RL.ApplyMapIconLabels(labels)
+    if type(labels) ~= "table" then
+        return "bad-arg"
+    end
+    -- Merge the new labels with the saved labels.
+    for key, text in pairs(labels) do
+        RL.LastMapIconLabels[key] = text
+    end
+    if not OdrText or not OdrText.SetLocalized then
+        RL.SendApLog("AP_MAP: labels FAIL no-OdrText n="..tostring((function()
+            local c = 0
+            for _ in pairs(labels) do c = c + 1 end
+            return c
+        end)()))
+        return "no-api"
+    end
+    -- Skip updates until the game's text bank is loaded.
+    local ok_n = 0
+    local fail_n = 0
+    local retryable = false
+    local fail_samples = 0
+    local sample_reason = nil
+    for key, text in pairs(labels) do
+        local ok, ret, reason = RL.CallSetLocalized(key, text)
+        if ok and ret == true then
+            ok_n = ok_n + 1
+            if ok_n <= 3 then
+                RL.SendApLog("AP_MAP: label ok key="..tostring(key).." text="..tostring(text).." ret=true")
+            end
+        else
+            fail_n = fail_n + 1
+            local why
+            if not ok then
+                why = "err="..tostring(ret)
+                if sample_reason == nil then sample_reason = "err" end
+            else
+                why = "ret="..tostring(ret).." reason="..tostring(reason or "soft-fail")
+                local r = tostring(reason or "")
+                if sample_reason == nil then sample_reason = r ~= "" and r or "soft-fail" end
+                if r == "bank-not-ready" or r == "not-ready" or r == "mgr-nil" or r == "key-missing" then
+                    retryable = true
+                end
+            end
+            if fail_samples < 6 then
+                fail_samples = fail_samples + 1
+                RL.SendApLog("AP_MAP: label FAIL key="..tostring(key).." text="..tostring(text).." "..why)
+            end
+        end
+    end
+    local prior_tries = RL.MapIconLabelsRetryLeft or 0
+    local sig = tostring(ok_n).."|"..tostring(fail_n).."|"..tostring(sample_reason or "")
+    if sig ~= RL.MapIconLabelsLastSig or fail_n == 0 or (prior_tries % 5 == 0) then
+        RL.MapIconLabelsLastSig = sig
+        RL.SendApLog("AP_MAP: labels apply ok n="..tostring(ok_n).." fail="..tostring(fail_n).." sample="..tostring(sample_reason or "-"))
+    end
+    if ok_n > 0 then
+        pcall(function()
+            if minimap and minimap.SetProfileDataDirty then
+                minimap.SetProfileDataDirty()
+            end
+        end)
+    end
+    -- Retry while the language bank is loading, with increasing delays.
+    -- Do not stop after a fixed number of tries.
+    -- The old limit gave up after about 10 to 15 seconds.
+    -- Limit the delay between tries instead.
+    -- Keep retrying until the bank is ready.
+    if fail_n > 0 and retryable then
+        RL.MapIconLabelsRetryLeft = prior_tries + 1
+        local delay = 2.0
+        if RL.MapIconLabelsRetryLeft > 5 then delay = 4.0 end
+        if RL.MapIconLabelsRetryLeft > 15 then delay = 8.0 end
+        if Game.AddSF then
+            Game.AddSF(delay, "RL.ReapplyLastMapIconLabels", "")
+        end
+    elseif fail_n == 0 then
+        RL.MapIconLabelsRetryLeft = 0
+    end
+    return tostring(ok_n)
+end
+function RL.ReapplyLastMapIconLabels()
+    if RL.LastMapIconVariants and next(RL.LastMapIconVariants) ~= nil and RL.ApplyMapIconVariants then
+        return RL.ApplyMapIconVariants(RL.LastMapIconVariants)
+    end
+    if RL.LastMapIconLabels and next(RL.LastMapIconLabels) ~= nil then
+        return RL.ApplyMapIconLabels(RL.LastMapIconLabels)
+    end
+    return "empty"
+end
+-- Set label text through SetLocalized first.
+-- Use redirects only when LabelRedirectInGetLocalized is enabled.
+function RL.ApplyMapIconVariants(variants)
+    if type(variants) ~= "table" then
+        return "bad-arg"
+    end
+    for k, v in pairs(variants) do
+        RL.LastMapIconVariants[k] = v
+    end
+    local has_redirect_fn = (OdrMap and OdrMap.SetIconInspectorLabel) and true or false
+    local native_redirect_live = (
+        OdrText and OdrText.LabelRedirectInGetLocalized
+    ) and true or false
+    local use_redirect = has_redirect_fn and native_redirect_live
+    local use_setloc = (OdrText and OdrText.SetLocalized) and true or false
+    if not has_redirect_fn and not use_setloc then
+        RL.SendApLog("AP_MAP: variants FAIL no-SetIconInspectorLabel/no-OdrText")
+        return "no-api"
+    end
+    local ok_n = 0
+    local fail_n = 0
+    local sample = nil
+    local mode = use_redirect and "redirect" or "setloc"
+    for base, spec in pairs(variants) do
+        local variant = spec
+        local text = nil
+        if type(spec) == "table" then
+            variant = spec.variant or spec[1]
+            text = spec.text or spec[2]
+        end
+        local applied = false
+        if use_redirect and variant ~= nil then
+            local icon = tostring(base)
+            if string.sub(icon, 1, 9) == "MAP_ICON_" then
+                icon = string.sub(icon, 10)
+            end
+            local label = tostring(variant)
+            if string.sub(label, 1, 1) ~= "#" then
+                label = "#" .. label
+            end
+            local pack = {{pcall(function()
+                return OdrMap.SetIconInspectorLabel(icon, label)
+            end)}}
+            if pack[1] and pack[2] then
+                applied = true
+            end
+        end
+        if (not applied) and use_setloc and text ~= nil then
+            local ok, ret, reason = RL.CallSetLocalized(tostring(base), tostring(text))
+            if ok and ret == true then
+                applied = true
+            elseif sample == nil then
+                sample = tostring(base) .. " reason=" .. tostring(reason or ret)
+            end
+        end
+        if applied then
+            ok_n = ok_n + 1
+        else
+            fail_n = fail_n + 1
+            if sample == nil then
+                sample = tostring(base) .. "->" .. tostring(variant)
+            end
+        end
+    end
+    local prior_tries = RL.MapIconLabelsRetryLeft or 0
+    local sig = tostring(ok_n) .. "|" .. tostring(fail_n) .. "|" .. mode
+    if sig ~= RL.MapIconVariantsLastSig or fail_n == 0 or (prior_tries % 5 == 0) then
+        RL.MapIconVariantsLastSig = sig
+        RL.SendApLog(
+            "AP_MAP: variants apply ok n=" .. tostring(ok_n)
+            .. " fail=" .. tostring(fail_n)
+            .. " mode=" .. mode
+            .. " sample=" .. tostring(sample or "-")
+        )
+    end
+    if ok_n > 0 then
+        pcall(function()
+            if minimap and minimap.SetProfileDataDirty then
+                minimap.SetProfileDataDirty()
+            end
+        end)
+    end
+    -- Retry unavailable banks without a fixed attempt limit.
+    if fail_n > 0 and (not use_redirect) then
+        RL.MapIconLabelsRetryLeft = prior_tries + 1
+        local delay = 2.0
+        if RL.MapIconLabelsRetryLeft > 5 then delay = 4.0 end
+        if RL.MapIconLabelsRetryLeft > 15 then delay = 8.0 end
+        if Game.AddSF then
+            Game.AddSF(delay, "RL.ReapplyLastMapIconLabels", "")
+        end
+    elseif fail_n == 0 then
+        RL.MapIconLabelsRetryLeft = 0
+    end
+    return tostring(ok_n)
+end
+-- Update icon graphics through SetIconSprite without the text bank.
+function RL.ApplyMapIconSprites(sprites)
+    if type(sprites) ~= "table" then
+        return "bad-arg"
+    end
+    -- Merge sprite chunks rather than replacing earlier chunks.
+    -- Reapplying sprites needs all the chunks the client sent.
+    for icon, cell in pairs(sprites) do
+        RL.LastMapIconSprites[icon] = cell
+    end
+    if not OdrMap or not OdrMap.SetIconSprite then
+        RL.SendApLog("AP_MAP: sprites FAIL no-SetIconSprite (old subsdk9)")
+        return "no-api"
+    end
+    local ok_n = 0
+    local fail_n = 0
+    local sample = nil
+    local retryable = false
+    for icon, cell in pairs(sprites) do
+        local row, col
+        if type(cell) == "table" then
+            row = cell[1] or cell.row
+            col = cell[2] or cell.col
+        end
+        if row == nil or col == nil then
+            fail_n = fail_n + 1
+            if sample == nil then sample = tostring(icon) .. " reason=bad-cell" end
+        else
+            local pack = {{pcall(function()
+                return OdrMap.SetIconSprite(tostring(icon), row, col)
+            end)}}
+            if pack[1] and pack[2] then
+                ok_n = ok_n + 1
+            else
+                fail_n = fail_n + 1
+                local reason = pack[1] and tostring(pack[3] or "soft-fail") or ("err=" .. tostring(pack[2]))
+                -- The map definition may be unavailable during startup or loading.
+                if reason == "mgr-nil" or reason == "no-def" or reason == "bad-count" or reason == "bad-arrays" then
+                    retryable = true
+                end
+                if sample == nil then sample = tostring(icon) .. " reason=" .. reason end
+            end
+        end
+    end
+    local prior_tries = RL.MapIconSpritesRetryLeft or 0
+    local sig = tostring(ok_n) .. "|" .. tostring(fail_n)
+    if sig ~= RL.MapIconSpritesLastSig or fail_n == 0 or (prior_tries % 5 == 0) then
+        RL.MapIconSpritesLastSig = sig
+        RL.SendApLog(
+            "AP_MAP: sprites apply ok n=" .. tostring(ok_n)
+            .. " fail=" .. tostring(fail_n)
+            .. " sample=" .. tostring(sample or "-")
+        )
+    end
+    -- Rebuild icon widgets so they use the new sprite cells.
+    if ok_n > 0 then
+        pcall(function()
+            if minimap and minimap.SetProfileDataDirty then
+                minimap.SetProfileDataDirty()
+            end
+        end)
+    end
+    -- Limit retry delays, not the number of retries.
+    if fail_n > 0 and retryable then
+        RL.MapIconSpritesRetryLeft = prior_tries + 1
+        local delay = 2.0
+        if RL.MapIconSpritesRetryLeft > 5 then delay = 4.0 end
+        if RL.MapIconSpritesRetryLeft > 15 then delay = 8.0 end
+        if Game.AddSF then
+            Game.AddSF(delay, "RL.ReapplyLastMapIconSprites", "")
+        end
+    elseif fail_n == 0 then
+        RL.MapIconSpritesRetryLeft = 0
+    end
+    return tostring(ok_n)
+end
+function RL.ReapplyLastMapIconSprites()
+    if RL.LastMapIconSprites and next(RL.LastMapIconSprites) ~= nil then
+        return RL.ApplyMapIconSprites(RL.LastMapIconSprites)
+    end
+    return "empty"
+end
+-- Return version|has_api|status for the client's sprite check.
+-- Include the version so an old subsdk9 is clear in the log.
+function RL.MapIconSpriteStatus()
+    if not OdrMap then
+        return "no-OdrMap|false|no-api"
+    end
+    local version = tostring(OdrMap.Version or "?")
+    if not OdrMap.SetIconSprite then
+        return version .. "|false|no-SetIconSprite"
+    end
+    local status = "?"
+    if OdrMap.IconDefStatus then
+        local pack = {{pcall(OdrMap.IconDefStatus)}}
+        status = pack[1] and tostring(pack[2]) or ("err=" .. tostring(pack[2]))
+    end
+    return version .. "|true|" .. status
+end
+-- Show hinted icons on the world map by setting bIsGlobal.
+-- Clear it when an icon is no longer hinted.
+-- Collected icons keep their sprite; hints control world-map visibility.
+RL.LastMapIconGlobals = RL.LastMapIconGlobals or {{}}
+RL.MapIconGlobalsRetryLeft = RL.MapIconGlobalsRetryLeft or 0
+RL.MapIconGlobalsLastSig = RL.MapIconGlobalsLastSig or ""
+function RL.ApplyMapIconGlobals(globals_map)
+    if type(globals_map) ~= "table" then
+        return "bad-arg"
+    end
+    for icon, flag in pairs(globals_map) do
+        RL.LastMapIconGlobals[icon] = flag and true or false
+    end
+    if not OdrMap or not OdrMap.SetIconGlobal then
+        RL.SendApLog("AP_MAP: globals FAIL no-SetIconGlobal (old subsdk9)")
+        return "no-api"
+    end
+    local ok_n = 0
+    local fail_n = 0
+    local sample = nil
+    local retryable = false
+    for icon, flag in pairs(globals_map) do
+        local pack = {{pcall(function()
+            return OdrMap.SetIconGlobal(tostring(icon), flag and true or false)
+        end)}}
+        if pack[1] and pack[2] then
+            ok_n = ok_n + 1
+        else
+            fail_n = fail_n + 1
+            local reason = pack[1] and tostring(pack[3] or "soft-fail") or ("err=" .. tostring(pack[2]))
+            if reason == "mgr-nil" or reason == "no-def" or reason == "bad-count" or reason == "bad-arrays" then
+                retryable = true
+            end
+            if sample == nil then sample = tostring(icon) .. " reason=" .. reason end
+        end
+    end
+    local prior_tries = RL.MapIconGlobalsRetryLeft or 0
+    local sig = tostring(ok_n) .. "|" .. tostring(fail_n)
+    if sig ~= RL.MapIconGlobalsLastSig or fail_n == 0 or (prior_tries % 5 == 0) then
+        RL.MapIconGlobalsLastSig = sig
+        RL.SendApLog(
+            "AP_MAP: globals apply ok n=" .. tostring(ok_n)
+            .. " fail=" .. tostring(fail_n)
+            .. " sample=" .. tostring(sample or "-")
+        )
+    end
+    if ok_n > 0 then
+        pcall(function()
+            if minimap and minimap.SetProfileDataDirty then
+                minimap.SetProfileDataDirty()
+            end
+        end)
+    end
+    if fail_n > 0 and retryable then
+        RL.MapIconGlobalsRetryLeft = prior_tries + 1
+        local delay = 2.0
+        if RL.MapIconGlobalsRetryLeft > 5 then delay = 4.0 end
+        if RL.MapIconGlobalsRetryLeft > 15 then delay = 8.0 end
+        if Game.AddSF then
+            Game.AddSF(delay, "RL.ReapplyLastMapIconGlobals", "")
+        end
+    elseif fail_n == 0 then
+        RL.MapIconGlobalsRetryLeft = 0
+    end
+    return tostring(ok_n)
+end
+function RL.ReapplyLastMapIconGlobals()
+    if RL.LastMapIconGlobals and next(RL.LastMapIconGlobals) ~= nil then
+        return RL.ApplyMapIconGlobals(RL.LastMapIconGlobals)
+    end
+    return "empty"
+end
+-- Test changing one custom map-icon label.
+-- Leave map painting unchanged.
+-- Use the first existing custom-icon key, or MAP_ICON_ItemCustom0.
+-- Find keys in the patched English text file.
+-- Also check sInspectorLabel in minimap.bmmdef.
+function RL.MapLabelSmoke(key, text)
+    local k = key
+    local t = text
+    if t == nil or t == "" then
+        t = "Label Smoke OK"
+    end
+    local mode, scen = "?", "?"
+    pcall(function() mode = tostring(Game.GetCurrentGameModeID()) end)
+    pcall(function() scen = tostring(Game.GetScenarioID()) end)
+    if not OdrText or not OdrText.SetLocalized then
+        RL.SendApLog("AP_MAP: label-smoke FAIL no-OdrText mode="..mode.." scen="..scen)
+        return "no-api"
+    end
+    -- Wait for the game-loaded bank; never force-load it.
+    if OdrText.IsBankReady then
+        local okb, ready = pcall(OdrText.IsBankReady)
+        if not okb or ready == false then
+            RL.SendApLog("AP_MAP: label-smoke soft-fail reason=bank-not-ready mode="..mode.." scen="..scen)
+            return "soft-fail"
+        end
+    else
+        RL.SendApLog("AP_MAP: label-smoke soft-fail reason=no-IsBankReady mode="..mode.." scen="..scen)
+        return "soft-fail"
+    end
+    if k == nil or k == "" then
+        k = "MAP_ICON_ItemCustom0"
+        if OdrText.HasLocalized then
+            for i = 0, 200 do
+                local cand = "MAP_ICON_ItemCustom"..tostring(i)
+                local ok, has = pcall(OdrText.HasLocalized, cand)
+                if ok and has then
+                    k = cand
+                    break
+                end
+            end
+        end
+    end
+    local ok, ret, reason = pcall(function()
+        return OdrText.SetLocalized(k, t)
+    end)
+    if not ok then
+        RL.SendApLog("AP_MAP: label-smoke FAIL key="..tostring(k).." mode="..mode.." scen="..scen.." err="..tostring(ret))
+        return "fail"
+    end
+    -- SetLocalized returns success and a reason.
+    local set_ok = ret
+    local set_reason = reason
+    if set_ok == true then
+        local got = "?"
+        pcall(function()
+            if OdrText.GetLocalized then
+                local v = OdrText.GetLocalized(k)
+                got = tostring(v)
+            end
+        end)
+        RL.SendApLog("AP_MAP: label-smoke ok key="..tostring(k).." text="..tostring(t).." got="..got.." mode="..mode.." scen="..scen)
+        return "ok"
+    end
+    RL.SendApLog("AP_MAP: label-smoke soft-fail key="..tostring(k).." reason="..tostring(set_reason).." mode="..mode.." scen="..scen)
+    return "soft-fail"
+end
+function RL.VisitFillmap(name)
+    if name == nil or name == "" then
+        return false
+    end
+    if not Game.SetMinimapRegionVisited then
+        return false
+    end
+    local ok = pcall(function()
+        Game.SetMinimapRegionVisited(name)
+    end)
+    return ok == true
+end
+function RL.PaintReachableFillmaps(by_scenario)
+    -- Use fillmap actors only in the currently loaded scenario.
+    if type(by_scenario) ~= "table" or not RL.AreaFillmaps then
+        return 0
+    end
+    if not RL.IsInGameForMapPaint or not RL.IsInGameForMapPaint() then
+        return 0
+    end
+    local scen = nil
+    pcall(function() scen = tostring(Game.GetScenarioID()) end)
+    if not scen or not RL.AreaFillmaps[scen] then
+        return 0
+    end
+    local areas = by_scenario[scen]
+    if type(areas) ~= "table" then
+        return 0
+    end
+    local painted = 0
+    local seen = {{}}
+    for _, area in ipairs(areas) do
+        local fms = RL.AreaFillmaps[scen][area]
+        if type(fms) == "table" then
+            for _, fm in ipairs(fms) do
+                if fm and not seen[fm] then
+                    seen[fm] = true
+                    if RL.VisitFillmap(fm) then
+                        painted = painted + 1
+                    end
+                end
+            end
+        end
+    end
+    if painted > 0 then
+        pcall(function()
+            if minimap and minimap.SetProfileDataDirty then
+                minimap.SetProfileDataDirty()
+            end
+        end)
+    end
+    return painted
+end
+""".strip()
+    part_map_tail = """
+function RL.ProbeVisitedCells(scenario)
+    if not scenario or not minimap or not minimap.GetNumVisitedCells then
+        return nil
+    end
+    local ok, n = pcall(function() return minimap.GetNumVisitedCells(scenario) end)
+    if ok then return n end
+    return nil
+end
+function RL.EnsureMapBounds()
+    -- Load only the area bounds table, without repainting fog.
+    if not RL.MapAreaBounds then
+        -- Load ap_reachable_map_cells.lc through the package's file table.
+        -- A loose Lua file is not enough for ODR to load it.
+        local ok, err = pcall(function()
+            Game.DoFile("system/scripts/ap_reachable_map_cells.lua")
+        end)
+        if not ok and not RL.MapBoundsLoadedLogged then
+            RL.SendApLog("AP_MAP: DoFile ap_reachable_map_cells.lua failed: "..tostring(err))
+        end
+    end
+    if RL.MapAreaBounds then
+        if not RL.MapBoundsLoadedLogged then
+            RL.MapBoundsLoadedLogged = true
+            RL.SendApLog("AP_MAP: area bounds table loaded")
+        end
+    else
+        if not RL.MapBoundsLoadedLogged then
+            RL.MapBoundsLoadedLogged = true
+            RL.SendApLog("AP_MAP: area bounds missing (not in TOC/system.pkg or file too large — re-run finalize_mod / install_reachable_map_script)")
+        end
+    end
+end
+function RL.IsInGameForMapPaint()
+    local ok, mode = pcall(Game.GetCurrentGameModeID)
+    return ok and mode == "INGAME"
+end
+function RL.NativeVisitWriterReady()
+    -- Keep the old VisitBounds readiness check for diagnostics only.
+    if OdrMap == nil then
+        return false
+    end
+    if OdrMap.IsVisitWriterReady then
+        local ok, ready = pcall(OdrMap.IsVisitWriterReady)
+        if ok and ready then
+            return true
+        end
+    end
+    return OdrMap.HasVisitWriter == true
+end
+function RL.NativeVisitBoundsSafeReady()
+    -- Paint whole rooms with VisitBoundsSafe and dim flag 4.
+    -- Retry readiness once the map manager and grid exist.
+    if OdrMap == nil or not OdrMap.VisitBoundsSafe then
+        return false
+    end
+    if OdrMap.IsVisitBoundsSafeReady then
+        local ok, ready = pcall(OdrMap.IsVisitBoundsSafeReady)
+        if ok then
+            return ready == true
+        end
+    end
+    return OdrMap.HasVisitBoundsSafe == true
+end
+function RL.CanPaintReachableMap()
+    -- Paint only in INGAME when a safe painting helper is ready.
+    -- Never enable the older VisitBounds path.
+    if not RL.IsInGameForMapPaint() then
+        return false
+    end
+    if not RL.MapAreaBounds and not (OdrMap and OdrMap.SetCellsVisited and RL.MapAreaCells) then
+        return false
+    end
+    if RL.NativeVisitBoundsSafeReady() then
+        return true
+    end
+    if OdrMap and OdrMap.SetCellsVisited and RL.MapAreaCells then
+        return true
+    end
+    return false
+end
+function RL.VisitAreaBounds(scenario, area)
+    if not RL.IsInGameForMapPaint() then
+        return false
+    end
+    local bounds = nil
+    if RL.MapAreaBounds and RL.MapAreaBounds[scenario] then
+        bounds = RL.MapAreaBounds[scenario][area]
+    end
+    if not bounds then
+        return false
+    end
+    local x1,y1,x2,y2 = bounds[1], bounds[2], bounds[3], bounds[4]
+    -- Use VisitBoundsSafe; the old VisitBounds call can crash.
+    -- Check IsVisitBoundsSafeReady before painting.
+    -- Other readiness checks can cause a hardware crash.
+    if OdrMap and OdrMap.VisitBoundsSafe and RL.NativeVisitBoundsSafeReady() then
+        local ret = nil
+        local ok = pcall(function()
+            ret = OdrMap.VisitBoundsSafe(scenario, x1, y1, x2, y2)
+        end)
+        -- A failed call must not permanently disable the helper.
+        if ok and ret then
+            return true
+        end
+        return false
+    end
+    if OdrMap and OdrMap.SetCellsVisited and RL.MapAreaCells and RL.MapAreaCells[scenario] and RL.MapAreaCells[scenario][area] then
+        local ok = pcall(function()
+            OdrMap.SetCellsVisited(scenario, RL.MapAreaCells[scenario][area])
+        end)
+        if ok then
+            return true
+        end
+    end
+    return false
+end
+function RL.CountReachableAreas(by_scenario)
+    local total = 0
+    for _, areas in pairs(by_scenario) do
+        if type(areas) == "table" then
+            total = total + #areas
+        end
+    end
+    return total
+end
+function RL.ApplyReachableMap(by_scenario)
+    if type(by_scenario) ~= "table" then
+        return "bad-arg"
+    end
+    RL.EnsureMapBounds()
+    RL.LastReachable = by_scenario
+    local total = RL.CountReachableAreas(by_scenario)
+    -- Paint reachable rooms only in the current scenario's grid.
+    local scen = nil
+    pcall(function() scen = tostring(Game.GetScenarioID()) end)
+    local painted = 0
+    local failed = 0
+    if not RL.CanPaintReachableMap() then
+        if total > 0 and not RL.MapBinderWarned then
+            RL.MapBinderWarned = true
+            if not RL.IsInGameForMapPaint() then
+                RL.SendApLog("AP_MAP: paint deferred — not INGAME ("..tostring(total).." areas queued)")
+            elseif not RL.MapAreaBounds then
+                RL.SendApLog("AP_MAP: paint skipped — area bounds not loaded ("..tostring(total).." areas queued). Need bounds-only ap_reachable_map_cells.lua in mod romfs.")
+            elseif not (OdrMap and OdrMap.VisitBoundsSafe) then
+                RL.SendApLog("AP_MAP: VisitBoundsSafe missing — need subsdk9 0.4.1-stackvt; fillmaps used when mapped")
+                RL.SendApLog("AP_MAP: tip — while INGAME try /map_smoke_bounds Corpius Arena or /map_smoke (fillmap cutout)")
+            elseif not RL.NativeVisitBoundsSafeReady() then
+                RL.SendApLog("AP_MAP: VisitBoundsSafe not ready — reachability queued ("..tostring(total).." areas). Retry on scenario load.")
+            else
+                RL.SendApLog("AP_MAP: paint gated — queued "..tostring(total).." areas")
+            end
+        end
+    elseif scen and type(by_scenario[scen]) == "table" then
+        for _, area in ipairs(by_scenario[scen]) do
+            if RL.VisitAreaBounds(scen, area) then
+                painted = painted + 1
+            else
+                failed = failed + 1
+            end
+        end
+        if painted > 0 then
+            pcall(function()
+                if minimap and minimap.SetProfileDataDirty then
+                    minimap.SetProfileDataDirty()
+                end
+            end)
+        end
+        -- Do not call VisitBoundsSafeStatus here; it can crash the game.
+        -- Its saved-state probe can fail during map logging.
+        -- Use only IsVisitBoundsSafeReady for this check.
+        local ready = "?"
+        pcall(function()
+            ready = tostring(RL.NativeVisitBoundsSafeReady())
+        end)
+        local sig = tostring(scen).."|"..tostring(painted).."|"..tostring(failed).."|"..ready
+        if sig ~= RL.MapBoundsPaintLastSig then
+            RL.MapBoundsPaintLastSig = sig
+            RL.SendApLog("AP_MAP: reachable bounds paint ok n="..tostring(painted).." fail="..tostring(failed).." ready="..ready)
+        end
+    end
+    -- Keep bright fillmap painting off by default; use dim bounds.
+    local fill_n = 0
+    if RL.MapFillmapPaintEnabled and RL.PaintReachableFillmaps then
+        fill_n = RL.PaintReachableFillmaps(by_scenario) or 0
+    end
+    if fill_n > 0 then
+        if not RL.MapFillmapLogged then
+            RL.MapFillmapLogged = true
+            RL.SendApLog("AP_MAP: fillmap paint ok n="..tostring(fill_n).." (SetMinimapRegionVisited supplement; not VisitBounds/collision_camera)")
+        else
+            RL.SendApLog("AP_MAP: fillmap paint n="..tostring(fill_n))
+        end
+    end
+    if painted == 0 and fill_n == 0 and total > 0 then
+        return "queued"
+    end
+    return tostring(painted + fill_n)
+end
+function RL.ReapplyLastReachable()
+    if RL.LastReachable and next(RL.LastReachable) ~= nil then
+        return RL.ApplyReachableMap(RL.LastReachable)
+    end
+    return "empty"
+end
+-- Do not replace or undo the game's normal map-visit handler.
+-- Keep physically visited cells and add dim AP reveals.
+-- Bright cells come from actual visits or manual tests.
+RL.EnsureMapBounds()
+Game.AddSF(2.0, "RL.EnsureMapBounds", "")
+""".strip()
+    part_map = part_map_head + "\n" + part_map_tail
+
+    chunks = [part0, part1, part2, part3, part_map]
+
+    # Set pickup properties for each scenario.
+    by_scenario: Dict[str, List[Tuple[str, int]]] = {}
+    for index_str, data in actors.items():
+        scenario = data["scenario"]
+        actor = data["actor"]
+        pickup_index = int(index_str)
+        by_scenario.setdefault(scenario, []).append((actor, pickup_index + 1))
+
+    for index_str, data in specials.items():
+        scenario = data["scenario"]
+        key = data["callback_function"]
+        pickup_index = int(index_str)
+        by_scenario.setdefault(scenario, []).append((key, pickup_index + 1))
+
+    for scenario, pairs in by_scenario.items():
+        entries = ",".join(f"{name}={lua_index}" for name, lua_index in pairs)
+        loc_prefix = f"{scenario}_"
+        code = (
+            f'for n,i in pairs{{{entries}}} do '
+            f'RL.Pickups[i]=RandomizerPowerup.PropertyForLocation("{loc_prefix}"..n) end'
+        )
+        chunks.append(code)
+
+    # Keep every send within buffer_size.
+    packed = pack_lua_chunks(chunks, buffer_size)
+    for i, piece in enumerate(packed):
+        if len(piece) > buffer_size:
+            raise ValueError(f"bootstrap chunk {i} length {len(piece)} > buffer {buffer_size}")
+        if not lua_chunk_has_balanced_quotes(piece):
+            raise ValueError(f"bootstrap chunk {i} has unbalanced quotes (packing bug)")
+    return packed
+
+
+def format_receive_pickup_lua(
+    message: str,
+    parent: str,
+    progression_lua: str,
+    received_pickups: int,
+    inventory_index: int,
+) -> str:
+    """Build RL.ReceivePickup(...) matching Randovania's DreadRemoteConnector."""
+    safe_message = message.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        f'RL.ReceivePickup("{safe_message}",{parent},{repr(progression_lua)},'
+        f"{received_pickups},{inventory_index})"
+    )
+
+
+def should_skip_local_inworld_grant(
+    item_player: int,
+    item_location: int,
+    slot: Optional[int],
+    is_solo_world: bool,
+    game_reported_locations: Optional[Set[int]] = None,
+    locations_checked: Optional[Set[int]] = None,
+) -> bool:
+    """Direct-patch local Dread items already apply resources on pickup"""
+    if slot is None:
+        return False
+    if item_player != slot:
+        return False
+    if item_location <= 0:
+        return False
+    if is_solo_world:
+        return True
+    if game_reported_locations and item_location in game_reported_locations:
+        return True
+    if locations_checked and item_location in locations_checked:
+        return True
+    return False
+
+
+def inventory_grant_would_be_noop(
+    amounts: Optional[List[int]],
+    resources: Optional[Union[List[dict], ResourceProgression]],
+    inventory_ids: Optional[List[str]] = None,
+) -> bool:
+    """True when Lua ``HandlePickupResources`` would grant nothing for ``resources``."""
+    if not amounts or not resources:
+        return False
+    stages = _normalize_progression(resources)
+    if not stages:
+        return False
+
+    ids = inventory_ids if inventory_ids is not None else inventory_item_ids()
+    id_to_idx = {iid: i for i, iid in enumerate(ids)}
+    stackable = {
+        "ITEM_WEAPON_MISSILE_MAX",
+        "ITEM_WEAPON_POWER_BOMB_MAX",
+        # IncreaseEnergy raises both maximum and current health.
+        "ITEM_ENERGY_TANKS",
+        # Older builds granted tanks through ITEM_MAX_LIFE.
+        "ITEM_MAX_LIFE",
+        "ITEM_LIFE_SHARDS",
+        "ITEM_NONE",
+        # Always grant single-stage upgrades that can stack.
+        "ITEM_UPGRADE_FLASH_SHIFT_CHAIN",
+        "ITEM_UPGRADE_SPEED_BOOST_CHARGE",
+    }
+
+    # Skip a single-stage grant only when all its resources are owned.
+    if len(stages) == 1:
+        checked = 0
+        for res in stages[0]:
+            if not isinstance(res, dict):
+                return False
+            iid = str(res.get("item_id") or "")
+            try:
+                qty = int(res.get("quantity") or 0)
+            except Exception:
+                qty = 0
+            if not iid or qty <= 0:
+                continue
+            if iid in stackable:
+                return False
+            idx = id_to_idx.get(iid)
+            if idx is None or idx >= len(amounts):
+                return False
+            if int(amounts[idx] or 0) < qty:
+                return False
+            checked += 1
+        return checked > 0
+
+    # Grant the first missing stage of a multi-stage item.
+    saw_stage = False
+    for stage in stages:
+        if not stage:
+            continue
+        first = stage[0]
+        if not isinstance(first, dict):
+            return False
+        iid = str(first.get("item_id") or "")
+        try:
+            qty = int(first.get("quantity") or 0)
+        except Exception:
+            qty = 0
+        if not iid or qty <= 0:
+            continue
+        if iid in stackable:
+            return False
+        idx = id_to_idx.get(iid)
+        if idx is None or idx >= len(amounts):
+            return False
+        if int(amounts[idx] or 0) < qty:
+            return False
+        saw_stage = True
+    return saw_stage
+
+
+def format_skip_local_pickup_lua(received_pickups: int) -> str:
+    """Advance ReceivedPickups without granting or showing a popup."""
+    return (
+        "do "
+        f"local idx = {int(received_pickups)}; "
+        "if RL.ReceivedPickups and idx == RL.ReceivedPickups() then "
+        "RL.PendingPickup = nil; "
+        'Scenario.WriteToPlayerBlackboard("ReceivedPickups","f",idx + 1); '
+        "if RL.SendReceivedPickups then RL.SendReceivedPickups(tostring(idx + 1)) end; "
+        "elseif RL.GetReceivedPickupsAndSend then "
+        'Game.AddSF(0, "RL.GetReceivedPickupsAndSend", "b", false); '
+        "end; "
+        "end"
+    )
+
+
+def _lua_escape_sq(s: str) -> str:
+    """Escape for a single-quoted Lua string literal."""
+    return (
+        str(s)
+        .replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+    )
+
+
+def deathlink_display_message(
+    source: str = "DeathLink",
+    cause: str = "",
+    game: str = "",
+) -> str:
+    """Text for inbound DeathLink tip / popup."""
+    text = (cause or "").strip()
+    if text:
+        return text
+    src = (source or "DeathLink").strip() or "DeathLink"
+    game_name = (game or "").strip()
+    if game_name:
+        return f"{src} died in {game_name}"
+    return f"Received from {src}"
+
+
+# Use joke tips for local deaths and real causes for DeathLink deaths.
+LOCAL_DEATH_JOKE_TIPS: Tuple[Tuple[str, str], ...] = (
+    ("DEATHLINK", "Samus experienced a skill issue"),
+    ("DEATHLINK", "Maybe try dodging next time"),
+    ("DEATHLINK", "This one was all you"),
+    ("DEATHLINK", "Have you tried not dying perhaps?"),
+    ("DEATHLINK", "Your friends must love playing with you")
+)
+
+# Check whether a local death happened outside a reachable area.
+OUT_OF_LOGIC_DEATH_JOKE_TIPS: Tuple[Tuple[str, str], ...] = (
+    ("OUT OF LOGIC", "Out of logic and out of luck"),
+    ("OUT OF LOGIC", "Dawg you dont even belong here"),
+    ("OUT OF LOGIC", "Softlock tourism claimed another victim"),
+    ("OUT OF LOGIC", "That room was not in the spoiler"),
+    ("OUT OF LOGIC", "Dude what were you even doing in there"),
+    ("OUT OF LOGIC", "Did you get lost or something"),
+    ("OUT OF LOGIC", "Dawg how did you even end up in here"),
+    ("OUT OF LOGIC", "Not even close my guy"),
+)
+
+# Add heat, lava, and cold once their death causes can be told apart.
+ENVIRONMENTAL_DEATH_JOKE_TIPS: Tuple[Tuple[str, str], ...] = (
+    ("ENVIRONMENT", "The room itself wanted you dead"),
+    ("ENVIRONMENT", "Suit check failed spectacularly"),
+    ("ENVIRONMENT", "Hazard rooms do not negotiate"),
+    ("ENVIRONMENT", "That was the planet not the enemies"),
+    ("ENVIRONMENT", "Maybe bring the right suit next time"),
+)
+
+# Return scenario;x;y from Lua, or an empty string on failure.
+QUERY_PLAYER_WORLD_POS_LUA = """
+if RL ~= nil and type(RL.LastDeathWorldPos) == "string" and RL.LastDeathWorldPos ~= "" then
+  return RL.LastDeathWorldPos
+end
+if RL ~= nil and type(RL.CapturePlayerWorldPos) == "function" then
+  local ok, pos = pcall(RL.CapturePlayerWorldPos)
+  if ok and type(pos) == "string" and pos ~= "" then
+    return pos
+  end
+end
+local scen = ""
+pcall(function()
+  if Game.GetScenarioID then scen = tostring(Game.GetScenarioID() or "") end
+end)
+if scen == "" or scen == "nil" then
+  pcall(function()
+    if Game.GetCurrentScenarioID then scen = tostring(Game.GetCurrentScenarioID() or "") end
+  end)
+end
+local p = Game.GetPlayer and Game.GetPlayer() or nil
+if p == nil or p.vPos == nil then
+  return ""
+end
+local x = tonumber(p.vPos[1]) or tonumber(p.vPos.x)
+local y = tonumber(p.vPos[2]) or tonumber(p.vPos.y)
+if x == nil or y == nil then
+  return ""
+end
+return tostring(scen) .. ";" .. tostring(x) .. ";" .. tostring(y)
+""".strip()
+
+# Read AP_DEATH logs with an optional scenario and position.
+_AP_DEATH_DIED_RE = re.compile(
+    r"AP_DEATH:\s*Player died(?:\|([^\s|]+))?",
+    re.IGNORECASE,
+)
+
+
+def format_death_tip_text(title: str, body: str) -> str:
+    """OdrTip TITLE||BODY with pipes stripped from body."""
+    clean_title = (
+        str(title or "DEATHLINK")
+        .replace("\r", " ")
+        .replace("\n", " ")
+        .replace("|", "/")
+        .strip()
+        or "DEATHLINK"
+    )
+    clean_body = (
+        str(body or "")
+        .replace("\r", " ")
+        .replace("\n", " ")
+        .replace("|", "/")
+        .strip()
+    )
+    if not clean_body:
+        clean_body = "Received from DeathLink"
+    return f"{{c6}}{clean_title}{{c7}}||{clean_body}{{c0}}"
+
+
+def death_tip_body(tip_text: str) -> str:
+    """Extract BODY from ``{c6}TITLE{c7}||BODY{c0}`` (for no-repeat tracking)."""
+    text = str(tip_text or "")
+    if "||" in text:
+        body = text.split("||", 1)[1]
+    else:
+        body = text
+    return body.replace("{c0}", "").replace("{c7}", "").replace("{c6}", "").strip()
+
+
+def format_deathlink_tip_text(death_message: str) -> str:
+    """OdrTip TITLE||BODY for inbound DeathLink (pipes stripped from body)."""
+    return format_death_tip_text("DEATHLINK", death_message or "Received from DeathLink")
+
+
+def _joke_pool_for_local_death(
+    *,
+    out_of_logic: bool = False,
+    environmental: bool = False,
+) -> Tuple[str, Tuple[Tuple[str, str], ...]]:
+    """Return (kind, pool). OOL > env > generic. DeathLink never uses this."""
+    if out_of_logic:
+        return "ool", OUT_OF_LOGIC_DEATH_JOKE_TIPS
+    if environmental:
+        return "env", ENVIRONMENTAL_DEATH_JOKE_TIPS
+    return "generic", LOCAL_DEATH_JOKE_TIPS
+
+
+def choose_local_death_joke_tip(
+    *,
+    out_of_logic: bool = False,
+    environmental: bool = False,
+    exclude_body: Optional[str] = None,
+) -> Tuple[str, str]:
+    """Pick a local-death joke tip."""
+    kind, pool = _joke_pool_for_local_death(
+        out_of_logic=out_of_logic, environmental=environmental
+    )
+    exclude = (exclude_body or "").strip()
+    candidates = list(pool)
+    if exclude:
+        filtered = [(t, b) for t, b in candidates if b != exclude]
+        if filtered:
+            candidates = filtered
+    title, body = random.choice(candidates)
+    return kind, format_death_tip_text(title, body)
+
+
+def pick_local_death_joke_tip(
+    *,
+    out_of_logic: bool = False,
+    environmental: bool = False,
+    exclude_body: Optional[str] = None,
+) -> str:
+    """Random joke tip for a local (non-DeathLink) death."""
+    _kind, tip = choose_local_death_joke_tip(
+        out_of_logic=out_of_logic,
+        environmental=environmental,
+        exclude_body=exclude_body,
+    )
+    return tip
+
+
+def parse_player_world_pos(response: Optional[Union[str, bytes]]) -> Optional[Tuple[str, float, float]]:
+    """Parse QUERY_PLAYER_WORLD_POS_LUA → (scenario, x, y), or None."""
+    if response is None:
+        return None
+    text = (
+        response.decode("ascii", errors="ignore")
+        if isinstance(response, (bytes, bytearray))
+        else str(response)
+    ).strip()
+    if not text or ";" not in text:
+        return None
+    parts = text.split(";")
+    if len(parts) < 3:
+        return None
+    scen = (parts[0] or "").strip()
+    try:
+        x = float(parts[1])
+        y = float(parts[2])
+    except ValueError:
+        return None
+    if not scen or scen in ("MAINMENU", "TRANSITION", "None", "nil"):
+        return None
+    return scen, x, y
+
+
+def parse_ap_death_world_pos(message: str) -> Optional[Tuple[str, float, float]]:
+    """Parse ``AP_DEATH: Player died|scen;x;y`` from a game log line."""
+    m = _AP_DEATH_DIED_RE.search(str(message or ""))
+    if not m:
+        return None
+    blob = (m.group(1) or "").strip()
+    if not blob:
+        return None
+    return parse_player_world_pos(blob)
+
+
+def format_death_tip_pin_lua(
+    tip_text: str,
+    *,
+    log_tag: str = "death tip pin",
+) -> str:
+    """Pin loading tip slot 0 + count=1 (SetTipText → Count → Order → ArmDeathLinkTip)."""
+    tip_lit = _lua_escape_sq(tip_text)
+    tag_lit = _lua_escape_sq(log_tag)
+    return f"""
+pcall(function()
+  Game.DoFile("system/scripts/ap_loading_tips.lua")
+  if ApLoadingTips and ApLoadingTips.Install then
+    ApLoadingTips.Install()
+  end
+end)
+local tip = '{tip_lit}'
+local tip_ok = false
+if type(OdrTip) == 'table' then
+  if type(OdrTip.SetTipText) == 'function' then
+    local call_ok, set_ok = pcall(OdrTip.SetTipText, 0, tip)
+    tip_ok = call_ok and set_ok and true or false
+  end
+  if type(OdrTip.SetTipCount) == 'function' then pcall(OdrTip.SetTipCount, 1) end
+  if type(OdrTip.SetTipOrder) == 'function' then
+    pcall(OdrTip.SetTipOrder, {{0, 1, 2, 3, 4}})
+  end
+elseif type(ApLoadingTips) == 'table' then
+  if type(ApLoadingTips.SetTipText) == 'function' then
+    local call_ok, set_ok = pcall(ApLoadingTips.SetTipText, 0, tip)
+    tip_ok = call_ok and set_ok and true or false
+  end
+  if type(ApLoadingTips.SetTipCount) == 'function' then pcall(ApLoadingTips.SetTipCount, 1) end
+elseif type(RL) == 'table' then
+  if type(RL.SetTipText) == 'function' then
+    local call_ok, set_ok = pcall(RL.SetTipText, 0, tip)
+    tip_ok = call_ok and set_ok and true or false
+  end
+  if type(RL.SetTipCount) == 'function' then pcall(RL.SetTipCount, 1) end
+end
+if type(ApLoadingTips) == 'table' and type(ApLoadingTips.ArmDeathLinkTip) == 'function' then
+  pcall(ApLoadingTips.ArmDeathLinkTip, tip)
+end
+if RL ~= nil and RL.SendApLog then
+  RL.SendApLog(
+    'AP_TIP: {tag_lit} ok='
+      .. tostring(tip_ok)
+      .. ' slot=0 count=1 (checkpoint load after game-over A)'
+  )
+end
+""".strip()
+
+
+def format_local_death_joke_tip_lua(
+    tip_text: Optional[str] = None,
+    *,
+    kind: str = "generic",
+) -> str:
+    """Pin a local-death joke tip (does not kill / does not set DeathFromRemote)."""
+    tip = tip_text if tip_text is not None else pick_local_death_joke_tip()
+    kind_tag = (kind or "generic").strip().lower() or "generic"
+    body = format_death_tip_pin_lua(
+        tip, log_tag=f"local death joke tip pin kind={kind_tag}"
+    )
+    return f"""
+do
+  local ok, err = pcall(function()
+{body}
+  end)
+  if not ok then
+    Game.LogWarn(0, "AP local death joke tip failed: " .. tostring(err))
+  end
+end
+""".strip()
+
+
+def persist_life_floor(
+    values: list[float | None],
+    *,
+    floor: float = 1.0,
+) -> float | None:
+    """Life value to write on scenario entry and on a save snapshot.
+
+    Return ``floor`` only when every readable copy is below ``floor``.
+    ``None`` means do not write: there is no reading, or at least one copy is
+    already at or above the floor (do not pull a real hit down to 1).
+    """
+    numbers: list[float] = []
+    for value in values:
+        if value is None:
+            continue
+        try:
+            numbers.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if not numbers:
+        return None
+    if max(numbers) >= floor:
+        return None
+    return float(floor)
+
+
+def ap_min_life_install_lua() -> str:
+    """Inline ``ap_min_life.lua`` so a reconnect floors HP before the next boot.
+
+    RemoteLua on 2.1.0 accepts 4096 bytes per statement. One ``pcall(function()``
+    around the whole file is a single statement (~10k) and the connect aborts.
+    Pieces are appended, then ``loadstring`` runs them together so the file's
+    local helpers stay in one chunk.
+    """
+    path = Path(__file__).resolve().parents[1] / "dread_scripts" / "ap_min_life.lua"
+    try:
+        body = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    if "function ApMinLife.Install" not in body:
+        return ""
+    source = (
+        body.rstrip()
+        + "\nif ApMinLife and ApMinLife.Install then ApMinLife.Install() end\n"
+    )
+    eq = "="
+    while f"]{eq}]" in source:
+        eq += "="
+    opener = f"[{eq}["
+    closer = f"]{eq}]"
+    step = 3000
+    lines = ["RL._apMinLifeSrc = nil"]
+    for i in range(0, len(source), step):
+        piece = source[i : i + step]
+        lines.append(
+            "RL._apMinLifeSrc = (RL._apMinLifeSrc or '') .. "
+            + opener
+            + piece
+            + closer
+        )
+    lines.append(
+        "do\n"
+        "  local fn, err = loadstring(RL._apMinLifeSrc or '')\n"
+        "  RL._apMinLifeSrc = nil\n"
+        "  if not fn then\n"
+        "    Game.LogWarn(0, 'AP min-life load failed: ' .. tostring(err))\n"
+        "  else\n"
+        "    local ok, err2 = pcall(fn)\n"
+        "    if not ok then\n"
+        "      Game.LogWarn(0, 'AP min-life install failed: ' .. tostring(err2))\n"
+        "    end\n"
+        "  end\n"
+        "end"
+    )
+    return "\n".join(lines) + "\n"
+
+
+def format_deathlink_kill_lua(
+    source: str = "DeathLink",
+    death_message: Optional[str] = None,
+) -> str:
+    """Force a player death the same way ODR updates energy in randomizer_powerup.lua.
+
+    A save-station / transport cinematic does not die from this 0. ApMinLife
+    floors scenario entry and the save snapshot at 1 HP. Do not floor here,
+    or a normal DeathLink would never kill.
+    """
+    message = death_message if death_message is not None else deathlink_display_message(source)
+    popup_lit = _lua_escape_sq(message)
+    tip_pin = format_death_tip_pin_lua(
+        format_deathlink_tip_text(message),
+        log_tag="deathlink tip pin",
+    )
+    return f"""
+do
+  local ok, err = pcall(function()
+    if RL ~= nil then
+      RL.DeathFromRemote = true
+      RL.DeathSent = true
+      RL.WasAlive = false
+      RL.DeathPending = false
+    end
+    -- Set tip 0 and a count of one before killing the player.
+    -- This makes the death tip ready for Continue and checkpoint loading.
+    -- OdrTip 0.5.9 saves text, count, and order without forcing a refresh.
+    -- Keep the refresh request pending if the tip is not ready yet.
+    -- Do not force the tip during the death sequence.
+    -- Apply it when the checkpoint finishes loading.
+{tip_pin}
+    Game.SetItemAmount(Game.GetPlayerName(), "ITEM_CURRENT_LIFE", 0)
+    local player = Game.GetPlayer()
+    if player ~= nil and player.LIFE ~= nil then
+      player.LIFE.fCurrentLife = 0
+    end
+    local section = Game.GetPlayerBlackboardSectionName()
+    if section ~= nil then
+      Blackboard.SetProp(section, "ITEM_CURRENT_LIFE", "f", 0.0)
+    end
+    Blackboard.SetProp("PLAYER_INVENTORY", "ITEM_CURRENT_LIFE", "f", 0.0)
+    Scenario.QueueAsyncPopup("{popup_lit}", 3.0)
+    -- Skip local death-cause handling for remote DeathLink kills.
+    if RL ~= nil and type(RL.LogDeathCauseProbe) == "function" then
+      pcall(RL.LogDeathCauseProbe, "deathlink")
+    end
+  end)
+  if not ok then
+    Game.LogWarn(0, "AP DeathLink kill failed: " .. tostring(err))
+  end
+end
+""".strip()

@@ -1,9 +1,9 @@
-/* * */
+
 
 "use strict";
 
 function normalizeUriPassword(password) {
-  // WebHost encodes empty passwords as the literal string "None".
+  // WebHost uses the text None for empty passwords.
   if (password == null) return "";
   let text;
   try {
@@ -17,7 +17,7 @@ function normalizeUriPassword(password) {
   return text;
 }
 
-/* * */
+
 function parseConnectServerString(server) {
   const result = {
     server: "",
@@ -46,10 +46,10 @@ function parseConnectServerString(server) {
   } else if (/^http:\/\//i.test(raw)) {
     result.scheme = "http";
   } else if (raw.includes("@")) {
-    // Text Client paste: slot:password@host:port (no scheme).
+    // Accept slot:password@host:port without a URL scheme.
     forUrl = `ws://${raw}`;
   } else {
-    // Plain host:port (or host) — keep path/query stripped.
+    // Keep only the host and port from a plain server address.
     result.server = raw.split("?")[0].split("/")[0];
     return result;
   }
@@ -57,7 +57,7 @@ function parseConnectServerString(server) {
   try {
     const u = new URL(forUrl);
     if (u.hostname) {
-      // Prefer host (hostname:port) without userinfo — safe for --connect.
+      // Use host and port without account details for --connect.
       result.server = u.host;
     }
     const hadUserinfo =
@@ -72,7 +72,7 @@ function parseConnectServerString(server) {
     const room = u.searchParams.get("room");
     if (room) result.room = room;
   } catch (_) {
-    // Last resort: strip scheme and take authority before path.
+    // Remove the URL scheme and path as a last resort.
     let fallback = raw
       .replace(/^wss?:\/\//i, "")
       .replace(/^archipelago:\/\//i, "")
@@ -111,7 +111,7 @@ function hostPortFromServer(server) {
   return parsed.server || "";
 }
 
-/* * */
+
 function buildWsCandidates(server) {
   const parsed = parseConnectServerString(server);
   const hostPort = parsed.server;
@@ -125,7 +125,7 @@ function buildWsCandidates(server) {
   return [`ws://${hostPort}`, `wss://${hostPort}`];
 }
 
-/* * */
+
 function decideConnectAfterRoomInfo(roomPasswordRequired, password) {
   const normalized = normalizeUriPassword(password);
   if (roomPasswordRequired && !normalized) {
@@ -152,7 +152,7 @@ function extractRoomInfo(payload) {
   return null;
 }
 
-/* * */
+
 function resolveWebSocketImpl(explicit) {
   if (explicit) return explicit;
   if (typeof WebSocket !== "undefined") return WebSocket;
@@ -176,7 +176,7 @@ function payloadToText(data) {
 }
 
 function attachSocketHandlers(ws, { onMessage, onError, onClose }) {
-  // `ws` package: EventEmitter (.on). Browsers / undici: onmessage properties.
+  // Use .on for ws; use onmessage for browser WebSockets.
   if (typeof ws.on === "function") {
     ws.on("message", (data) => onMessage({ data: payloadToText(data) }));
     ws.on("error", (err) =>
@@ -195,7 +195,7 @@ function attachSocketHandlers(ws, { onMessage, onError, onClose }) {
   ws.onclose = onClose;
 }
 
-/* * */
+
 function probeRoomInfo(server, opts = {}) {
   const timeoutMs = opts.timeoutMs != null ? opts.timeoutMs : 8000;
   const WS = resolveWebSocketImpl(opts.WebSocketImpl);
@@ -224,7 +224,7 @@ function probeRoomInfo(server, opts = {}) {
         try {
           if (ws && (ws.readyState === undefined || ws.readyState <= 1)) ws.close();
         } catch (_) {
-          /* ignore */
+          /* Ignore this optional close error. */
         }
         resolve(result);
       };

@@ -1,4 +1,4 @@
-# Python
+# Python cache files.
 __pycache__/
 *.py[cod]
 *$py.class
@@ -10,7 +10,7 @@ __pycache__/
 dist/
 build/
 
-# Virtualenvs (Hub / client)
+# Local Python environments.
 _metroid_bread_venv/
 **/_metroid_bread_venv/
 _metroid_dread_venv/
@@ -18,7 +18,7 @@ _metroid_dread_venv/
 **/.venv/
 venv/
 
-# npm / Electron (Hub installs these locally — never commit)
+# The Hub installs npm and Electron files locally.
 node_modules/
 **/node_modules/
 dread-client-app/node_modules/
@@ -29,9 +29,9 @@ dread-client-app/.vite/
 .vite/
 .cache/
 
-# Hub Setup Wizard portable Node/Python — must live under Archipelago's
-# custom_worlds/, NOT inside this world repo. Nesting them here bloated
-# packs to ~7k files / ~80MB+ (node.exe, CPython, .pdbs, site-packages).
+# Store portable Node and Python in Archipelago's custom_worlds folder.
+# Do not put them in this world folder.
+# Including them added about 7,000 files and over 80 MB.
 custom_worlds/
 **/_metroid_bread_runtime/
 **/_metroid_dread_runtime/
@@ -39,14 +39,14 @@ custom_worlds/
 **/tools/python-*/
 *.pdb
 
-# Local runtime configs / logs / outputs
+# Local settings, logs, and output files.
 *.log
 logs/
 output/
 dread_client_ui_config.json
 dread_direct_patch_config.json
 
-# Editor / OS
+# Editor and operating system files.
 .DS_Store
 Thumbs.db
 .idea/
@@ -54,15 +54,15 @@ Thumbs.db
 *.swp
 *~
 
-# Large binary artifacts that are rebuilt locally (keep intentional assets tracked)
-# icons.bctex / PNGs under assets/ ARE tracked on purpose.
+# Ignore large files that local builds recreate.
+# Keep icons.bctex and the PNG files in assets.
 /docs
 
-# Local unit tests (not shipped in apworld / not committed)
-/local_tests/
-CAUSE_OF_DEATH_MATRIX.md
+# Local tests are not included in the apworld.
+/test/
+docs/CAUSE_OF_DEATH_MATRIX.md
 
-# ExeFS deploy backups (keep live subsdk9 only)
+# Ignore ExeFS backups; keep the live subsdk9 file.
 exlaunch/deploy/subsdk9.bak*
 exlaunch/deploy/*.bak*
 **/subsdk9.bak*

@@ -10,7 +10,7 @@ from .Items import ItemData
 
 
 
-# RDV event resource name -> AP event item name
+# Map RDV event names to AP event items.
 
 EVENT_RESOURCE_TO_ITEM: Dict[str, str] = {
 
@@ -386,7 +386,7 @@ EVENT_RESOURCE_TO_ITEM: Dict[str, str] = {
 
 
 
-# Event items (id=None — not networked)
+# Event items have no network ID.
 
 event_item_table: Dict[str, ItemData] = {
 
@@ -766,7 +766,7 @@ class EventLocationData(NamedTuple):
 
     name: str
 
-    region: str  # AP area region key: "GameRegion/Area"
+    region: str  # Use GameRegion/Area as the region key.
 
     game_region: str
 
@@ -1250,7 +1250,7 @@ event_locations: List[EventLocationData] = [
 
 
 
-# (game_region, area, node) -> event location name
+# Map a region, area, and node to an event location.
 
 EVENT_NODE_TO_LOCATION: Dict[Tuple[str, str, str], str] = {
 

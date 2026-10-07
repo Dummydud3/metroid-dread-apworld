@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the Metroid Bread Client Hub (YAML editor + client / patcher)
+# Start the Hub's YAML editor, client, and patcher.
 set -euo pipefail
 cd "$(dirname "$0")"
 export SKIP_REQUIREMENTS_UPDATE=1
@@ -9,14 +9,14 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-ENSURE_SCRIPT="$(cd .. && pwd)/ensure_client_deps.py"
+ENSURE_SCRIPT="$(cd .. && pwd)/hub/ensure_client_deps.py"
 WORLD_DIR="$(cd .. && pwd)"
 VENV_DIR="$WORLD_DIR/_metroid_bread_venv"
 if [[ -f "$ENSURE_SCRIPT" ]]; then
   echo "Checking Python client dependencies..."
   echo "Linux: packages install into local venv: $VENV_DIR"
   runner=""
-  # Prefer an existing Hub venv if present.
+  # Use the Hub's existing Python environment when available.
   if [[ -x "$VENV_DIR/bin/python" ]]; then
     runner="$VENV_DIR/bin/python"
     echo "Using venv Python: $runner"
@@ -50,10 +50,10 @@ if [[ -f "$ENSURE_SCRIPT" ]]; then
   echo
 fi
 
-# Electron postinstall must run (downloads platform binary).
+# Allow Electron's install script to download its program files.
 unset ELECTRON_SKIP_BINARY_DOWNLOAD || true
 export npm_config_ignore_scripts=false
-# Ensure project .npmrc allows Electron postinstall (create or repair).
+# Create or repair .npmrc to allow Electron's install script.
 if [[ ! -f .npmrc ]] || grep -qiE 'ignore-scripts\s*=\s*true' .npmrc 2>/dev/null; then
   printf '%s\n' 'ignore-scripts=false' 'dangerously-allow-all-scripts=true' > .npmrc
 else
@@ -72,7 +72,7 @@ if [[ ! -d node_modules/adm-zip ]]; then
   npm install --no-ignore-scripts
 fi
 
-# Auto-repair incomplete Electron binary install.
+# Repair missing Electron program files automatically.
 need_repair=0
 if [[ ! -f node_modules/electron/path.txt ]]; then
   need_repair=1

@@ -14,9 +14,9 @@ from .Events import event_locations
 
 from .Locations import location_table
 
-from . import bosses
+from worlds.metroid_bread.logic import bosses
 
-from . import victory_clearance
+from worlds.metroid_bread.logic import victory_clearance
 
 
 
@@ -64,13 +64,13 @@ def set_rules(multiworld: MultiWorld, player: int, options: MetroidBreadOptions)
 
 
 
-    # Raven Beak is only in logic once enough clearable pickups (full-inventory
+    # Open Raven Beak only after enough checks are reachable.
 
-    # reachability from this start) are also in logic. Defeat Raven Beak uses
+    # Count checks reachable from this start with a full inventory.
 
-    # >=90%; Game Goal 100% requires every clearable check. All Bosses keeps
+    # Raven Beak needs 90%; 100% needs every reachable check.
 
-    # 90% and also requires every non-RB boss node in logic.
+    # All Bosses also needs every other boss node reachable.
 
     clearable_nodes = victory_clearance.clearable_pickup_nodes(world)
 
@@ -108,11 +108,11 @@ def set_rules(multiworld: MultiWorld, player: int, options: MetroidBreadOptions)
 
 
 
-    # Win: defeat Raven Beak. For 100%, also require every real check in the
+    # Winning normally means defeating Raven Beak.
 
-    # active pool (non-clearable checks are stripped for that goal). For All
+    # For 100%, also finish every active AP check.
 
-    # Bosses, require every boss event (+ Z-57 pickup) as well.
+    # For All Bosses, also finish all boss events and the Z-57 pickup.
 
     if options.game_goal == GameGoal.option_one_hundred_percent:
 

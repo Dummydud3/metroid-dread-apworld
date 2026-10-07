@@ -1,10 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const https = require("https");
-const http = require("http");
 const { spawn, spawnSync } = require("child_process");
-const AdmZip = require("adm-zip");
 const {
   normalizeUriPassword,
   parseConnectServerString,
@@ -16,11 +13,11 @@ const {
   explainClientExit,
 } = require("./client_exit");
 
-// Hub lives at worlds/metroid_bread/dread-client-app — world package is parent.
+// The world folder is the parent of the Hub folder.
 const WORLD_DIR = path.resolve(__dirname, "..");
 const AP_CORE_DIRNAME = "ap_core";
 
-/** Strip UTF-8 BOM (`\uFEFF` / EF BB BF) so JSON.parse accepts Windows-saved files. */
+/* Remove the UTF-8 file marker so JSON.parse can read Windows-saved files. */
 function stripBom(text) {
   return String(text ?? "").replace(/^\uFEFF/, "");
 }
@@ -29,7 +26,7 @@ function readJsonFile(filePath) {
   return JSON.parse(stripBom(fs.readFileSync(filePath, "utf8")));
 }
 
-/** UTF-8 without BOM (Node's default `utf8` write). */
+/* Write UTF-8 JSON without a file marker. */
 function writeJsonFile(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
 }
@@ -81,7 +78,7 @@ function climbForFrozenInstall(startDir) {
 }
 
 function inferApRootFromWorldConfig(worldDir) {
-  // Runtime extracts under ProgramData have no CommonClient nearby; saved Hub
+  // Use saved Hub settings when the extracted files have no nearby AP core.
   try {
     const cfgPath = path.join(worldDir, "dread_client_ui_config.json");
     if (!fs.existsSync(cfgPath)) return "";
@@ -93,7 +90,7 @@ function inferApRootFromWorldConfig(worldDir) {
       if (found) return found;
     }
   } catch (_) {
-    /* ignore */
+    /* Continue if this path cannot be read. */
   }
   return "";
 }
@@ -103,7 +100,7 @@ function bundledApCore(worldDir) {
   return hasCommonClient(core) ? core : "";
 }
 
-/* * */
+
 function resolveInstallCandidate(worldDir, { prefer = "" } = {}) {
   const envInstall = (process.env.DREAD_HUB_INSTALL_ROOT || "").trim();
   if (envInstall && fs.existsSync(envInstall)) {
@@ -121,7 +118,7 @@ function resolveInstallCandidate(worldDir, { prefer = "" } = {}) {
   return "";
 }
 
-/* * */
+
 function resolveApRoots(worldDir) {
   const core = bundledApCore(worldDir);
   const envRoot = (
@@ -136,7 +133,7 @@ function resolveApRoots(worldDir) {
       const install = resolveInstallCandidate(worldDir) || resolved;
       return { importRoot: resolved, installRoot: install };
     }
-    // Explicit non-ap_core AP root: still prefer bundled ap_core for imports
+    // Use bundled ap_core for imports even when an AP root was provided.
     if (core) {
       return { importRoot: core, installRoot: resolved };
     }
@@ -154,7 +151,7 @@ function resolveApRoots(worldDir) {
     return { importRoot: install, installRoot: install };
   }
 
-  // Conventional checkout: worlds/metroid_bread → repo root (may lack CommonClient
+  // Look for the AP root above worlds/metroid_bread.
   const legacy = path.resolve(worldDir, "..", "..");
   const frozen = climbForFrozenInstall(worldDir);
   return {
@@ -166,8 +163,8 @@ function resolveApRoots(worldDir) {
 const { importRoot: AP_ROOT, installRoot: INSTALL_ROOT } = resolveApRoots(WORLD_DIR);
 const CONFIG_PATH = path.join(WORLD_DIR, "dread_client_ui_config.json");
 const PATCH_CONFIG_PATH = path.join(WORLD_DIR, "dread_direct_patch_config.json");
-const CLIENT_SCRIPT = path.join(WORLD_DIR, "MetroidBreadClient.py");
-const PATCHER_SCRIPT = path.join(WORLD_DIR, "dread_direct_patch.py");
+const CLIENT_SCRIPT = path.join(WORLD_DIR, "client", "MetroidBreadClient.py");
+const PATCHER_SCRIPT = path.join(WORLD_DIR, "patcher", "dread_direct_patch.py");
 const CATALOG_PATH = path.join(__dirname, "tracker", "catalog.json");
 const DEFAULT_OUTPUT_SCAN = path.join(INSTALL_ROOT, "output");
 const EXTRACT_ROOT = path.join(INSTALL_ROOT, "output", "_patcher_extract");
@@ -207,7 +204,7 @@ const DEFAULT_CONFIG = {
   clean_output: false,
   yaml_path: path.join(PLAYERS_DIR, "dread_player.yaml"),
   hub_stage: "connect",
-  // Hub Log panel: off = AP/normal only; on = full debug (@@APLOG@@debug@@…).
+  // Show debug messages only when debug logs are enabled.
   debug_logs: false,
 };
 
@@ -229,7 +226,7 @@ function pythonSpawnEnv(extra = {}) {
     DREAD_HUB_AP_ROOT: AP_ROOT,
     DREAD_HUB_INSTALL_ROOT: INSTALL_ROOT,
     DREAD_HUB_WORLD_DIR: WORLD_DIR,
-    // AP import root must precede WORLD_DIR — world Options.py would shadow AP Options.
+    // Put the AP import path first so world Options.py cannot hide AP Options.py.
     PYTHONPATH: [AP_ROOT, WORLD_DIR, process.env.PYTHONPATH || ""]
       .filter(Boolean)
       .join(path.delimiter),
@@ -243,7 +240,6 @@ let visualizerWindow = null;
 let clientProcess = null;
 let patchProcess = null;
 let latestStatus = null;
-let preparedSeed = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -286,7 +282,7 @@ function loadPatchDefaults() {
 }
 
 function applyLauncherPrefill(cfg) {
-  // Archipelago Launcher / hub_launcher.py can pass connect fields via env.
+  // Read connection settings passed by the launcher.
   const server = process.env.DREAD_HUB_CONNECT;
   const slot = process.env.DREAD_HUB_SLOT;
   const password = process.env.DREAD_HUB_PASSWORD;
@@ -305,7 +301,7 @@ function applyLauncherPrefill(cfg) {
     cfg.slot = String(slot);
   }
   if (password != null) {
-    // Env always present as string when set; "" / None → clear stored password.
+    // Clear the saved password for an empty value or None.
     cfg.password = normalizeUriPassword(password);
   }
   if (dreadIp) {
@@ -341,7 +337,7 @@ function applyLauncherPrefill(cfg) {
         cfg.game = gameParam;
       }
     } catch (err) {
-      // ignore malformed URI; user can still type connect fields
+      // Leave invalid connection text for the user to correct.
     }
     cfg.auto_connect_ap = true;
   }
@@ -352,7 +348,7 @@ function applyLauncherPrefill(cfg) {
 }
 
 function migratePlaceholderDreadIp(cfg) {
-  // Old sample/placeholder game IP; leave any other custom IP alone.
+  // Replace the old example IP; keep other custom IPs.
   if (String(cfg.dread_ip || "").trim() !== "1.2.3.4") {
     return false;
   }
@@ -438,7 +434,7 @@ function saveConfig(partial) {
     closeVisualizerWindow();
   }
 
-  // Keep patcher config in sync for CLI / legacy tools.
+  // Share patcher settings with the older command-line tools.
   try {
     const patchDefaults = loadPatchDefaults();
     const patchCfg = {
@@ -453,7 +449,7 @@ function saveConfig(partial) {
       clean_output: Boolean(cfg.clean_output),
       freesink: Boolean(cfg.freesink),
       games_folder: cfg.games_folder || DEFAULT_OUTPUT_SCAN,
-      // Frozen Hub / apworld ship exlaunch/deploy next to the world package.
+      // Use the exlaunch/deploy folder included with the world.
       custom_exlaunch_deploy:
         patchDefaults.custom_exlaunch_deploy || "exlaunch/deploy",
     };
@@ -465,8 +461,8 @@ function saveConfig(partial) {
 }
 
 let cachedPythonLauncher = null;
-const ENSURE_CLIENT_DEPS_SCRIPT = path.join(WORLD_DIR, "ensure_client_deps.py");
-const APWORLD_UPDATER_SCRIPT = path.join(WORLD_DIR, "apworld_updater.py");
+const ENSURE_CLIENT_DEPS_SCRIPT = path.join(WORLD_DIR, "hub", "ensure_client_deps.py");
+const APWORLD_UPDATER_SCRIPT = path.join(WORLD_DIR, "hub", "apworld_updater.py");
 const APWORLD_RELEASES_URL =
   "https://github.com/Dummydud3/metroid-dread-apworld/releases";
 
@@ -488,7 +484,7 @@ function findPythonLauncher() {
     }).status === 0;
 
   if (process.platform !== "win32") {
-    // Linux Hub client deps live in a local venv (never systemwide pip).
+    // Install Linux client packages in the Hub's own Python environment.
     const venvPython = path.join(WORLD_DIR, "_metroid_bread_venv", "bin", "python");
     if (process.platform === "linux" && fs.existsSync(venvPython)) {
       const venvLauncher = { cmd: venvPython, prefixArgs: [] };
@@ -498,7 +494,7 @@ function findPythonLauncher() {
       }
     }
 
-    // Managed portable CPython — prefer one that already has client packages.
+    // Prefer portable Python that already has the client packages.
     const dreadHubPython = (process.env.DREAD_HUB_PYTHON || "").trim();
     if (dreadHubPython && fs.existsSync(dreadHubPython)) {
       const managed = { cmd: dreadHubPython, prefixArgs: [] };
@@ -528,7 +524,7 @@ function findPythonLauncher() {
     return cachedPythonLauncher;
   }
 
-  // Windows Hub client deps install into %LOCALAPPDATA%\MetroidBread\venv.
+  // Store the Windows client environment in LOCALAPPDATA/MetroidBread/venv.
   const winVenvPython = path.join(
     process.env.LOCALAPPDATA || "",
     "MetroidBread",
@@ -547,7 +543,7 @@ function findPythonLauncher() {
   const dreadHubPython = (process.env.DREAD_HUB_PYTHON || "").trim();
   if (dreadHubPython && fs.existsSync(dreadHubPython)) {
     const managed = { cmd: dreadHubPython, prefixArgs: [] };
-    // Prefer packaged managed Python; allow bare version match only as bootstrap
+    // Use managed Python first; use a bare version only to set up its packages.
     if (
       probeCandidate(managed, hasWebsockets) ||
       probeCandidate(managed, hasOdr) ||
@@ -558,7 +554,7 @@ function findPythonLauncher() {
     }
   }
 
-  // Prefer an interpreter that already has client deps over a bare version match.
+  // Prefer Python with client packages already installed.
   const candidates = [
     { cmd: "py", prefixArgs: ["-3.11"] },
     { cmd: "py", prefixArgs: ["-3.12"] },
@@ -571,7 +567,7 @@ function findPythonLauncher() {
     candidates.find((c) => probeCandidate(c, hasOdr)) ||
     candidates.find((c) => probeCandidate(c, hasPathspec)) ||
     candidates.find((c) => probeCandidate(c, versionOkShared));
-  // Do NOT fall back to py -3.11 when nothing probes clean — that yields a bare
+  // Report missing Python rather than using an untested py -3.11 fallback.
   if (!found) {
     return null;
   }
@@ -579,7 +575,7 @@ function findPythonLauncher() {
   return cachedPythonLauncher;
 }
 
-/** Parse HUB_CLIENT_PYTHON=... from ensure_client_deps.py stdout. */
+/* Read HUB_CLIENT_PYTHON from the dependency helper's output. */
 function parseHubClientPython(text) {
   const m = String(text || "").match(/^HUB_CLIENT_PYTHON=(.+)$/m);
   if (!m) return null;
@@ -588,7 +584,7 @@ function parseHubClientPython(text) {
   return { cmd: p, prefixArgs: [] };
 }
 
-/* * */
+
 function ensureClientDeps(launcher) {
   if (!launcher) {
     return { ok: false, error: pythonMissingError() };
@@ -644,7 +640,7 @@ function ensureClientDeps(launcher) {
         `Failed to install Python client packages (exit ${result.status}).`,
     };
   }
-  // Linux/Windows: ensure may have just created/refreshed the Hub venv —
+  // Check again after the helper creates or updates the Python environment.
   if (process.platform === "linux" || process.platform === "win32") {
     cachedPythonLauncher = null;
   }
@@ -658,14 +654,14 @@ function ensureClientDeps(launcher) {
 function findRyujinxPath() {
   const home = process.env.USERPROFILE || "";
   const candidates = [
-    // Prefer the newer portable build when present.
+    // Use the newer portable Ryujinx build when available.
     path.join(home, "Downloads", "ryujinx-1.2.78-win_x64", "publish", "Ryujinx.exe"),
     path.join(home, "Desktop", "publish", "Ryujinx.exe"),
     path.join(process.env.LOCALAPPDATA || "", "Ryujinx", "Ryujinx.exe"),
     path.join(process.env.ProgramFiles || "", "Ryujinx", "Ryujinx.exe"),
     "C:\\Ryujinx\\Ryujinx.exe",
   ];
-  // Also accept any Downloads\ryujinx-*\publish\Ryujinx.exe (newest first).
+  // Also check downloaded Ryujinx publish folders, newest first.
   try {
     const downloads = path.join(home, "Downloads");
     if (fs.existsSync(downloads)) {
@@ -684,7 +680,7 @@ function findRyujinxPath() {
       candidates.unshift(...found);
     }
   } catch (_) {
-    /* ignore */
+    /* Skip paths that cannot be read. */
   }
   const seen = new Set();
   for (const p of candidates) {
@@ -736,7 +732,7 @@ function findDreadRomPath(cfg) {
         return path.join(dir, ent.name);
       }
     } catch {
-      /* skip */
+      /* Try the next path. */
     }
   }
   return "";
@@ -904,12 +900,12 @@ const HUB_LOG_FILENAME = "metroid_bread_hub.log";
 const HUB_LOG_MAX_BYTES = 8 * 1024 * 1024;
 
 function getLogsDir() {
-  // Matches Utils.user_path("logs") when Hub sets DREAD_HUB_INSTALL_ROOT /
+  // Use the same log folder as Utils.user_path.
   const dir = path.join(INSTALL_ROOT, "logs");
   try {
     fs.mkdirSync(dir, { recursive: true });
   } catch (_) {
-    /* ignore — openPath still attempts the path */
+    /* Still try to open the path if setup failed. */
   }
   return dir;
 }
@@ -930,20 +926,20 @@ function appendHubLogFile(text) {
         try {
           fs.unlinkSync(bak);
         } catch (_) {
-          /* ignore */
+          /* Skip unreadable log files. */
         }
         try {
           fs.renameSync(filePath, bak);
         } catch (_) {
-          /* ignore */
+          /* Skip missing or unreadable paths. */
         }
       }
     } catch (_) {
-      /* missing file — fine */
+      /* A missing log file is fine. */
     }
     fs.appendFileSync(filePath, cleaned, "utf8");
   } catch (_) {
-    /* never block the UI on log IO */
+    /* Do not block the UI if writing the log fails. */
   }
 }
 
@@ -954,7 +950,7 @@ function appendLog(stream, text, level = "normal") {
     text: payloadText,
     level: level === "debug" ? "debug" : "normal",
   });
-  // Always tee Hub/main-process lines to disk (including debug) so connect
+  // Save all Hub log lines to disk, including debug messages.
   const stamp = new Date().toISOString().replace(/\..+$/, "");
   const tag = level === "debug" ? "DEBUG" : stream === "stderr" ? "STDERR" : "INFO";
   appendHubLogFile(`[${stamp}] ${tag} ${payloadText.replace(/\r?\n$/, "")}\n`);
@@ -1025,16 +1021,15 @@ function stopClient() {
       clientProcess.stdin.write("/exit\n");
     }
   } catch (_) {
-    /* ignore */
+    /* Continue without this optional value. */
   }
   try {
     clientProcess.kill();
   } catch (_) {
-    /* ignore */
+    /* Continue if this setting cannot be saved. */
   }
   clientProcess = null;
   latestStatus = null;
-  preparedSeed = null;
   for (const [rid, waiter] of explainWaiters.entries()) {
     clearTimeout(waiter.timeout);
     waiter.resolve({
@@ -1062,19 +1057,19 @@ function normalizeConnectOpts(opts) {
   let dreadIp = String(opts.dreadIp || "127.0.0.1").trim() || "127.0.0.1";
   let roomId = "";
 
-  // Room page URL: https://archipelago.gg/room/<id>
+  // Accept an Archipelago room page URL.
   const roomMatch = server.match(/\/room\/([A-Za-z0-9_-]+)/i);
   if (roomMatch) {
     roomId = roomMatch[1];
   }
 
-  // Text Client / launcher strings: optional scheme + slot:password@host:port.
+  // Accept optional scheme and slot:password@host:port text.
   const parsed = parseConnectServerString(server);
   if (parsed.server) {
     server = parsed.server;
   }
   if (parsed.hasUserinfo) {
-    // Prefer userinfo from the server string over separate fields.
+    // Use slot and password details from the server text first.
     if (parsed.slot) slot = parsed.slot;
     password = parsed.password || "";
   }
@@ -1082,7 +1077,7 @@ function normalizeConnectOpts(opts) {
     roomId = parsed.room;
   }
 
-  // Strip any leftover scheme/path so --connect matches Text Client / CommonClient.
+  // Remove leftover URL parts before passing --connect.
   server = String(server || "")
     .replace(/^wss?:\/\//i, "")
     .replace(/^archipelago:\/\//i, "")
@@ -1167,7 +1162,7 @@ function startClient(opts) {
     appendLog("stdout", `[app] ${deps.message.replace(/\n/g, "\n[app] ")}\n`);
   }
 
-  // Must launch the same interpreter ensure_client_deps just provisioned
+  // Use the Python environment created by ensure_client_deps.
   const launchPy = deps.python || findPythonLauncher() || launcher;
   const { cmd, prefixArgs } = launchPy;
   appendLog("stdout", `[app] Starting client with ${formatPythonCmd(launchPy)}\n`);
@@ -1186,7 +1181,7 @@ function startClient(opts) {
   if (normalized.password) {
     args.push("--password", normalized.password);
   }
-  // Hub connects AP first; game attach happens after patch / launch.
+  // Connect to AP before attaching to the game.
   if (normalized.autoConnectDread) {
     args.push("--auto-dread");
   } else {
@@ -1196,7 +1191,7 @@ function startClient(opts) {
   let stderrBuf = "";
   try {
     const spawnEnv = pythonSpawnEnv();
-    // Keep nested Hub tools pointed at the provisioned interpreter.
+    // Use the same installed Python for nested Hub tools.
     if (!prefixArgs.length) {
       spawnEnv.DREAD_HUB_PYTHON = cmd;
     }
@@ -1248,7 +1243,7 @@ function startClient(opts) {
     appendLog("stdout", `\n[app] Client exited (code=${code}, signal=${signal || "none"})\n`);
     const crashHint = explainClientExit(code, stderrBuf);
     if (crashHint && stderrBuf.trim()) {
-      // Ensure the UI status line is not the only place stderr is visible.
+      // Show errors separately from UI status messages.
       appendLog("stdout", `[app] ${crashHint.replace(/\n/g, "\n[app] ")}\n`);
     }
     latestStatus = {
@@ -1292,451 +1287,6 @@ function sendCommand(text, opts = {}) {
   return { ok: true };
 }
 
-/* ---------- Spoiler / seed discovery (from direct patcher) ---------- */
-
-function creationMs(stat) {
-  const birth = stat.birthtimeMs;
-  if (Number.isFinite(birth) && birth > 0) return birth;
-  if (Number.isFinite(stat.ctimeMs) && stat.ctimeMs > 0) return stat.ctimeMs;
-  return stat.mtimeMs || 0;
-}
-
-function listSpoilerEntriesInZip(zipPath) {
-  const zip = new AdmZip(zipPath);
-  return zip
-    .getEntries()
-    .filter((e) => !e.isDirectory && /_Spoiler\.txt$/i.test(path.basename(e.entryName)))
-    .sort((a, b) => {
-      const da = a.entryName.split(/[/\\]/).length;
-      const db = b.entryName.split(/[/\\]/).length;
-      return da - db || a.entryName.localeCompare(b.entryName);
-    });
-}
-
-function extractSpoilerFromZip(zipPath) {
-  if (!zipPath || !fs.existsSync(zipPath)) {
-    return { ok: false, error: `Zip not found:\n${zipPath}` };
-  }
-  let entries;
-  try {
-    entries = listSpoilerEntriesInZip(zipPath);
-  } catch (err) {
-    return { ok: false, error: `Could not read zip:\n${err.message || err}` };
-  }
-  if (!entries.length) {
-    return { ok: false, error: `No *_Spoiler.txt inside zip:\n${zipPath}` };
-  }
-
-  const entry = entries[0];
-  const stem = path.basename(zipPath, path.extname(zipPath));
-  const outDir = path.join(EXTRACT_ROOT, stem);
-  fs.mkdirSync(outDir, { recursive: true });
-
-  const spoilerName = path.basename(entry.entryName);
-  const spoilerPath = path.join(outDir, spoilerName);
-  fs.writeFileSync(spoilerPath, entry.getData());
-
-  let zipStat = null;
-  try {
-    zipStat = fs.statSync(zipPath);
-  } catch {
-    zipStat = null;
-  }
-
-  return {
-    ok: true,
-    spoilerPath,
-    zipPath,
-    gameFolder: zipPath,
-    gameName: stem,
-    source: "zip",
-    createdAt: zipStat ? creationMs(zipStat) : Date.now(),
-    createdAtLocal: zipStat
-      ? new Date(creationMs(zipStat)).toLocaleString()
-      : new Date().toLocaleString(),
-  };
-}
-
-function isSoloDreadSpoiler(spoilerPath) {
-  if (!spoilerPath || !fs.existsSync(spoilerPath)) return false;
-  const text = fs.readFileSync(spoilerPath, "utf8");
-  let sawPlayerHeader = false;
-  let sawSoloGame = false;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (line === "Locations:") break;
-    if (/^Player \d+:\s*/.test(line)) {
-      sawPlayerHeader = true;
-      break;
-    }
-    if (line.startsWith("Game:") && line.slice(line.indexOf(":") + 1).trim() === "Metroid Bread") {
-      sawSoloGame = true;
-    }
-  }
-  return sawSoloGame && !sawPlayerHeader;
-}
-
-function detectDreadPlayers(spoilerPath) {
-  if (!spoilerPath || !fs.existsSync(spoilerPath)) return [];
-  if (isSoloDreadSpoiler(spoilerPath)) {
-    return ["(solo Metroid Bread)"];
-  }
-  const text = fs.readFileSync(spoilerPath, "utf8");
-  const players = [];
-  let current = null;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (line === "Locations:") break;
-    const pm = line.match(/^Player \d+:\s*(.+)$/);
-    if (pm) {
-      current = pm[1].trim();
-      continue;
-    }
-    if (current != null && line.startsWith("Game:")) {
-      const game = line.slice(line.indexOf(":") + 1).trim();
-      if (game === "Metroid Bread") players.push(current);
-      current = null;
-    }
-  }
-  return players;
-}
-
-function spoilerMentionsSeed(spoilerPath, seedName) {
-  if (!seedName || !spoilerPath || !fs.existsSync(spoilerPath)) return false;
-  try {
-    const head = fs.readFileSync(spoilerPath, "utf8").slice(0, 4000);
-    return head.includes(seedName);
-  } catch {
-    return false;
-  }
-}
-
-function walkSpoilers(rootDir, maxDepth = 8) {
-  const results = [];
-  if (!rootDir || !fs.existsSync(rootDir)) return results;
-  const rootResolved = path.resolve(rootDir);
-
-  function topLevelBatch(filePath) {
-    const rel = path.relative(rootResolved, filePath);
-    const parts = rel.split(path.sep).filter(Boolean);
-    if (!parts.length) return rootResolved;
-    return path.join(rootResolved, parts[0]);
-  }
-
-  function walk(dir, depth) {
-    if (depth > maxDepth) return;
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const ent of entries) {
-      const full = path.join(dir, ent.name);
-      if (ent.isDirectory()) {
-        if (
-          ent.name === "node_modules" ||
-          ent.name === "_patcher_extract" ||
-          ent.name.startsWith(".")
-        ) {
-          continue;
-        }
-        walk(full, depth + 1);
-      } else if (ent.isFile() && /_Spoiler\.txt$/i.test(ent.name)) {
-        try {
-          const spoilerStat = fs.statSync(full);
-          const batchFolder = topLevelBatch(full);
-          const batchStat = fs.statSync(batchFolder);
-          results.push({
-            spoilerPath: full,
-            gameFolder: batchFolder,
-            gameName: path.basename(batchFolder),
-            createdAt: creationMs(batchStat),
-            spoilerCreatedAt: creationMs(spoilerStat),
-            source: "folder",
-            key: batchFolder,
-          });
-        } catch {
-          /* skip */
-        }
-      } else if (ent.isFile() && /\.zip$/i.test(ent.name)) {
-        try {
-          const zipStat = fs.statSync(full);
-          const spoilers = listSpoilerEntriesInZip(full);
-          if (!spoilers.length) continue;
-          results.push({
-            spoilerPath: null,
-            zipPath: full,
-            gameFolder: full,
-            gameName: path.basename(full, path.extname(full)),
-            createdAt: creationMs(zipStat),
-            spoilerCreatedAt: creationMs(zipStat),
-            source: "zip",
-            key: full,
-          });
-        } catch {
-          /* skip */
-        }
-      }
-    }
-  }
-
-  walk(rootResolved, 0);
-  return results;
-}
-
-function attachPlayerInfo(payload, preferredPlayer) {
-  if (!payload?.ok || !payload.spoilerPath) return payload;
-  const dreadPlayers = detectDreadPlayers(payload.spoilerPath);
-  const solo = isSoloDreadSpoiler(payload.spoilerPath);
-  const cfgName = preferredPlayer || loadConfig().slot || "DreadPlayer";
-  let suggested = cfgName;
-  if (!solo && dreadPlayers.length) {
-    const exact = dreadPlayers.find(
-      (p) => p.toLowerCase() === String(cfgName).toLowerCase()
-    );
-    suggested = exact || dreadPlayers[0];
-  }
-  return {
-    ...payload,
-    dreadPlayers,
-    soloDread: solo,
-    suggestedPlayer: suggested,
-  };
-}
-
-/* ---------- Singleplayer zip drop (Hub-optional patch flow) ---------- */
-
-function loadSingleplayerZip(zipPath) {
-  const clean = String(zipPath || "").trim();
-  if (!clean) return { ok: false, error: "No file provided." };
-  if (!/\.zip$/i.test(clean)) {
-    return { ok: false, error: "Please select or drop a .zip file (Archipelago generated output)." };
-  }
-  if (!fs.existsSync(clean)) {
-    return { ok: false, error: `File not found:\n${clean}` };
-  }
-
-  // Reuse the same zip -> spoiler extraction the direct patcher / seed scan use,
-  const extracted = extractSpoilerFromZip(clean);
-  if (!extracted.ok) return extracted;
-
-  preparedSeed = attachPlayerInfo(
-    {
-      ok: true,
-      spoilerPath: extracted.spoilerPath,
-      zipPath: extracted.zipPath,
-      gameName: extracted.gameName,
-      gameFolder: extracted.zipPath,
-      createdAtLocal: extracted.createdAtLocal,
-      source: "zip",
-    },
-    loadConfig().slot
-  );
-  return preparedSeed;
-}
-
-function httpGetBuffer(url, redirects = 0) {
-  return new Promise((resolve, reject) => {
-    const lib = url.startsWith("https") ? https : http;
-    const req = lib.get(url, { timeout: 20000 }, (res) => {
-      if (
-        res.statusCode >= 300 &&
-        res.statusCode < 400 &&
-        res.headers.location &&
-        redirects < 5
-      ) {
-        const next = new URL(res.headers.location, url).toString();
-        res.resume();
-        httpGetBuffer(next, redirects + 1).then(resolve, reject);
-        return;
-      }
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode} for ${url}`));
-        res.resume();
-        return;
-      }
-      const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => resolve(Buffer.concat(chunks)));
-    });
-    req.on("error", reject);
-    req.on("timeout", () => {
-      req.destroy();
-      reject(new Error("Request timed out"));
-    });
-  });
-}
-
-async function tryDownloadSpoilerFromRoom(roomId, slotName) {
-  if (!roomId) return { ok: false, error: "No room id" };
-  const apiUrl = `https://archipelago.gg/api/room_status/${roomId}`;
-  let room;
-  try {
-    const buf = await httpGetBuffer(apiUrl);
-    room = JSON.parse(buf.toString("utf8"));
-  } catch (err) {
-    return { ok: false, error: `Room lookup failed: ${err.message || err}` };
-  }
-
-  const players = Array.isArray(room.players) ? room.players : [];
-  const match = players.find(
-    (p) =>
-      Array.isArray(p) &&
-      String(p[0] || "").toLowerCase() === String(slotName || "").toLowerCase()
-  );
-  if (match && match[1] && match[1] !== "Metroid Bread") {
-    return {
-      ok: false,
-      error: `Slot "${slotName}" is ${match[1]}, not Metroid Bread.`,
-      game: match[1],
-    };
-  }
-
-  // Spoiler lives on the seed page; scrape download link from room HTML.
-  const roomPage = `https://archipelago.gg/room/${roomId}`;
-  try {
-    const html = (await httpGetBuffer(roomPage)).toString("utf8");
-    const rel = html.match(/\/dl_spoiler\/([A-Za-z0-9_-]+)/i);
-    if (rel) {
-      const finalUrl = `https://archipelago.gg/dl_spoiler/${rel[1]}`;
-      const textBuf = await httpGetBuffer(finalUrl);
-      const text = textBuf.toString("utf8");
-      if (!text.includes("Locations:") && !text.includes("Game:")) {
-        return { ok: false, error: "Downloaded file does not look like a spoiler." };
-      }
-      const outDir = path.join(EXTRACT_ROOT, `room_${roomId}`);
-      fs.mkdirSync(outDir, { recursive: true });
-      const spoilerPath = path.join(outDir, `AP_${roomId}_Spoiler.txt`);
-      fs.writeFileSync(spoilerPath, text, "utf8");
-      return attachPlayerInfo(
-        {
-          ok: true,
-          spoilerPath,
-          zipPath: null,
-          gameName: `room_${roomId}`,
-          gameFolder: outDir,
-          source: "download",
-          createdAtLocal: new Date().toLocaleString(),
-          roomPort: room.last_port || null,
-        },
-        slotName
-      );
-    }
-  } catch (err) {
-    return { ok: false, error: `Spoiler download failed: ${err.message || err}` };
-  }
-
-  return {
-    ok: false,
-    error:
-      "Room found, but no spoiler download was available (host may have spoilers disabled).",
-    roomPort: room.last_port || null,
-  };
-}
-
-function findSeedForSlot({ gamesFolder, slotName, seedName }) {
-  const folder = gamesFolder || loadConfig().games_folder || DEFAULT_OUTPUT_SCAN;
-  const all = walkSpoilers(folder);
-  if (!all.length) {
-    return {
-      ok: false,
-      error: `No *_Spoiler.txt or seed .zip found under:\n${folder}`,
-    };
-  }
-
-  const scored = [];
-  for (const g of all) {
-    let spoilerPath = g.spoilerPath;
-    let zipPath = g.zipPath || null;
-    if (g.source === "zip" && !spoilerPath) {
-      const extracted = extractSpoilerFromZip(g.zipPath);
-      if (!extracted.ok) continue;
-      spoilerPath = extracted.spoilerPath;
-      zipPath = extracted.zipPath;
-    }
-    if (!spoilerPath) continue;
-
-    const dreadPlayers = detectDreadPlayers(spoilerPath);
-    const solo = isSoloDreadSpoiler(spoilerPath);
-    if (!solo && !dreadPlayers.length) continue;
-
-    let score = g.createdAt;
-    const slotLower = String(slotName || "").toLowerCase();
-    if (solo) score += 1e12;
-    if (dreadPlayers.some((p) => p.toLowerCase() === slotLower)) score += 5e12;
-    if (seedName && (spoilerMentionsSeed(spoilerPath, seedName) || g.gameName.includes(seedName))) {
-      score += 8e12;
-    }
-    scored.push({
-      ok: true,
-      spoilerPath,
-      zipPath,
-      gameFolder: g.gameFolder,
-      gameName: g.gameName,
-      source: g.source,
-      createdAt: g.createdAt,
-      createdAtLocal: new Date(g.createdAt).toLocaleString(),
-      dreadPlayers,
-      soloDread: solo,
-      suggestedPlayer: solo
-        ? slotName || "DreadPlayer"
-        : dreadPlayers.find((p) => p.toLowerCase() === slotLower) || dreadPlayers[0],
-      _score: score,
-    });
-  }
-
-  if (!scored.length) {
-    return {
-      ok: false,
-      error: `No Metroid Bread spoiler found for slot "${slotName}" under:\n${folder}`,
-    };
-  }
-
-  scored.sort((a, b) => b._score - a._score);
-  const best = scored[0];
-  delete best._score;
-  return { ok: true, game: best, scanned: scored.length };
-}
-
-async function preparePatchFiles(opts = {}) {
-  const cfg = loadConfig();
-  const slotName = opts.slot || cfg.slot || latestStatus?.slot || "";
-  const seedName = opts.seedName || latestStatus?.seed_name || "";
-  const roomId = opts.roomId || cfg.room_id || "";
-  const gamesFolder = opts.gamesFolder || cfg.games_folder || DEFAULT_OUTPUT_SCAN;
-
-  let downloadError = null;
-
-  // Prefer room spoiler download when available.
-  if (roomId) {
-    const dl = await tryDownloadSpoilerFromRoom(roomId, slotName);
-    if (dl.ok) {
-      preparedSeed = dl;
-      return { ok: true, game: dl, source: "download" };
-    }
-    downloadError = dl.error;
-  }
-
-  const local = findSeedForSlot({ gamesFolder, slotName, seedName });
-  if (local.ok) {
-    preparedSeed = local.game;
-    return {
-      ok: true,
-      game: local.game,
-      source: "local",
-      scanned: local.scanned,
-      downloadError,
-    };
-  }
-
-  return {
-    ok: false,
-    error: local.error,
-    downloadError,
-  };
-}
-
 function estimatePatchProgress(text, current) {
   const stages = [
     { re: /Archipelago Dread Direct Patcher/i, pct: 5 },
@@ -1766,16 +1316,11 @@ function runPatch(opts) {
     });
   }
 
-  let spoilerPath = opts?.spoilerPath || preparedSeed?.spoilerPath;
-  if (spoilerPath && /\.zip$/i.test(spoilerPath)) {
-    const extracted = extractSpoilerFromZip(spoilerPath);
-    if (!extracted.ok) return Promise.resolve(extracted);
-    spoilerPath = extracted.spoilerPath;
-  }
-  if (!spoilerPath || !fs.existsSync(spoilerPath)) {
+  const slotPath = opts?.slotPath;
+  if (!slotPath || !fs.existsSync(slotPath)) {
     return Promise.resolve({
       ok: false,
-      error: "Seed data missing. Connect again so the hub can download it from the server.",
+      error: "Seed data missing. Connect again so the hub can save slot data from the server.",
     });
   }
 
@@ -1799,8 +1344,8 @@ function runPatch(opts) {
   const args = [
     ...prefixArgs,
     PATCHER_SCRIPT,
-    "--spoiler",
-    spoilerPath,
+    "--slot",
+    slotPath,
     "--player",
     opts.playerName || cfg.slot || "DreadPlayer",
     "--base-rom",
@@ -1812,7 +1357,7 @@ function runPatch(opts) {
   ];
   if (cfg.clean_output) args.push("--clean");
   args.push(cfg.freesink ? "--freesink" : "--no-freesink");
-  // Always point frozen/source Hub at the world-bundled deploy when present so
+  // Use the deployment files bundled with the world when available.
   const bundledDeploy = path.join(WORLD_DIR, "exlaunch", "deploy");
   if (fs.existsSync(path.join(bundledDeploy, "subsdk9"))) {
     args.push("--custom-exlaunch-deploy", bundledDeploy);
@@ -1893,7 +1438,7 @@ function cancelPatch() {
   try {
     patchProcess.kill();
   } catch {
-    /* ignore */
+    /* Continue if the optional path cannot be read. */
   }
   patchProcess = null;
   return { ok: true };
@@ -1927,7 +1472,7 @@ function launchRyujinx(opts = {}) {
   const cwd = path.dirname(ryujinx);
 
   try {
-    // Direct Electron/Node spawn of Ryujinx.exe exits immediately on Windows
+    // Directly starting Ryujinx from Electron can exit early on Windows.
     let child;
     if (process.platform === "win32") {
       child = spawn(
@@ -1950,7 +1495,7 @@ function launchRyujinx(opts = {}) {
     return { ok: false, error: String(err.message || err) };
   }
 
-  // Passive wait in MetroidBreadClient (poll until :6969 accepts). Only a short
+  // Let the Python client retry until the game's port opens.
   const CONNECT_DELAY_MS = 3000;
   if (clientProcess) {
     const ip = cfg.dread_ip || "127.0.0.1";
@@ -1968,7 +1513,7 @@ function launchRyujinx(opts = {}) {
   return { ok: true, ryujinx, rom, connectDelayMs: CONNECT_DELAY_MS };
 }
 
-/* ---------- YAML helpers ---------- */
+/* YAML helpers. */
 
 function defaultYamlConfig() {
   return {
@@ -2055,6 +1600,7 @@ function defaultYamlConfig() {
       room_name_display: "never",
       raven_beak_damage_table: "consistent_low",
       nerf_power_bombs: false,
+      skip_item_popups: false,
       dangerous_logic: false,
       disabled_lights: [],
       x_starts_released: false,
@@ -2130,7 +1676,7 @@ function configToYaml(config) {
 }
 
 function parseSimpleYaml(text) {
-  // Minimal parser for the flat Dread player YAML we write/read (incl. option sets).
+  // Read the flat player YAML written by this Hub, including option sets.
   const result = defaultYamlConfig();
   const dread = { ...result["Metroid Bread"] };
   let inDread = false;
@@ -2193,7 +1739,7 @@ function parseSimpleYaml(text) {
     dread[key] = val;
   }
 
-  // Legacy Hub DNA → required_dna
+  // Convert the old DNA setting to required_dna.
   if (dread.required_dna == null && dread.game_goal === "dna_hunt") {
     const count = Number(dread.dna_count);
     if (Number.isFinite(count) && count > 0) dread.required_dna = count;
@@ -2238,7 +1784,7 @@ function saveYamlFile(opts = {}) {
   }
 }
 
-/* ---------- Apworld updater (GitHub Releases) ---------- */
+/* Check and install apworld updates. */
 
 function runApworldUpdater(actionArgs, { timeoutMs = 180000 } = {}) {
   const launcher = findPythonLauncher();
@@ -2287,7 +1833,7 @@ function runApworldUpdater(actionArgs, { timeoutMs = 180000 } = {}) {
       detail: stderr,
     };
   }
-  // Last JSON object on stdout (ignore log lines if any).
+  // Read the last JSON object; ignore log lines.
   let payload = null;
   const lines = stdout.split(/\r?\n/).filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -2295,7 +1841,7 @@ function runApworldUpdater(actionArgs, { timeoutMs = 180000 } = {}) {
       payload = JSON.parse(lines[i]);
       break;
     } catch (_err) {
-      /* keep scanning */
+      /* Try the previous output line. */
     }
   }
   if (!payload || typeof payload !== "object") {
@@ -2344,7 +1890,7 @@ function installApworldUpdate(opts = {}) {
 async function promptApworldUpdateIfAvailable({ interactiveIfCurrent = false } = {}) {
   const check = checkApworldUpdate();
   if (!check || check.error === "network_or_prerelease" || check.error === "python_missing") {
-    // Soft-fail: never block Hub startup on network / missing Python.
+    // Keep startup working when Python or the network is unavailable.
     if (interactiveIfCurrent && check && check.message) {
       await dialog.showMessageBox(mainWindow || undefined, {
         type: "info",
@@ -2398,7 +1944,7 @@ async function promptApworldUpdateIfAvailable({ interactiveIfCurrent = false } =
   return { check, installed };
 }
 
-/* ---------- App lifecycle / IPC ---------- */
+/* App startup and messages. */
 
 app.whenReady().then(() => {
   try {
@@ -2412,13 +1958,13 @@ app.whenReady().then(() => {
         `hub_log: ${getHubLogPath()}\n`
     );
   } catch (_) {
-    /* ignore */
+    /* Continue if this optional startup step fails. */
   }
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-  // Async startup update check — non-blocking after window exists.
+  // Check for updates after the window opens.
   setTimeout(() => {
     promptApworldUpdateIfAvailable({ interactiveIfCurrent: false }).catch((err) => {
       console.warn("Apworld startup update check failed:", err);
@@ -2523,9 +2069,6 @@ ipcMain.handle("get-tracker-catalog", () => {
 });
 ipcMain.handle("get-tracker-status", () => trackerPayloadFromStatus(latestStatus));
 
-ipcMain.handle("load-singleplayer-zip", (_e, zipPath) => loadSingleplayerZip(zipPath));
-ipcMain.handle("prepare-patch-files", async (_e, opts) => preparePatchFiles(opts || {}));
-ipcMain.handle("get-prepared-seed", () => preparedSeed);
 ipcMain.handle("run-patch", async (_e, opts) => runPatch(opts || {}));
 ipcMain.handle("cancel-patch", () => cancelPatch());
 ipcMain.handle("launch-ryujinx", (_e, opts) => launchRyujinx(opts || {}));
@@ -2550,50 +2093,6 @@ ipcMain.handle("pick-file", async (_e, opts) => {
   return result.filePaths[0];
 });
 
-ipcMain.handle("pick-spoiler", async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: "Select Spoiler (.txt) or Archipelago seed (.zip)",
-    properties: ["openFile"],
-    filters: [
-      { name: "Archipelago seed / spoiler", extensions: ["zip", "txt"] },
-      { name: "ZIP", extensions: ["zip"] },
-      { name: "Spoiler text", extensions: ["txt"] },
-      { name: "All Files", extensions: ["*"] },
-    ],
-    defaultPath: loadConfig().games_folder || DEFAULT_OUTPUT_SCAN,
-  });
-  if (result.canceled || !result.filePaths.length) return null;
-  const chosen = result.filePaths[0];
-  if (/\.zip$/i.test(chosen)) {
-    const extracted = extractSpoilerFromZip(chosen);
-    if (!extracted.ok) return extracted;
-    preparedSeed = attachPlayerInfo(
-      {
-        ok: true,
-        spoilerPath: extracted.spoilerPath,
-        zipPath: extracted.zipPath,
-        gameName: extracted.gameName,
-        gameFolder: extracted.zipPath,
-        createdAtLocal: extracted.createdAtLocal,
-        source: "zip",
-      },
-      loadConfig().slot
-    );
-    return preparedSeed;
-  }
-  preparedSeed = attachPlayerInfo(
-    {
-      ok: true,
-      spoilerPath: chosen,
-      zipPath: null,
-      gameName: path.basename(path.dirname(chosen)),
-      gameFolder: path.dirname(chosen),
-      source: "file",
-    },
-    loadConfig().slot
-  );
-  return preparedSeed;
-});
 
 ipcMain.handle("load-yaml", (_e, filePath) => loadYamlFile(filePath));
 ipcMain.handle("save-yaml", (_e, opts) => saveYamlFile(opts || {}));
@@ -2625,7 +2124,7 @@ const YAML_SPHERE0_CATALOGUE = path.join(
   "logic_database",
   "start_sphere0_catalogue.json"
 );
-const YAML_PROBE_SCRIPT = path.join(WORLD_DIR, "start_sphere0_probe.py");
+const YAML_PROBE_SCRIPT = path.join(WORLD_DIR, "logic", "start_sphere0_probe.py");
 const TRICK_OPTION_KEYS = [
   "knowledge_tricks",
   "movement_tricks",
@@ -2682,7 +2181,7 @@ function formatTrickAlt(entries) {
     .join(", ");
 }
 
-/** Keep in sync with worlds/metroid_bread/yaml_option_conflicts.py */
+/* Keep these checks in sync with yaml_option_conflicts.py. */
 function yamlEffectiveEnergyTanks(opts) {
   const tanks = Math.max(0, Number(opts.energy_tanks) || 0);
   const parts = Math.max(0, Number(opts.energy_parts) || 0);
@@ -2690,7 +2189,7 @@ function yamlEffectiveEnergyTanks(opts) {
   return immediate ? tanks + parts : tanks + Math.floor(parts / 4);
 }
 
-/** Same peak-HP formula as MetroidBreadWorld._max_obtainable_energy */
+/* Use the world's maximum-health calculation. */
 function yamlMaxObtainableEnergy(opts) {
   const ept = Math.max(1, Number(opts.energy_per_tank != null ? opts.energy_per_tank : 100) || 100);
   const tanks = Math.max(0, Number(opts.energy_tanks != null ? opts.energy_tanks : 8) || 0);
@@ -2698,7 +2197,7 @@ function yamlMaxObtainableEnergy(opts) {
   return Math.floor(ept - 1 + tanks * ept + parts * (ept / 4));
 }
 
-/** Raven Beak / Gold Chozo-style Damage gate still required at this Combat level */
+/* This combat setting still requires enough health for boss damage. */
 function yamlCombatBossEnergyNeed(combat) {
   if (combat <= 0) return 799;
   if (combat === 1) return 549;
@@ -2956,7 +2455,7 @@ function evaluateFromCatalogue(opts) {
       };
     }
     const trickAlt = row.trick_alt || null;
-    // Catalogue trick_alt opens with Starting Items=0. Still a valid alternative
+    // The alternative trick preset works without starting items.
     const fixAlt =
       budget === 0 || budget < (row.min_kit_size || 0)
         ? formatTrickAlt(trickAlt)
@@ -3070,7 +2569,7 @@ function evaluateFromCatalogue(opts) {
   return severityFor(byKey(key));
 }
 
-/** In-flight YAML sphere-0 Python probe (async so the Hub UI stays responsive). */
+/* Run the starting-area check in the background so the UI stays usable. */
 let yamlProbeChild = null;
 let yamlProbeToken = 0;
 
@@ -3091,7 +2590,7 @@ function killYamlProbeProcess() {
     try {
       child.kill();
     } catch (__) {
-      /* ignore */
+      /* Continue if the old process is already gone. */
     }
   }
 }
@@ -3123,7 +2622,7 @@ function runYamlProbeProcess(payload) {
   killYamlProbeProcess();
 
   const launchPy = findPythonLauncher() || launcher;
-  // -P / PYTHONSAFEPATH: do not prepend the script directory to sys.path.
+  // Use -P or PYTHONSAFEPATH to keep the script folder off sys.path.
   const args = [...(launchPy.prefixArgs || []), "-P", YAML_PROBE_SCRIPT];
 
   return new Promise((resolve) => {
@@ -3228,7 +2727,7 @@ function runYamlProbeProcess(payload) {
         return;
       }
       try {
-        // Prefer last non-empty line that parses as a JSON object (ignore banners).
+        // Read the last non-empty JSON output line.
         const lines = out.split(/\r?\n/).filter(Boolean);
         let parsed = null;
         for (let i = lines.length - 1; i >= 0; i--) {
@@ -3238,7 +2737,7 @@ function runYamlProbeProcess(payload) {
             parsed = JSON.parse(line);
             break;
           } catch (_) {
-            /* try earlier line */
+            /* Try the previous line. */
           }
         }
         if (!parsed) {
@@ -3285,7 +2784,7 @@ ipcMain.handle("probe-yaml-start-sphere0", async (_e, opts) => {
   const doorsOff = yamlProbeDoorsOff(payload);
   const tricksOff = yamlProbeAllTricksDisabled(tricks);
   const access = String(payload.accessibility || "items").trim().toLowerCase();
-  // Full accessibility needs a live reachability check (uncleared pickups/events).
+  // Full accessibility needs a live check of remaining pickups and events.
   const needsLive = access === "full";
 
   if (doorsOff && tricksOff && !needsLive) {
@@ -3293,7 +2792,7 @@ ipcMain.handle("probe-yaml-start-sphere0", async (_e, opts) => {
     if (cached) {
       cached.source = "catalogue";
       cached.doors_unvalidated = false;
-      // Cancel any leftover live probe from a prior tricks-on edit.
+      // Cancel the previous check after changing trick settings.
       yamlProbeToken += 1;
       killYamlProbeProcess();
       return mergeYamlConflicts(cached, yamlOptionConflicts(payload));

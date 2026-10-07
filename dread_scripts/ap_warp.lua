@@ -1,30 +1,30 @@
--- ApWarp: location-independent hotkey warps (not HK autosave / ProgressKeeper).
+-- Warp hotkeys that work anywhere, separate from the old HK autosave.
 
 ApWarp = ApWarp or {
   enabled = true,
   level_id = "c10_samus",
-  last_save = nil,       -- { scenario=, start= }
-  last_checkpoint = nil, -- { scenario=, start= }
+  last_save = nil,       -- Warp target: scenario and start point.
+  last_checkpoint = nil, -- Warp target: scenario and start point.
   menu_open = false,
-  held_combo = nil,      -- edge detect: "checkpoint" | "save" | nil
+  held_combo = nil,      -- Last action: checkpoint, save, or none.
   did_install = false,
 }
 
--- Older builds left ApWarp.cooling=true forever after LoadScenario wiped AddSF.
+-- Clear old cooldowns that survived LoadScenario removing the timer.
 ApWarp.cooling = false
 
--- Last blackboard spawn we classified, so GetEntities() is only walked on change.
+-- Check entities only when the saved spawn point changes.
 ApWarp.seen_start = ApWarp.seen_start or nil
 ApWarp.seen_scenario = ApWarp.seen_scenario or nil
 
--- Charclass of the weight plate the engine actually respawns Samus on. The
+-- The plate class where the engine respawns Samus.
 local SAVE_PLATFORM_CHARCLASSES = {
   weightactivatedplatform_save = true,
-  weightactivatedplatform_access = true, -- Network Station plate
-  weightactivatedplatform_map = true, -- Map Station plate
+  weightactivatedplatform_access = true, -- Network Station spawn plate.
+  weightactivatedplatform_map = true, -- Map Station spawn plate.
 }
 
--- Usables that update the ZR+DPAD_RIGHT ("last save") warp target. Matches
+-- Station kinds that update the last-save warp target.
 local SAVE_USABLE_CHARCLASSES = {
   savestation = true,
   accesspoint = true,
@@ -56,7 +56,7 @@ local function entities()
   return nil
 end
 
--- Scenario.GetCharclass logs every lookup; read the table directly instead.
+-- Read the table directly to avoid a log line for every lookup.
 local function charclass_of(name, tbl)
   tbl = tbl or entities()
   if not tbl or type(name) ~= "string" then
@@ -65,7 +65,7 @@ local function charclass_of(name, tbl)
   return tbl[name]
 end
 
--- GetEntities only covers the loaded scenario, so spawns recorded in another
+-- GetEntities lists only the current scenario's actors.
 local function name_looks_like_save(name)
   local low = string.lower(name)
   return string.find(low, "savestation", 1, true) ~= nil
@@ -84,7 +84,7 @@ local function is_save_spawn(name)
   return name_looks_like_save(name)
 end
 
--- Map a Save / Network / Map station usable to the plate the engine spawns on.
+-- Find the spawn plate for a Save, Network, or Map Station.
 local function resolve_save_platform(usable_name)
   local tbl = entities()
   if not tbl then
@@ -142,7 +142,7 @@ function ApWarp.NoteSaveStation(actor)
   if type(name) ~= "string" then return end
   local platform = resolve_save_platform(name)
   if platform == nil then
-    -- Blackboard polling still catches it once the engine commits the respawn.
+    -- Poll saved state to catch the engine's final respawn point.
     log("save station " .. name .. " has no resolvable spawn plate")
     return
   end
@@ -153,7 +153,7 @@ function ApWarp.NoteCheckpoint(scenario, start_point)
   capture_spawn("checkpoint", scenario, start_point)
 end
 
--- - Track the engine's own respawn point. Whatever sits in the player
+-- Track the game's own respawn point.
 function ApWarp.SyncFromBlackboard()
   local ps = Game.GetPlayerBlackboardSectionName and Game.GetPlayerBlackboardSectionName()
   if not ps then return end
@@ -261,7 +261,7 @@ local function fire_combo(combo)
   end
 end
 
---- Called every CheckDebugInputs tick (ODR already schedules this in INGAME).
+-- Run on each INGAME debug-input tick.
 function ApWarp.Tick()
   if not ApWarp.enabled then
     return
@@ -274,7 +274,7 @@ function ApWarp.Tick()
   local ok_open, result = pcall(menu_appears_open)
   if ok_open then open = result and true or false end
 
-  -- Closing pause/options while holding a shoulder (one-shot on the close edge).
+  -- Trigger once when closing pause or options while holding a shoulder button.
   if ApWarp.menu_open and not open then
     if inputs("ZL") and not inputs("ZR") then
       ApWarp.WarpLastCheckpoint()
@@ -302,14 +302,14 @@ function ApWarp.Tick()
 end
 
 function ApWarp.Install()
-  -- Always clear sticky latch from older builds, even if already installed.
+  -- Clear cooldowns left by older builds even if already installed.
   ApWarp.cooling = false
 
   if ApWarp.did_install then
     return
   end
 
-  -- Bootstrap must run after ODR defines these (end of scenario.lc).
+  -- Install after ODR defines its handlers.
   if not Scenario or type(Scenario.CheckDebugInputs) ~= "function" then
     log("Install deferred — waiting for Scenario.CheckDebugInputs")
     if Game.AddSF then
@@ -336,7 +336,7 @@ function ApWarp.Install()
       if type(name) == "string" and SAVE_USABLE_CHARCLASSES[charclass_of(name) or ""] then
         pcall(ApWarp.NoteSaveStation, actor)
       end
-      -- ODR sends the player to the seed's starting location on plain ZL+ZR.
+      -- Normal ZL+ZR sends the player to the seed's starting location.
       if inputs("DPAD_LEFT") or inputs("DPAD_RIGHT") then
         return
       end

@@ -1,6 +1,6 @@
-' Silent launcher for Dread Client Hub (no console window).
-' First-run / broken Electron: delegates to Launch_Dread_Client.bat so
-' .npmrc + --no-ignore-scripts + install.js repair run reliably.
+' Start the Hub without a console window.
+' Use the batch launcher for first-time setup or repairs.
+' It fixes .npmrc and allows Electron's install script to run.
 Option Explicit
 
 Dim sh, fso, appDir, electron, pathTxt, bat, npmCmd, exitCode, healthy
@@ -15,8 +15,8 @@ bat = appDir & "\Launch_Dread_Client.bat"
 healthy = fso.FileExists(electron) And fso.FileExists(pathTxt)
 
 If Not healthy Then
-  ' Console briefly: bat writes .npmrc, runs npm install --no-ignore-scripts,
-  ' and repairs incomplete Electron binary installs.
+  ' Setup may briefly show a console while npm installs packages.
+  ' It also repairs missing Electron program files.
   If fso.FileExists(bat) Then
     exitCode = sh.Run("cmd /c call """ & bat & """", 1, True)
     If exitCode <> 0 Then
@@ -26,11 +26,11 @@ If Not healthy Then
              "or run: npm install --ignore-scripts=false", vbCritical, "Dread Client Hub"
       WScript.Quit 1
     End If
-    ' Bat already started the Hub (npm start).
+    ' The batch launcher already started the Hub.
     WScript.Quit 0
   End If
 
-  ' Fallback if bat is missing (odd installs).
+  ' Start directly if the batch launcher is missing.
   sh.Environment("PROCESS")("npm_config_ignore_scripts") = "false"
   sh.Environment("PROCESS")("ELECTRON_SKIP_BINARY_DOWNLOAD") = ""
   If Not fso.FileExists(appDir & "\.npmrc") Then

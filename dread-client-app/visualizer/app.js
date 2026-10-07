@@ -750,7 +750,7 @@
     try {
       els.pane.releasePointerCapture(ev.pointerId);
     } catch (_) {
-      /* ignore */
+      /* Leave the previous value if this update fails. */
     }
   }
 

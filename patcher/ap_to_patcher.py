@@ -1,0 +1,1841 @@
+#!/usr/bin/env python3
+"""Direct Archipelago → Dread Patcher Converter"""
+
+import copy
+import json
+import re
+import sys
+import uuid
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import dread_paths
+dread_paths.ensure_import_paths()
+
+_ROOT = Path(__file__).resolve().parents[1]
+# Use dread_paths so AP's Options.py takes priority over the world's file.
+try:
+    import dread_paths
+
+    dread_paths.ensure_import_paths()
+    _AP_ROOT = dread_paths.AP_ROOT
+except Exception:
+    # Keep the AP path first even without dread_paths.
+    import os
+
+    _AP_ROOT = _ROOT.parents[1] if len(_ROOT.parents) >= 2 else _ROOT
+    for key in ("DREAD_HUB_AP_ROOT", "ARCHIPELAGO_ROOT"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            candidate = Path(raw).expanduser()
+            if (candidate / "Options.py").is_file() and (candidate / "CommonClient.py").is_file():
+                _AP_ROOT = candidate.resolve()
+                break
+    for _p in (_ROOT, _AP_ROOT):
+        _s = str(_p)
+        if _s in sys.path:
+            sys.path.remove(_s)
+        sys.path.insert(0, _s)
+
+# Read pickup actors from the file beside this script.
+with open(_ROOT / "data" / "patcher" / "dread_pickup_actors.json", encoding="utf-8") as _f:
+    PICKUP_ACTORS = json.load(_f)
+
+# Boss and EMMI rewards use Lua callbacks rather than pickup actors.
+with open(_ROOT / "data" / "patcher" / "dread_special_pickups.json", encoding="utf-8") as _f:
+    SPECIAL_PICKUPS = json.load(_f)
+
+# Load the Dread item mapping.
+from worlds.metroid_bread.patcher.dread_item_mapping import get_dread_item_data, normalize_resource_progression, DEFAULT_STARTING_LOCATION, DEFAULT_STARTING_ITEMS
+
+# Map each placement to the sprite shown after collecting or hinting it.
+from worlds.metroid_bread.tracker.dread_map_icon_labels import sprite_for_item
+
+
+
+def _carousel_tip_env_hint() -> str:
+    return "METROID_BREAD_CAROUSEL_TIP_PATCHES=0 to disable later"
+
+# Load the AP-to-RDV location mapping.
+from worlds.metroid_bread.patcher.rdvgame_export import AP_TO_RANDOVANIA_LOCATION_MAP
+from worlds.metroid_bread.logic.starting_locations import (
+    DEFAULT_PATCHER_REF,
+    get_by_path,
+    patcher_ref_for_node,
+)
+
+
+
+def _path_to_patcher_ref(path: str, player: str) -> Dict[str, str]:
+    info = get_by_path(path)
+    if info is not None:
+        ref = info.patcher_ref
+        print(f"[OK] Starting location for {player}: {path} -> {ref}")
+        return ref
+    parts = path.split("/")
+    if len(parts) == 3:
+        try:
+            ref = patcher_ref_for_node((parts[0], parts[1], parts[2]))
+            print(f"[OK] Starting location for {player}: {path} -> {ref}")
+            return ref
+        except KeyError:
+            pass
+    print(f"[WARNING] Unknown starting location path {path!r}; using default")
+    return dict(DEFAULT_PATCHER_REF)
+
+
+# Item IDs allowed by ODR 2.19's schema.
+VALID_ITEM_IDS = {
+    "ITEM_NONE",
+    "ITEM_WEAPON_WIDE_BEAM",
+    "ITEM_WEAPON_PLASMA_BEAM",
+    "ITEM_WEAPON_WAVE_BEAM",
+    "ITEM_WEAPON_HYPER_BEAM",
+    "ITEM_WEAPON_CHARGE_BEAM",
+    "ITEM_WEAPON_DIFFUSION_BEAM",
+    "ITEM_WEAPON_GRAPPLE_BEAM",
+    "ITEM_WEAPON_SUPER_MISSILE",
+    "ITEM_WEAPON_ICE_MISSILE",
+    "ITEM_MULTILOCKON",
+    "ITEM_OPTIC_CAMOUFLAGE",
+    "ITEM_GHOST_AURA",
+    "ITEM_SONAR",
+    "ITEM_VARIA_SUIT",
+    "ITEM_GRAVITY_SUIT",
+    "ITEM_HYPER_SUIT",
+    "ITEM_MORPH_BALL",
+    "ITEM_WEAPON_BOMB",
+    "ITEM_WEAPON_LINE_BOMB",
+    "ITEM_WEAPON_POWER_BOMB",
+    "ITEM_MAGNET_GLOVE",
+    "ITEM_SPEED_BOOSTER",
+    "ITEM_DOUBLE_JUMP",
+    "ITEM_SPACE_JUMP",
+    "ITEM_SCREW_ATTACK",
+    "ITEM_ENERGY_TANKS",
+    "ITEM_LIFE_SHARDS",
+    "ITEM_MAX_LIFE",
+    "ITEM_CURRENT_LIFE",
+    "ITEM_WEAPON_MISSILE_CURRENT",
+    "ITEM_WEAPON_MISSILE_MAX",
+    "ITEM_WEAPON_POWER_BOMB_CURRENT",
+    "ITEM_WEAPON_POWER_BOMB_MAX",
+    "ITEM_FLOOR_SLIDE",
+    "ITEM_METROIDNIZATION",
+    "ITEM_RANDO_ARTIFACT_1",
+    "ITEM_RANDO_ARTIFACT_2",
+    "ITEM_RANDO_ARTIFACT_3",
+    "ITEM_RANDO_ARTIFACT_4",
+    "ITEM_RANDO_ARTIFACT_5",
+    "ITEM_RANDO_ARTIFACT_6",
+    "ITEM_RANDO_ARTIFACT_7",
+    "ITEM_RANDO_ARTIFACT_8",
+    "ITEM_RANDO_ARTIFACT_9",
+    "ITEM_RANDO_ARTIFACT_10",
+    "ITEM_RANDO_ARTIFACT_11",
+    "ITEM_RANDO_ARTIFACT_12",
+    "ITEM_UPGRADE_FLASH_SHIFT_CHAIN",
+    "ITEM_UPGRADE_SPEED_BOOST_CHARGE",
+}
+
+# Replace old or invalid IDs with supported ones.
+ITEM_ID_ALIASES = {
+    "ITEM_SONAR_SIGHT": "ITEM_SONAR",
+    "ITEM_SPECIAL_SLIDE": "ITEM_FLOOR_SLIDE",
+    "ITEM_WEAPON_MISSILE_LAUNCHER": "ITEM_WEAPON_MISSILE_MAX",
+    "ITEM_SPEED_BOOSTER_UPGRADE": "ITEM_UPGRADE_SPEED_BOOST_CHARGE",
+}
+
+
+def _sanitize_item_id(item_id: str) -> str:
+    item_id = ITEM_ID_ALIASES.get(item_id, item_id)
+    if item_id not in VALID_ITEM_IDS:
+        print(f"[WARNING] Invalid item_id {item_id!r} -> ITEM_NONE")
+        return "ITEM_NONE"
+    return item_id
+
+
+def _sanitize_resources(resources_groups):
+    """Ensure every item_id is valid for open-dread-rando."""
+    out = []
+    for group in resources_groups:
+        new_group = []
+        for entry in group:
+            eid = _sanitize_item_id(entry.get("item_id", "ITEM_NONE"))
+            qty = entry.get("quantity", 0)
+            # Give missile capacity a useful quantity when mapping the launcher.
+            if (
+                entry.get("item_id") == "ITEM_WEAPON_MISSILE_LAUNCHER"
+                and eid == "ITEM_WEAPON_MISSILE_MAX"
+                and qty == 1
+            ):
+                qty = 15
+            new_group.append({"item_id": eid, "quantity": qty})
+        out.append(new_group)
+    return out
+
+
+def _display_item_name(item_name: str) -> str:
+    return item_name.replace("_", " ")
+
+
+# ODR stores credits as UTF-16 text ending in a zero character.
+_CREDITS_MAX_LINE = 64
+_CREDITS_MAX_LINES = 16
+
+# Main items shown in the credits, in the normal RDV order.
+CREDITS_SPOILER_ITEMS: Tuple[str, ...] = (
+    "Wide Beam",
+    "Plasma Beam",
+    "Wave Beam",
+    "Progressive Beam",
+    "Charge Beam",
+    "Diffusion Beam",
+    "Progressive Charge Beam",
+    "Grapple Beam",
+    "Missile Launcher",
+    "Super Missile",
+    "Ice Missile",
+    "Progressive Missiles",
+    "Storm Missile",
+    "Phantom Cloak",
+    "Flash Shift",
+    "Flash Shift Upgrade",
+    "Pulse Radar",
+    "Varia Suit",
+    "Gravity Suit",
+    "Progressive Suit",
+    "Morph Ball",
+    "Bomb",
+    "Cross Bomb",
+    "Progressive Bombs",
+    "Power Bomb",
+    "Spider Magnet",
+    "Speed Booster",
+    "Speed Booster Upgrade",
+    "Spin Boost",
+    "Space Jump",
+    "Progressive Spin",
+    "Screw Attack",
+    "Metroid DNA",
+)
+_CREDITS_SPOILER_ITEM_SET = frozenset(CREDITS_SPOILER_ITEMS)
+
+
+def sanitize_credits_text(
+    value: object,
+    *,
+    max_line: int = _CREDITS_MAX_LINE,
+    max_lines: int = _CREDITS_MAX_LINES,
+    allow_newlines: bool = True,
+) -> str:
+    """Scrub a string destined for Dread credits.txt / in-game localization."""
+    text = str(value if value is not None else "")
+    text = text.replace("\x00", "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if not allow_newlines:
+        text = text.replace("\n", " ")
+
+    lines_in = text.split("\n") if allow_newlines else [text]
+    cleaned_lines: List[str] = []
+    for raw_line in lines_in[: max(1, int(max_lines))]:
+        out_chars: List[str] = []
+        for ch in raw_line:
+            o = ord(ch)
+            if 0x20 <= o <= 0x7E:
+                out_chars.append(ch)
+            elif ch in "\t\v\f":
+                out_chars.append(" ")
+            else:
+                out_chars.append("?")
+        line = "".join(out_chars).strip()
+        limit = max(1, int(max_line))
+        if len(line) > limit:
+            line = line[: max(0, limit - 3)].rstrip() + "..."
+        if line:
+            cleaned_lines.append(line)
+
+    if not cleaned_lines:
+        return "?"
+    return "\n".join(cleaned_lines) if allow_newlines else cleaned_lines[0]
+
+
+def sanitize_spoiler_log(spoiler_log: object) -> Dict[str, str]:
+    """Sanitize ODR ``spoiler_log`` keys/values (item → location text)."""
+    if not isinstance(spoiler_log, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for raw_key, raw_val in spoiler_log.items():
+        key = sanitize_credits_text(raw_key, max_line=_CREDITS_MAX_LINE, max_lines=1)
+        val = sanitize_credits_text(raw_val)
+        if key and key != "?":
+            out[key] = val
+    return out
+
+
+def build_credits_spoiler_log(
+    placements: List[Tuple],
+    *,
+    our_player: Optional[str] = None,
+) -> Dict[str, str]:
+    """Build ODR ``spoiler_log`` for credits from AP placements (RDV-style)."""
+    del our_player  # Placements already identify local items and their owner.
+    buckets: Dict[str, List[str]] = {name: [] for name in CREDITS_SPOILER_ITEMS}
+    for region, area, _node, item, _item_player, is_ours in placements:
+        if not is_ours or item not in _CREDITS_SPOILER_ITEM_SET:
+            continue
+        loc = sanitize_credits_text(
+            f"{region} - {area}",
+            max_line=_CREDITS_MAX_LINE,
+            max_lines=1,
+        )
+        if loc and loc not in buckets[item]:
+            buckets[item].append(loc)
+
+    result: Dict[str, str] = {}
+    for item in CREDITS_SPOILER_ITEMS:
+        entries = buckets.get(item) or []
+        if not entries:
+            continue
+        key = sanitize_credits_text(item, max_line=_CREDITS_MAX_LINE, max_lines=1)
+        result[key] = sanitize_credits_text("\n".join(entries))
+    return result
+
+
+def _format_pickup_caption(item_name: str, player_name: str = None) -> str:
+    """In-game pickup notification shown when collecting a world location."""
+    display = sanitize_credits_text(
+        _display_item_name(item_name), max_lines=1, allow_newlines=False
+    )
+    if player_name:
+        who = sanitize_credits_text(player_name, max_lines=1, allow_newlines=False)
+        return f"You just grabbed {who}'s {display}!"
+    return f"You just grabbed {display}!"
+
+
+def _map_icon_item_label(
+    item_name: str,
+    is_foreign: bool,
+    player_name: str = None,
+) -> str:
+    """Short minimap reveal name (no 'You just grabbed')."""
+    display = sanitize_credits_text(
+        _display_item_name(item_name), max_lines=1, allow_newlines=False
+    )
+    if is_foreign and player_name:
+        who = sanitize_credits_text(player_name, max_lines=1, allow_newlines=False)
+        return f"{who}'s {display}"
+    return display
+
+
+def _pickup_resources_and_caption(
+    item_name: str,
+    is_foreign: bool,
+    player_name: str = None,
+    dna_artifact_index: Optional[int] = None,
+    flash_shift_plan: Optional[dict] = None,
+    yield_plan: Optional[dict] = None,
+) -> Tuple[list, str, Optional[dict]]:
+    """Return (resources, caption, dread_item_data_or_None)."""
+    caption = _format_pickup_caption(item_name, player_name)
+    if is_foreign:
+        return [[{"item_id": "ITEM_NONE", "quantity": 0}]], caption, None
+
+    if item_name == "Metroid DNA":
+        if dna_artifact_index is not None and 1 <= int(dna_artifact_index) <= 12:
+            artifact_id = f"ITEM_RANDO_ARTIFACT_{int(dna_artifact_index)}"
+            return [[{"item_id": artifact_id, "quantity": 1}]], caption, None
+        print(f"[WARNING] Metroid DNA pickup without artifact index — using ITEM_NONE")
+        return [[{"item_id": "ITEM_NONE", "quantity": 0}]], caption, None
+
+    item_data = get_dread_item_data(item_name)
+    if item_data:
+        try:
+            from worlds.metroid_bread.patcher.dread_item_mapping import apply_yield_overrides
+
+            if yield_plan:
+                item_data = apply_yield_overrides(item_name, item_data, yield_plan)
+        except Exception as exc:
+            print(f"[WARN] yield override failed for {item_name}: {exc}")
+        # Use the correct tank or energy amount in local item names.
+        if item_name in (
+            "Missile Tank",
+            "Missile+ Tank",
+            "Power Bomb Tank",
+            "Energy Tank",
+            "Energy Part",
+        ):
+            raw_caption = item_data.get("caption") or caption
+            caption = sanitize_credits_text(
+                raw_caption, max_lines=1, allow_newlines=False
+            )
+        resources = _sanitize_resources(normalize_resource_progression(item_data["resources"]))
+        if flash_shift_plan and item_name in ("Flash Shift", "Flash Shift Upgrade"):
+            try:
+                from worlds.metroid_bread.logic.flash_shift import main_resources, upgrade_resources
+
+                if item_name == "Flash Shift":
+                    resources = _sanitize_resources(
+                        normalize_resource_progression(
+                            main_resources(int(flash_shift_plan.get("included_ammo", 2) or 2))
+                        )
+                    )
+                else:
+                    resources = _sanitize_resources(
+                        normalize_resource_progression(
+                            upgrade_resources(int(flash_shift_plan.get("upgrade_amount", 1) or 1))
+                        )
+                    )
+            except Exception as exc:
+                print(f"[WARN] Flash Shift resource adjust failed: {exc}")
+        return resources, caption, item_data
+
+    print(f"[WARNING] Unknown Dread item: {item_name}, using generic")
+    return [[{"item_id": "ITEM_NONE", "quantity": 0}]], caption, None
+
+
+def create_special_pickup_entry(
+    special: dict,
+    item_name: str,
+    is_foreign: bool,
+    player_name: str = None,
+    dna_artifact_index: Optional[int] = None,
+    flash_shift_plan: Optional[dict] = None,
+    yield_plan: Optional[dict] = None,
+) -> dict:
+    """Boss/EMMI death rewards for open-dread-rando."""
+    resources, caption, _ = _pickup_resources_and_caption(
+        item_name,
+        is_foreign,
+        player_name,
+        dna_artifact_index=dna_artifact_index,
+        flash_shift_plan=flash_shift_plan,
+        yield_plan=yield_plan,
+    )
+    entry = {
+        "pickup_type": special["pickup_type"],
+        "caption": caption,
+        "resources": resources,
+        "pickup_lua_callback": {
+            "scenario": special["scenario"],
+            "function": special["callback_function"],
+            "args": int(special.get("callback_args", 0)),
+        },
+    }
+    if special["pickup_type"] != "cutscene":
+        entry["pickup_actordef"] = special["actor_def"]
+        entry["pickup_string_key"] = special["string_key"]
+    return entry
+
+
+def create_pickup_entry(
+    pickup_index: int,
+    item_name: str,
+    is_foreign: bool,
+    player_name: str = None,
+    dna_artifact_index: Optional[int] = None,
+    flash_shift_plan: Optional[dict] = None,
+    yield_plan: Optional[dict] = None,
+) -> dict:
+    """Create a pickup entry for patcher.json."""
+
+    special = SPECIAL_PICKUPS.get(str(pickup_index))
+    if special:
+        return create_special_pickup_entry(
+            special,
+            item_name,
+            is_foreign,
+            player_name,
+            dna_artifact_index=dna_artifact_index,
+            flash_shift_plan=flash_shift_plan,
+            yield_plan=yield_plan,
+        )
+
+    actor_data = PICKUP_ACTORS.get(str(pickup_index))
+    if not actor_data:
+        print(f"[WARNING] No actor/special data for pickup index {pickup_index}")
+        return None
+
+    pickup_actor = {
+        "scenario": actor_data["scenario"],
+        "actor": actor_data["actor"]
+    }
+
+    # The map icon actor may differ from the pickup actor.
+    map_actor_name = actor_data.get("map_icon_actor") or actor_data["actor"]
+    original_actor = {
+        "scenario": actor_data["scenario"],
+        "actor": map_actor_name,
+    }
+
+    resources, caption, item_data = _pickup_resources_and_caption(
+        item_name,
+        is_foreign,
+        player_name,
+        dna_artifact_index=dna_artifact_index,
+        flash_shift_plan=flash_shift_plan,
+        yield_plan=yield_plan,
+    )
+
+    # Give hidden items unique names, question-mark sprites, and Unknown Item labels.
+    map_icon = {
+        "custom_icon": {
+            "label": "Unknown Item",
+            "coords": {"row": 7, "col": 15},  # Use ODR's unknown-item sprite.
+            "is_global": False,
+            "full_zoom_scale": False,
+        },
+        "original_actor": original_actor,
+    }
+
+    if is_foreign:
+        # Give no local resource for foreign items; the AP client delivers them.
+        return {
+            "pickup_type": "actor",
+            "caption": caption,
+            "resources": resources,
+            "pickup_actor": pickup_actor,
+            "model": ["itemsphere"],
+            "map_icon": map_icon,
+        }
+
+    if item_data:
+        return {
+            "pickup_type": "actor",
+            "caption": caption,
+            "resources": resources,
+            "pickup_actor": pickup_actor,
+            "model": [item_data["model"]],
+            "map_icon": map_icon,
+        }
+
+    return {
+        "pickup_type": "actor",
+        "caption": caption,
+        "resources": resources,
+        "pickup_actor": pickup_actor,
+        "model": ["itemsphere"],
+        "map_icon": map_icon,
+    }
+
+
+# ODR needs the full set of at least 146 pickup entries.
+ODR_PICKUPS_MIN_ITEMS = 146
+
+
+def _all_dread_pickup_indices() -> list[int]:
+    """Every actor + boss/EMMI special index we know how to patch."""
+    idxs = {int(k) for k in PICKUP_ACTORS}
+    idxs.update(int(k) for k in SPECIAL_PICKUPS)
+    return sorted(idxs)
+
+
+def create_nothing_pad_entry(pickup_index: int) -> Optional[dict]:
+    """Patch a missing pool slot as Randovania Nothing (ITEM_NONE)."""
+    special = SPECIAL_PICKUPS.get(str(pickup_index))
+    if special:
+        return create_special_pickup_entry(
+            special,
+            "Nothing",
+            is_foreign=True,
+            player_name=None,
+        )
+
+    actor_data = PICKUP_ACTORS.get(str(pickup_index))
+    if not actor_data:
+        return None
+
+    map_actor_name = actor_data.get("map_icon_actor") or actor_data["actor"]
+    return {
+        "pickup_type": "actor",
+        "caption": "Nothing acquired.",
+        "resources": [[{"item_id": "ITEM_NONE", "quantity": 0}]],
+        "pickup_actor": {
+            "scenario": actor_data["scenario"],
+            "actor": actor_data["actor"],
+        },
+        "model": ["itemsphere"],
+        "map_icon": {
+            "icon_id": "ItemNothing",
+            "original_actor": {
+                "scenario": actor_data["scenario"],
+                "actor": map_actor_name,
+            },
+        },
+    }
+
+
+def pad_pickups_with_nothing(
+    patcher_data: dict,
+    *,
+    seen_indices: set[int],
+    min_items: int = ODR_PICKUPS_MIN_ITEMS,
+) -> int:
+    """Append Nothing for every unused dread pickup index."""
+    pickups = patcher_data.setdefault("pickups", [])
+    added = 0
+    for idx in _all_dread_pickup_indices():
+        if idx in seen_indices:
+            continue
+        entry = create_nothing_pad_entry(idx)
+        if not entry:
+            print(f"[WARNING] Cannot pad pickup index {idx} with Nothing (no actor/special)")
+            continue
+        pickups.append(entry)
+        seen_indices.add(idx)
+        added += 1
+    if len(pickups) < min_items:
+        print(
+            f"[WARN] pickups={len(pickups)} still below ODR minItems={min_items} "
+            "after Nothing padding — schema validation may fail"
+        )
+    return added
+
+
+def enable_death_counter(patcher_data: dict) -> None:
+    """Turn on ODR's in-game HUD death counter (cosmetic_patches.lua.custom_init)."""
+    cosmetic = patcher_data.setdefault("cosmetic_patches", {})
+    if not isinstance(cosmetic, dict):
+        cosmetic = {}
+        patcher_data["cosmetic_patches"] = cosmetic
+    lua = cosmetic.setdefault("lua", {})
+    if not isinstance(lua, dict):
+        lua = {}
+        cosmetic["lua"] = lua
+    custom_init = lua.setdefault("custom_init", {})
+    if not isinstance(custom_init, dict):
+        custom_init = {}
+        lua["custom_init"] = custom_init
+    custom_init["enable_death_counter"] = True
+
+
+COSMETIC_COMBAT_PATHS: dict[str, tuple[str, ...]] = {
+    "bShowBossLifebar": ("cosmetic_patches", "config", "AIManager", "bShowBossLifebar"),
+    "bShowEnemyLife": ("cosmetic_patches", "config", "AIManager", "bShowEnemyLife"),
+    "bShowEnemyDamage": ("cosmetic_patches", "config", "AIManager", "bShowEnemyDamage"),
+    "bShowPlayerDamage": ("cosmetic_patches", "config", "AIManager", "bShowPlayerDamage"),
+    "enable_death_counter": ("cosmetic_patches", "lua", "custom_init", "enable_death_counter"),
+    # Include this only when the installed ODR schema supports 2.19 fields.
+    "show_dna_in_hud": ("cosmetic_patches", "lua", "custom_init", "show_dna_in_hud"),
+    "enable_room_name_display": ("cosmetic_patches", "lua", "custom_init", "enable_room_name_display"),
+    "raven_beak_damage_table_handling": ("game_patches", "raven_beak_damage_table_handling"),
+    "nerf_power_bombs": ("game_patches", "nerf_power_bombs"),
+    "skip_item_popups": ("skip_item_popups",),
+    "default_x_released": ("game_patches", "default_x_released"),
+    "energy_per_tank": ("energy_per_tank",),
+    # Put energy settings at the root, not under cosmetic_patches.
+    "immediate_energy_parts": ("immediate_energy_parts",),
+}
+
+
+def _normalize_constant_environment_damage(raw) -> dict:
+    """ODR expects heat/cold/lava keys; null = vanilla scaling, number = constant DPS."""
+    if not isinstance(raw, dict):
+        raw = {}
+    out = {}
+    for key in ("heat", "cold", "lava"):
+        val = raw.get(key, None)
+        if val is None:
+            out[key] = None
+            continue
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            out[key] = None
+            continue
+        # Zero keeps normal damage; positive values set damage per second.
+        out[key] = None if num <= 0 else num
+    return out
+
+# Remove fields older ODR schemas do not allow.
+_CUSTOM_INIT_OPTIONAL_KEYS = frozenset({"show_dna_in_hud"})
+_ROOT_OPTIONAL_KEYS = frozenset({
+    "has_flash_upgrades",
+    "has_speed_upgrades",
+    "enable_logging",
+    "skip_item_popups",
+})
+_COSMETIC_OPTIONAL_KEYS = frozenset({"split_saves"})
+
+# Reuse the schema checked for each Python interpreter.
+_ODR_SCHEMA_CACHE: dict[Optional[tuple], Optional[dict]] = {}
+
+
+def _load_odr_schema(py_cmd: Optional[List[str]] = None) -> Optional[dict]:
+    """Load open-dread-rando files/schema.json from *py_cmd* or this process."""
+    cache_key: Optional[tuple]
+    if py_cmd:
+        cache_key = tuple(py_cmd)
+    else:
+        cache_key = None
+    if cache_key in _ODR_SCHEMA_CACHE:
+        return _ODR_SCHEMA_CACHE[cache_key]
+
+    schema: Optional[dict] = None
+    if py_cmd:
+        import subprocess
+
+        # Read only the property names needed to filter settings.
+        probe = (
+            "import json,os;"
+            "import open_dread_rando;"
+            "p=os.path.join(os.path.dirname(open_dread_rando.__file__),'files','schema.json');"
+            "s=json.load(open(p,encoding='utf-8'));"
+            "ci=s['properties']['cosmetic_patches']['properties']['lua']"
+            "['properties']['custom_init']['properties'];"
+            "cp=s['properties']['cosmetic_patches']['properties'];"
+            "print(json.dumps({"
+            "'root':sorted(s['properties']),"
+            "'custom_init':sorted(ci),"
+            "'cosmetic':sorted(cp)"
+            "}))"
+        )
+        try:
+            r = subprocess.run(
+                list(py_cmd) + ["-c", probe],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if r.returncode == 0 and (r.stdout or "").strip():
+                summary = json.loads(r.stdout.strip().splitlines()[-1])
+                # Build a small schema dictionary for the helpers below.
+                schema = {
+                    "properties": {
+                        **{k: {} for k in summary.get("root", [])},
+                        "cosmetic_patches": {
+                            "properties": {
+                                **{k: {} for k in summary.get("cosmetic", [])},
+                                "lua": {
+                                    "properties": {
+                                        "custom_init": {
+                                            "properties": {
+                                                k: {}
+                                                for k in summary.get("custom_init", [])
+                                            }
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError, KeyError):
+            schema = None
+    else:
+        try:
+            import open_dread_rando
+
+            schema_path = (
+                Path(open_dread_rando.__file__).resolve().parent / "files" / "schema.json"
+            )
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        except Exception:
+            schema = None
+
+    _ODR_SCHEMA_CACHE[cache_key] = schema
+    return schema
+
+
+def _load_odr_custom_init_properties(
+    py_cmd: Optional[List[str]] = None,
+) -> Optional[frozenset]:
+    """Return allowed custom_init property names from an installed ODR schema."""
+    schema = _load_odr_schema(py_cmd)
+    if not schema:
+        return None
+    try:
+        props = (
+            schema["properties"]["cosmetic_patches"]["properties"]["lua"]["properties"][
+                "custom_init"
+            ]["properties"]
+        )
+        return frozenset(str(k) for k in props)
+    except (KeyError, TypeError):
+        return None
+
+
+def _load_odr_root_properties(
+    py_cmd: Optional[List[str]] = None,
+) -> Optional[frozenset]:
+    """Return allowed top-level patcher.json property names from ODR schema."""
+    schema = _load_odr_schema(py_cmd)
+    if not schema:
+        return None
+    try:
+        return frozenset(str(k) for k in schema["properties"])
+    except (KeyError, TypeError):
+        return None
+
+
+def _cosmetic_custom_init_field_supported(field: str) -> bool:
+    """Whether *field* may be written under cosmetic_patches.lua.custom_init."""
+    allowed = _load_odr_custom_init_properties()
+    if allowed is not None:
+        return field in allowed
+    # When ODR is unknown, leave out fields rejected by 2.18 and earlier.
+    return field not in _CUSTOM_INIT_OPTIONAL_KEYS
+
+
+def _root_field_supported(field: str, py_cmd: Optional[List[str]] = None) -> bool:
+    """Whether *field* may be written at the patcher.json root for target ODR."""
+    allowed = _load_odr_root_properties(py_cmd)
+    if allowed is not None:
+        return field in allowed
+    return field not in _ROOT_OPTIONAL_KEYS
+
+
+def sanitize_custom_init_for_odr(
+    patcher_data: dict,
+    *,
+    py_cmd: Optional[List[str]] = None,
+) -> list[str]:
+    """Drop custom_init keys the target ODR schema does not allow."""
+    try:
+        custom_init = patcher_data["cosmetic_patches"]["lua"]["custom_init"]
+    except (KeyError, TypeError):
+        return []
+    if not isinstance(custom_init, dict):
+        return []
+
+    allowed = _load_odr_custom_init_properties(py_cmd)
+    removed: list[str] = []
+    if allowed is None:
+        # Use safe defaults if checking the schema fails.
+        drop = [k for k in list(custom_init) if k in _CUSTOM_INIT_OPTIONAL_KEYS]
+    else:
+        drop = [k for k in list(custom_init) if k not in allowed]
+
+    for key in drop:
+        custom_init.pop(key, None)
+        removed.append(key)
+    return removed
+
+
+def sanitize_root_for_odr(
+    patcher_data: dict,
+    *,
+    py_cmd: Optional[List[str]] = None,
+) -> list[str]:
+    """Drop root keys the target ODR schema rejects (additionalProperties: false)."""
+    if not isinstance(patcher_data, dict):
+        return []
+    allowed = _load_odr_root_properties(py_cmd)
+    removed: list[str] = []
+    if allowed is None:
+        drop = [k for k in list(patcher_data) if k in _ROOT_OPTIONAL_KEYS]
+    else:
+        # Keep AP-only fields until the final patch step has saved them.
+        drop = [
+            k
+            for k in list(patcher_data)
+            if k not in allowed and not str(k).startswith("_")
+        ]
+    for key in drop:
+        patcher_data.pop(key, None)
+        removed.append(key)
+    return removed
+
+
+def sanitize_cosmetic_for_odr(
+    patcher_data: dict,
+    *,
+    py_cmd: Optional[List[str]] = None,
+) -> list[str]:
+    """Drop cosmetic_patches keys unsupported by the target ODR schema."""
+    try:
+        cosmetic = patcher_data["cosmetic_patches"]
+    except (KeyError, TypeError):
+        return []
+    if not isinstance(cosmetic, dict):
+        return []
+
+    schema = _load_odr_schema(py_cmd)
+    removed: list[str] = []
+    if schema is None:
+        drop = [k for k in list(cosmetic) if k in _COSMETIC_OPTIONAL_KEYS]
+    else:
+        try:
+            allowed = frozenset(
+                schema["properties"]["cosmetic_patches"]["properties"]
+            )
+        except (KeyError, TypeError):
+            drop = [k for k in list(cosmetic) if k in _COSMETIC_OPTIONAL_KEYS]
+        else:
+            # Remove only known optional fields the installed schema does not support.
+            drop = [
+                k
+                for k in list(cosmetic)
+                if k in _COSMETIC_OPTIONAL_KEYS and k not in allowed
+            ]
+    for key in drop:
+        cosmetic.pop(key, None)
+        removed.append(key)
+    return removed
+
+
+def sanitize_patcher_for_odr(
+    patcher_data: dict,
+    *,
+    py_cmd: Optional[List[str]] = None,
+) -> list[str]:
+    """Strip all known ODR-version-skew fields the target schema rejects."""
+    removed: list[str] = []
+    for key in sanitize_root_for_odr(patcher_data, py_cmd=py_cmd):
+        removed.append(key)
+    for key in sanitize_cosmetic_for_odr(patcher_data, py_cmd=py_cmd):
+        removed.append(f"cosmetic_patches.{key}")
+    for key in sanitize_custom_init_for_odr(patcher_data, py_cmd=py_cmd):
+        removed.append(key)
+    return removed
+
+
+def _patcher_has_item(patcher_data: dict, item_id: str) -> bool:
+    """True if starting_items or any pickup grants *item_id* with qty > 0."""
+    start = patcher_data.get("starting_items") or {}
+    if isinstance(start, dict) and int(start.get(item_id, 0) or 0) > 0:
+        return True
+    for pickup in patcher_data.get("pickups") or []:
+        if not isinstance(pickup, dict):
+            continue
+        for stage in pickup.get("resources") or []:
+            if not isinstance(stage, list):
+                continue
+            for entry in stage:
+                if (
+                    isinstance(entry, dict)
+                    and entry.get("item_id") == item_id
+                    and int(entry.get("quantity", 0) or 0) > 0
+                ):
+                    return True
+    return False
+
+
+def apply_upgrade_menu_flags(
+    patcher_data: dict,
+    *,
+    py_cmd: Optional[List[str]] = None,
+) -> None:
+    """Set has_flash_upgrades / has_speed_upgrades when the ODR schema allows."""
+    if _root_field_supported("has_flash_upgrades", py_cmd):
+        patcher_data["has_flash_upgrades"] = _patcher_has_item(
+            patcher_data, "ITEM_UPGRADE_FLASH_SHIFT_CHAIN"
+        )
+    else:
+        patcher_data.pop("has_flash_upgrades", None)
+
+    if _root_field_supported("has_speed_upgrades", py_cmd):
+        patcher_data["has_speed_upgrades"] = _patcher_has_item(
+            patcher_data, "ITEM_UPGRADE_SPEED_BOOST_CHARGE"
+        )
+    else:
+        patcher_data.pop("has_speed_upgrades", None)
+
+LIGHT_REGION_TO_SCENARIO: dict[str, str] = {
+    "artaria": "s010_cave",
+    "cataris": "s020_magma",
+    "dairon": "s030_baselab",
+    "burenia": "s040_aqua",
+    "ghavoran": "s050_forest",
+    "elun": "s060_quarantine",
+    "ferenia": "s070_basesanc",
+    "hanubia": "s080_shipyard",
+    "itorash": "s090_skybase",
+}
+
+def _set_nested(root: dict, path: tuple[str, ...], value) -> None:
+    cur = root
+    for key in path[:-1]:
+        nxt = cur.get(key)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cur[key] = nxt
+        cur = nxt
+    cur[path[-1]] = value
+
+
+def _objective_hints_for(required_artifacts: int, game_goal: int = 0) -> list:
+    n = int(required_artifacts)
+    goal = int(game_goal)
+    if goal == 1:
+        if n <= 0:
+            return ["Collect 100% of checks, then defeat Raven Beak."]
+        return [
+            f"Collect 100% of checks and {n} Metroid DNA, then defeat Raven Beak."
+        ]
+    if goal == 2:
+        if n <= 0:
+            return ["Defeat every boss, then defeat Raven Beak."]
+        return [
+            f"Defeat every boss, collect {n} Metroid DNA, then defeat Raven Beak."
+        ]
+    if n <= 0:
+        return ["Return to your ship and escape ZDR."]
+    return [f"Collect {n} Metroid DNA, then defeat Raven Beak."]
+
+
+def _sanitize_connection_name(name: str) -> str:
+    """Normalize transporter labels for ODR map-icon ids / BTXT keys."""
+    cleaned = str(name or "").replace(".", "").strip()
+    return cleaned or "Unknown"
+
+
+def _harden_elevator_entry(entry: dict) -> dict:
+    """Ensure elevator entries are safe for open-dread-rando + in-game use."""
+    entry = dict(entry)
+    tele = dict(entry.get("teleporter") or {})
+    dest = dict(entry.get("destination") or {})
+    for blob, label in ((tele, "teleporter"), (dest, "destination")):
+        scen = blob.get("scenario")
+        actor = blob.get("actor")
+        if not isinstance(scen, str) or not scen.strip():
+            raise ValueError(f"elevator {label}.scenario missing/empty: {entry!r}")
+        if not isinstance(actor, str) or not actor.strip():
+            raise ValueError(f"elevator {label}.actor missing/empty: {entry!r}")
+        blob["scenario"] = scen.strip()
+        blob["actor"] = actor.strip()
+    entry["teleporter"] = tele
+    entry["destination"] = dest
+    raw_name = entry.get("connection_name") or dest.get("scenario") or dest.get("actor") or "Unknown"
+    entry["connection_name"] = _sanitize_connection_name(raw_name)
+    return entry
+
+
+def _apply_elevator_destination_room_names(patcher_data: dict, elevators: list) -> None:
+    """Overlay transporter collision-cameras with shuffled destination labels."""
+    if not elevators:
+        return
+    cosmetic = patcher_data.setdefault("cosmetic_patches", {})
+    lua = cosmetic.setdefault("lua", {})
+    custom_init = lua.setdefault("custom_init", {})
+    if custom_init.get("enable_room_name_display") == "NEVER":
+        custom_init["enable_room_name_display"] = "ALWAYS"
+    camera_dict = lua.setdefault("camera_names_dict", {})
+    applied = 0
+    for entry in elevators:
+        tele = entry.get("teleporter") or {}
+        scenario = tele.get("scenario")
+        camera = entry.get("source_camera")
+        label = entry.get("connection_name")
+        if not scenario or not camera or not label:
+            continue
+        camera_dict.setdefault(scenario, {})[camera] = f"Transport to {label}"
+        applied += 1
+    if applied:
+        print(f"[OK] Applied {applied} transporter room-name overlays")
+
+
+def _normalize_mass_delete_entry(entry: dict) -> dict:
+    """Coerce a mass_delete_actors to_remove entry to open-dread-rando schema."""
+    entry = dict(entry)
+    method = entry.get("method", "all")
+    if isinstance(method, list):
+        method = method[0] if method else "all"
+    elif not isinstance(method, str):
+        method = str(method)
+    entry["method"] = method
+    if method in ("remove_from_groups", "keep_from_groups"):
+        groups = entry.get("actor_groups")
+        if isinstance(groups, str):
+            entry["actor_groups"] = [groups]
+        elif not isinstance(groups, list):
+            entry["actor_groups"] = []
+    return entry
+
+
+def _mass_delete_to_remove_list(patcher_data: dict) -> list:
+    """Return the to_remove list, accepting legacy flat-list mass_delete_actors."""
+    mda = patcher_data.get("mass_delete_actors")
+    if isinstance(mda, dict):
+        to_remove = mda.get("to_remove")
+        if isinstance(to_remove, list):
+            return [_normalize_mass_delete_entry(e) for e in to_remove if isinstance(e, dict)]
+        return []
+    if isinstance(mda, list):
+        return [_normalize_mass_delete_entry(e) for e in mda if isinstance(e, dict)]
+    return []
+
+
+def _set_mass_delete_to_remove(patcher_data: dict, to_remove: list) -> None:
+    """Write to_remove under mass_delete_actors using the ODR object shape."""
+    mda = patcher_data.get("mass_delete_actors")
+    if isinstance(mda, dict):
+        mda = dict(mda)
+    else:
+        mda = {}
+    mda["to_remove"] = [_normalize_mass_delete_entry(e) for e in to_remove if isinstance(e, dict)]
+    mda.setdefault("to_keep", [])
+    patcher_data["mass_delete_actors"] = mda
+
+
+def _station_warp_from_extras(extras: dict) -> tuple[bool, str, str]:
+    """Return (enabled, requirement, reach) for the pause-map station warp.
+
+    ``station_map_warp`` is the master enable. ``warp_allow`` is accepted as an
+    alias so a caller that set only one of them still turns the warp on.
+    Missing or unknown requirement/reach fall back to the script's current
+    behavior: visited stations, any region the pause map can show (global).
+    """
+    enabled = bool(extras.get("station_map_warp")) or bool(extras.get("warp_allow"))
+    requirement = str(extras.get("warp_requirement") or "visited").strip().lower()
+    reach = str(extras.get("warp_reach") or "global").strip().lower()
+    if requirement not in ("visible", "visited"):
+        requirement = "visited"
+    if reach not in ("local", "global"):
+        reach = "global"
+    return enabled, requirement, reach
+
+
+def apply_dread_patch_extras(patcher_data: dict, extras: dict, *, our_player: str) -> None:
+    """Merge door/elevator/DNA/cosmetic overrides from generation into patcher JSON."""
+    if not extras:
+        return
+
+    # Remove this before ODR validation; off means no station-warp script.
+    # station_map_warp normally controls whether station warping is enabled.
+    # Also accept warp_allow so an explicit enabled setting is not lost.
+    enabled, requirement, reach = _station_warp_from_extras(extras)
+    patcher_data["_ap_station_map_warp"] = enabled
+    patcher_data["_ap_station_warp_requirement"] = requirement
+    patcher_data["_ap_station_warp_reach"] = reach
+
+    door_patches = extras.get("door_patches") or []
+    if door_patches:
+        from worlds.metroid_bread.logic.door_rando_db import (
+            ODR_CANNOT_ADD_DOOR_TYPES,
+            is_odr_patchable_door_actor,
+            patchable_door_types,
+        )
+
+        allowed = patchable_door_types()
+        cleaned = []
+        dropped_actors = []
+        for entry in door_patches:
+            if not isinstance(entry, dict):
+                continue
+            door_type = entry.get("door_type")
+            if door_type in ODR_CANNOT_ADD_DOOR_TYPES:
+                raise ValueError(
+                    f"door_patches refuse non-addable door_type={door_type!r} "
+                    f"(never emit phantom_cloak / phase_shift)"
+                )
+            if door_type not in allowed:
+                raise ValueError(
+                    f"door_patches refuse unsupported door_type={door_type!r}; "
+                    f"allowed={sorted(allowed)}"
+                )
+            actor_ref = entry.get("actor") if isinstance(entry.get("actor"), dict) else {}
+            actor_name = actor_ref.get("actor") if actor_ref else None
+            # Never pass unsupported shutter, thermal, or unknown door types.
+            if not is_odr_patchable_door_actor(str(actor_name or "")):
+                dropped_actors.append(str(actor_name or "?"))
+                continue
+            cleaned.append(entry)
+        patcher_data["door_patches"] = cleaned
+        if dropped_actors:
+            print(
+                f"[WARN] Dropped {len(dropped_actors)} non-patchable door actor(s): "
+                f"{dropped_actors[:8]}"
+            )
+        print(f"[OK] Applied {len(cleaned)} door_patches from seed options")
+
+    elevators = extras.get("elevators") or []
+    if elevators:
+        elevators = [_harden_elevator_entry(entry) for entry in elevators]
+        patcher_data["elevators"] = elevators
+        print(f"[OK] Applied {len(elevators)} elevators from seed options")
+
+    cosmetic = extras.get("cosmetic_combat") or {}
+    for field, path in COSMETIC_COMBAT_PATHS.items():
+        if field not in cosmetic:
+            continue
+        # Skip custom_init fields not supported by installed ODR.
+        if (
+            len(path) >= 4
+            and path[:3] == ("cosmetic_patches", "lua", "custom_init")
+            and not _cosmetic_custom_init_field_supported(field)
+        ):
+            print(
+                f"[INFO] Omitting cosmetic_patches.lua.custom_init.{field} - "
+                f"not in installed open-dread-rando schema "
+                f"(upgrade to open-dread-rando>=2.19 for DNA HUD)"
+            )
+            continue
+        _set_nested(patcher_data, path, cosmetic[field])
+
+    # Put constant heat, cold, and lava damage settings at the root.
+    if "constant_environment_damage" in cosmetic:
+        patcher_data["constant_environment_damage"] = _normalize_constant_environment_damage(
+            cosmetic.get("constant_environment_damage")
+        )
+
+    # Read seed settings from cosmetic_combat and write ODR's root field.
+    # An explicit root-level value takes priority.
+    # Remove settings the installed ODR does not support.
+    if "skip_item_popups" in extras:
+        patcher_data["skip_item_popups"] = bool(extras.get("skip_item_popups"))
+
+    # Custom tank energy applies only with Immediate Energy Parts.
+    if "immediate_energy_parts" in cosmetic and not cosmetic.get("immediate_energy_parts"):
+        patcher_data["energy_per_tank"] = 100.0
+
+    # Apply this after appearance settings so it can override the room-name display.
+    if elevators:
+        _apply_elevator_destination_room_names(patcher_data, elevators)
+
+    lights = extras.get("disabled_lights") or []
+    if lights:
+        deletes = _mass_delete_to_remove_list(patcher_data)
+        for region_key in lights:
+            scenario = LIGHT_REGION_TO_SCENARIO.get(str(region_key).lower())
+            if not scenario:
+                continue
+            entry = {
+                "scenario": scenario,
+                "actor_layer": "rLightsLayer",
+                "method": "all",
+            }
+            if entry not in deletes:
+                deletes.append(entry)
+        _set_mass_delete_to_remove(patcher_data, deletes)
+        print(f"[OK] Applied {len(lights)} disabled_lights region(s) to mass_delete_actors")
+
+    required = extras.get("required_artifacts")
+    if required is not None:
+        obj = patcher_data.setdefault("objective", {})
+        if not isinstance(obj, dict):
+            obj = {}
+            patcher_data["objective"] = obj
+        obj["required_artifacts"] = int(required)
+        # Use the real DNA count for ADAM hints, even if All Bosses forces an artifact.
+        hint_dna = extras.get("required_dna")
+        if hint_dna is None:
+            hint_dna = required
+        obj["hints"] = _objective_hints_for(
+            int(hint_dna), int(extras.get("game_goal", 0) or 0)
+        )
+        # Grant extra artifacts so the game gate uses the required count.
+        start = patcher_data.setdefault("starting_items", {})
+        if not isinstance(start, dict):
+            start = {}
+            patcher_data["starting_items"] = start
+        for i in range(int(required) + 1, 13):
+            start[f"ITEM_RANDO_ARTIFACT_{i}"] = 1
+        print(f"[OK] objective.required_artifacts={required}")
+
+    start = patcher_data.setdefault("starting_items", {})
+    if not isinstance(start, dict):
+        start = {}
+        patcher_data["starting_items"] = start
+    if "starting_missiles" in extras:
+        start["ITEM_WEAPON_MISSILE_MAX"] = int(extras["starting_missiles"])
+    if "starting_power_bombs" in extras and int(extras["starting_power_bombs"]) > 0:
+        start["ITEM_WEAPON_POWER_BOMB_MAX"] = int(extras["starting_power_bombs"])
+    if extras.get("start_with_pulse_radar"):
+        start["ITEM_SONAR"] = 1  # Pulse Radar setting.
+    # Give starting items that make enough checks reachable.
+    for item_id, qty in (extras.get("starting_items") or {}).items():
+        start[item_id] = max(int(start.get(item_id, 0) or 0), int(qty))
+
+    # Add DNA location hints at ADAM terminals when enabled.
+    if extras.get("hint_all_dna") and extras.get("dna_locations"):
+        from worlds.metroid_bread.patcher.dread_adam_hints import ADAM_HINT_TERMINALS, format_region_hint, JOKE_HINTS
+
+        dna_locs = list(extras["dna_locations"])
+        hints = []
+        for i, terminal in enumerate(ADAM_HINT_TERMINALS):
+            if i < len(dna_locs):
+                loc = dna_locs[i]
+                # Read the hint region from Region - Area - Node.
+                region = loc.split(" - ", 1)[0] if " - " in loc else loc
+                text = format_region_hint("Metroid DNA", region)
+            else:
+                text = JOKE_HINTS[i % len(JOKE_HINTS)]
+            hints.append({
+                "accesspoint_actor": dict(terminal["accesspoint_actor"]),
+                "hint_id": terminal["hint_id"],
+                "text": text,
+            })
+        patcher_data["hints"] = hints
+        print(f"[OK] hint_all_dna: {min(len(dna_locs), len(ADAM_HINT_TERMINALS))} DNA Adam hints")
+
+
+# Do not use example placeholders as a real seed ID.
+_PLACEHOLDER_LAYOUT_UUIDS = frozenset({
+    "00000000-0000-1111-0000-000000000000",
+})
+# Use the same layout ID for the same AP room and player.
+_AP_DREAD_LAYOUT_NAMESPACE = uuid.UUID("b3c8f0a1-5e2d-4a7b-9c6e-1f8d4a2b0e73")
+
+
+# Add AP branding to the title-screen text.
+DEFAULT_ODR_VERSION = "2.18.0"
+_STALE_RDV_SEED_MARKERS = ("Slaaga Spittail Robe", "57GXBFRH")
+_DIFSELECTOR_LABEL_KEYS = (
+    "GUI_DIFSELECTOR_LABEL_DESCRIPTOR_EASY",
+    "GUI_DIFSELECTOR_LABEL_DESCRIPTOR_NORMAL",
+    "GUI_DIFSELECTOR_LABEL_DESCRIPTOR_HARD_UNLOCKED",
+    "GUI_DIFSELECTOR_LABEL_DESCRIPTOR_EXPERT",
+)
+
+
+def ap_world_version() -> str:
+    """AP world / apworld build version from archipelago.json."""
+    path = _ROOT / "archipelago.json"
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        version = data.get("world_version") if isinstance(data, dict) else None
+        if isinstance(version, str) and version.strip():
+            return version.strip()
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    return "0.0.0"
+
+
+def open_dread_rando_version() -> str:
+    """Installed ODR version when importable; else the pinned fallback."""
+    try:
+        from open_dread_rando.version import version as odr_version
+
+        text = str(odr_version).strip()
+        if text:
+            return text
+    except Exception:
+        pass
+    return DEFAULT_ODR_VERSION
+
+
+def format_display_seed_id(seed_key: str) -> str:
+    """Turn a raw AP seed into a short title-screen id."""
+    key = (seed_key or "").strip()
+    if not key or any(m in key for m in _STALE_RDV_SEED_MARKERS):
+        return ""
+    match = re.fullmatch(r"(?:SEED_|AP_)?(\d{10,})", key)
+    if match:
+        return match.group(1)
+    if key.startswith("SEED_"):
+        return key[5:]
+    if key.startswith("AP_"):
+        return key
+    # Do not show fallback file paths on the title screen.
+    if "/" in key or "\\" in key or len(key) > 48:
+        return ""
+    return key
+
+
+def layout_uuid_short(layout_uuid: Optional[str]) -> str:
+    if not isinstance(layout_uuid, str):
+        return ""
+    value = layout_uuid.strip()
+    if not value or value in _PLACEHOLDER_LAYOUT_UUIDS:
+        return ""
+    compact = value.replace("-", "")
+    return compact[:8].upper() if len(compact) >= 8 else compact.upper()
+
+
+def resolve_title_seed_id(
+    *,
+    seed_id: Optional[str] = None,
+    patcher_data: Optional[dict] = None,
+) -> str:
+    """Prefer the real AP seed; fall back to a short layout UUID."""
+    direct = format_display_seed_id(seed_id or "")
+    if direct:
+        return direct
+    if isinstance(patcher_data, dict):
+        short = layout_uuid_short(patcher_data.get("layout_uuid"))
+        if short:
+            return short
+    return "unknown"
+
+
+def build_company_title_screen(
+    *,
+    version: Optional[str] = None,
+    odr_version: Optional[str] = None,
+    seed_id: str,
+) -> str:
+    # Allow only printable ASCII in title text, like the credits.
+    ver = sanitize_credits_text(
+        (version or ap_world_version()).strip(),
+        max_lines=1,
+        allow_newlines=False,
+    )
+    odr = sanitize_credits_text(
+        (odr_version or open_dread_rando_version()).strip(),
+        max_lines=1,
+        allow_newlines=False,
+    )
+    sid = sanitize_credits_text(
+        (seed_id or "unknown").strip() or "unknown",
+        max_lines=1,
+        allow_newlines=False,
+    )
+    return sanitize_credits_text(
+        f"Metroid Bread AP\nAP World v{ver} - open-dread-rando {odr}|{sid}",
+        max_lines=2,
+    )
+
+
+def apply_company_title_screen(
+    patcher_data: dict,
+    *,
+    seed_id: Optional[str] = None,
+) -> str:
+    """Replace GUI_COMPANY_TITLE_SCREEN entirely (no RDV leftover prepend)."""
+    sid = resolve_title_seed_id(seed_id=seed_id, patcher_data=patcher_data)
+    title = build_company_title_screen(seed_id=sid)
+    text = patcher_data.setdefault("text_patches", {})
+    if isinstance(text, dict):
+        text["GUI_COMPANY_TITLE_SCREEN"] = title
+        for key in _DIFSELECTOR_LABEL_KEYS:
+            text[key] = sid
+    if sid and sid != "unknown":
+        patcher_data["_ap_seed_id"] = sid
+    return title
+
+
+def normalize_ap_seed_id(value: Optional[str]) -> str:
+    """Canonical seed id for client↔game compare (title / RoomInfo / Init.sApSeedId)."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    # Ignore command replies and status text that cannot be seed IDs.
+    if "|" in raw or "," in raw or "=" in raw or " " in raw:
+        return ""
+    # Accept long seed digits, optionally prefixed with SEED_ or AP_.
+    match = re.fullmatch(r"(?:SEED_|AP_)?(\d{10,})", raw)
+    if match:
+        return match.group(1)
+    # Also accept the short layout-ID fragment used by some patches.
+    if re.fullmatch(r"[0-9A-Fa-f]{8}", raw):
+        return raw.upper()
+    return ""
+
+
+def seeds_match(client_seed: Optional[str], game_seed: Optional[str]) -> bool:
+    """True when either side is unknown, or both normalize to the same id."""
+    a = normalize_ap_seed_id(client_seed)
+    b = normalize_ap_seed_id(game_seed)
+    if not a or not b:
+        return True
+    return a == b
+
+
+def _read_layout_uuid(path: Path) -> Optional[str]:
+    if not path.is_file():
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    value = data.get("layout_uuid") if isinstance(data, dict) else None
+    if isinstance(value, str) and value and value not in _PLACEHOLDER_LAYOUT_UUIDS:
+        return value
+    return None
+
+
+def derive_layout_uuid(seed_name: str, player_name: str) -> str:
+    """Deterministic UUID for a seed+player (safe across re-patches)."""
+    key = f"{seed_name or 'unknown'}::{player_name}"
+    return str(uuid.uuid5(_AP_DREAD_LAYOUT_NAMESPACE, key))
+
+
+def resolve_layout_uuid(
+    slot_dir: Optional[Path],
+    seed_name: str,
+    player_name: str,
+    template_patcher: dict,
+    *,
+    layout_uuid: Optional[str] = None,
+) -> str:
+    """Pick layout_uuid without inventing a fresh random id each run."""
+    if isinstance(layout_uuid, str) and layout_uuid.strip():
+        return layout_uuid.strip()
+
+    if slot_dir is not None:
+        existing = _read_layout_uuid(slot_dir / f"AP_{player_name}_patcher.json")
+        if existing:
+            print(f"[OK] Preserving layout_uuid from existing patcher JSON: {existing}")
+            return existing
+
+    tmpl = template_patcher.get("layout_uuid")
+    if isinstance(tmpl, str) and tmpl and tmpl not in _PLACEHOLDER_LAYOUT_UUIDS:
+        print(f"[OK] Using layout_uuid from template: {tmpl}")
+        return tmpl
+
+    derived = derive_layout_uuid(seed_name, player_name)
+    print(f"[OK] Derived stable layout_uuid from seed+player: {derived}")
+    return derived
+
+
+# Remember revealed sprites from the last patcher JSON build.
+_LAST_MAP_ICON_SPRITES: Dict[int, Tuple[int, int]] = {}
+
+
+def last_map_icon_sprites() -> Dict[int, Tuple[int, int]]:
+    return dict(_LAST_MAP_ICON_SPRITES)
+
+
+def placements_from_slot(slot: dict, our_player_name: str) -> List[Tuple]:
+    """Slot placements are {location, item, item_player}. Location is 'Region - Area - Node'."""
+    rows = slot.get("placements") or []
+    out: List[Tuple] = []
+    if not isinstance(rows, list):
+        return out
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        parts = str(row.get("location") or "").split(" - ", 2)
+        if len(parts) != 3:
+            continue
+        item = str(row.get("item") or "")
+        owner = str(row.get("item_player") or our_player_name).strip() or our_player_name
+        region, area, node = (part.strip() for part in parts)
+        out.append((region, area, node, item, owner, owner == our_player_name))
+    return out
+
+
+def load_slot_file(path: Path) -> dict:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"Slot file is not a JSON object: {path}")
+    if not data.get("placements"):
+        raise ValueError(
+            f"{path.name} has no placements. Generate the seed again so slot data includes them."
+        )
+    return data
+
+
+def _starting_path_from_slot(slot: dict) -> str:
+    start = slot.get("starting_location")
+    if not isinstance(start, dict):
+        return ""
+    path = str(start.get("path") or "").strip()
+    if path:
+        return path
+    parts = [start.get("region"), start.get("area"), start.get("node")]
+    if all(parts):
+        return "/".join(str(part) for part in parts)
+    return ""
+
+
+def create_patcher_json(
+    slot: dict,
+    template_patcher: dict,
+    *,
+    layout_uuid: Optional[str] = None,
+    slot_dir: Optional[Path] = None,
+) -> dict:
+    """Create patcher.json from Archipelago slot data."""
+    our_player_name = str(slot.get("player_name") or "").strip() or "DreadPlayer"
+    seed_name = str(slot.get("seed_name") or "").strip()
+    print(f"[INFO] Using slot data for {our_player_name} (seed {seed_name or 'unknown'})")
+    placements = placements_from_slot(slot, our_player_name)
+    print(f"[INFO] Found {len(placements)} item placements")
+    if not placements:
+        raise ValueError(
+            f"Slot data for {our_player_name!r} has no usable placements. "
+            "Generate the seed again with this Metroid Bread version."
+        )
+
+    start_path = _starting_path_from_slot(slot)
+    start_ref = (
+        _path_to_patcher_ref(start_path, our_player_name)
+        if start_path
+        else dict(DEFAULT_PATCHER_REF)
+    )
+    resolved_layout_uuid = resolve_layout_uuid(
+        slot_dir,
+        seed_name,
+        our_player_name,
+        template_patcher,
+        layout_uuid=layout_uuid,
+    )
+
+    # Start with the ODR template structure.
+    patcher_data = {
+        "configuration_identifier": "AP_MULTIWORLD",
+        "starting_location": start_ref,
+        "starting_items": {
+            "ITEM_WEAPON_MISSILE_MAX": 15,
+            "ITEM_FLOOR_SLIDE": 1,
+        },
+        "starting_text": [["{c1}Archipelago Multiworld{c0}"]],
+        "pickups": [],
+        "elevators": template_patcher.get("elevators", []),
+        "hints": [],  # Fill this from the seed's placements below.
+        "text_patches": template_patcher.get("text_patches", {}),
+        # Build this from the current seed, not the example template.
+        "spoiler_log": {},
+        # Copy nested values so seed settings cannot change the shared template.
+        "cosmetic_patches": copy.deepcopy(template_patcher.get("cosmetic_patches", {})),
+        "energy_per_tank": template_patcher.get("energy_per_tank", 100),
+        # Use RDV and Options.py defaults unless YAML settings override them.
+        "immediate_energy_parts": template_patcher.get("immediate_energy_parts", True),
+        "enable_remote_lua": True,  # Required by the AP client.
+        "constant_environment_damage": _normalize_constant_environment_damage(
+            template_patcher.get(
+                "constant_environment_damage",
+                {"heat": 20, "cold": 20, "lava": 20},
+            )
+        ),
+        "game_patches": {
+            # The schema does not allow custom files here.
+            **template_patcher.get("game_patches", {})
+        },
+        "show_shields_on_minimap": template_patcher.get("show_shields_on_minimap", True),
+        "door_patches": template_patcher.get("door_patches", []),
+        "tile_group_patches": template_patcher.get("tile_group_patches", []),
+        "new_spawn_points": template_patcher.get("new_spawn_points", []),
+        "objective": template_patcher.get("objective", {}),  # Restore the template value.
+        "mass_delete_actors": template_patcher.get(
+            "mass_delete_actors", {"to_remove": [], "to_keep": []}
+        ),
+        "layout_uuid": resolved_layout_uuid,
+        # Default to Ryujinx; direct patching switches this for Atmosphere.
+        "mod_compatibility": "ryujinx",
+        "mod_category": "romfs"  # Required to load the mod correctly.
+    }
+
+    extras = slot.get("patch_extras") if isinstance(slot.get("patch_extras"), dict) else {}
+
+    # Enable the death counter by default unless seed settings override it.
+    if not extras or extras.get("cosmetic_combat", {}).get("enable_death_counter", True):
+        enable_death_counter(patcher_data)
+
+    from worlds.metroid_bread.patcher.dread_adam_hints import build_adam_hints
+
+    patcher_data["hints"] = build_adam_hints(placements, our_player=our_player_name)
+    print(f"[OK] Generated {len(patcher_data['hints'])} Adam Nav Station hints")
+
+    # Build the Major Item Locations credits from this seed.
+    spoiler_log = build_credits_spoiler_log(placements, our_player=our_player_name)
+    patcher_data["spoiler_log"] = spoiler_log
+    print(f"[OK] Credits spoiler_log: {len(spoiler_log)} major item entries")
+
+    apply_dread_patch_extras(patcher_data, extras, our_player=our_player_name)
+
+    try:
+        from worlds.metroid_bread.logic.flash_shift import plan_from_extras
+
+        flash_shift_plan = plan_from_extras(extras)
+    except Exception:
+        flash_shift_plan = None
+
+    try:
+        from worlds.metroid_bread.patcher.dread_item_mapping import yields_from_extras
+
+        yield_plan = yields_from_extras(extras)
+    except Exception:
+        yield_plan = None
+
+    # Without extra settings, keep normal X release and no DNA requirement.
+    if not extras:
+        if "game_patches" in patcher_data and isinstance(patcher_data["game_patches"], dict):
+            patcher_data["game_patches"]["default_x_released"] = False
+        if "objective" in patcher_data and isinstance(patcher_data["objective"], dict):
+            patcher_data["objective"]["required_artifacts"] = 0
+            patcher_data["objective"]["hints"] = []
+
+    # Keep starting items supported by the ODR schema.
+    start = patcher_data.get("starting_items") or {}
+    patcher_data["starting_items"] = {
+        _sanitize_item_id(k): v for k, v in start.items() if _sanitize_item_id(k) != "ITEM_NONE" or k == "ITEM_NONE"
+    }
+    
+    # Build one entry per pickup index, even if a location is listed twice.
+    foreign_count = 0
+    dread_count = 0
+    seen_indices: set[int] = set()
+    skipped_dupes = 0
+    # Map pickup indexes to revealed icon labels.
+    map_icon_item_by_pickup: dict[int, str] = {}
+    # Map pickup indexes to revealed sprite rows and columns.
+    map_icon_sprite_by_pickup: dict[int, tuple[int, int]] = {}
+    dna_artifact_next = 1
+
+    for region, area, node, item, item_player, is_ours in placements:
+        # Read the pickup index.
+        location_key = f"{region}/{area}/{node}"
+        if location_key not in AP_TO_RANDOVANIA_LOCATION_MAP:
+            print(f"[WARNING] Unknown location: {location_key}")
+            continue
+
+        _, pickup_index = AP_TO_RANDOVANIA_LOCATION_MAP[location_key]
+        if pickup_index in seen_indices:
+            skipped_dupes += 1
+            continue
+        seen_indices.add(pickup_index)
+
+        is_foreign = not is_ours
+        dna_idx = None
+        if item == "Metroid DNA" and is_ours:
+            dna_idx = dna_artifact_next
+            dna_artifact_next += 1
+        pickup_entry = create_pickup_entry(
+            pickup_index,
+            item,
+            is_foreign,
+            item_player,
+            dna_artifact_index=dna_idx,
+            flash_shift_plan=flash_shift_plan,
+            yield_plan=yield_plan,
+        )
+
+        if pickup_entry:
+            patcher_data["pickups"].append(pickup_entry)
+            if is_foreign:
+                foreign_count += 1
+            else:
+                dread_count += 1
+            if (
+                pickup_entry.get("pickup_type") == "actor"
+                and isinstance(pickup_entry.get("map_icon"), dict)
+                and "custom_icon" in pickup_entry["map_icon"]
+            ):
+                map_icon_item_by_pickup[pickup_index] = _map_icon_item_label(
+                    item, is_foreign, item_player if is_foreign else None
+                )
+                map_icon_sprite_by_pickup[pickup_index] = sprite_for_item(
+                    item, is_foreign=is_foreign
+                )
+
+    # Clear leftover normal pickups even when the AP pool is smaller.
+    pool_before_pad = len(patcher_data["pickups"])
+    nothing_padded = pad_pickups_with_nothing(
+        patcher_data, seen_indices=seen_indices
+    )
+
+    special_count = sum(
+        1 for p in patcher_data["pickups"] if p.get("pickup_type") != "actor"
+    )
+    actor_custom = sum(
+        1
+        for p in patcher_data["pickups"]
+        if p.get("pickup_type") == "actor"
+        and isinstance(p.get("map_icon"), dict)
+        and "custom_icon" in p["map_icon"]
+    )
+    print(f"[OK] Generated {len(patcher_data['pickups'])} pickups")
+    print(f"     - {dread_count} Dread items")
+    print(f"     - {foreign_count} foreign items (display names; AP client grants)")
+    print(f"     - {special_count} boss/EMMI death pickups (lua callbacks)")
+    print(f"     - {actor_custom} actor pickups with unique MAP_ICON_ItemCustom* (Phase 2)")
+    if nothing_padded:
+        print(
+            f"     - padded {nothing_padded} missing slots with Nothing "
+            f"(pool was {pool_before_pad}; ODR minItems={ODR_PICKUPS_MIN_ITEMS})"
+        )
+    if skipped_dupes:
+        print(f"     - skipped {skipped_dupes} duplicate placements")
+
+    # Build unknown and revealed labels for reachable and unreachable checks.
+    from worlds.metroid_bread.tracker.dread_map_icon_labels import build_map_icon_keys_for_patcher, build_map_label_text_patches, item_names_by_custom_n, merge_text_patches
+
+    _LAST_MAP_ICON_SPRITES.clear()
+    _LAST_MAP_ICON_SPRITES.update(map_icon_sprite_by_pickup)
+
+    keys_preview = build_map_icon_keys_for_patcher(
+        patcher_data, sprite_by_pickup_index=map_icon_sprite_by_pickup
+    )
+    label_patches = build_map_label_text_patches(
+        keys_preview, item_names_by_custom_n(keys_preview, map_icon_item_by_pickup)
+    )
+    patcher_data["text_patches"] = merge_text_patches(
+        patcher_data.get("text_patches"), label_patches
+    )
+    print(
+        f"[OK] Map label text_patches: {len(label_patches)} keys "
+        f"({keys_preview.get('custom_icon_count', 0)} icons × 4 variants)"
+    )
+    no_icon = len(keys_preview.get("skipped") or [])
+    if no_icon:
+        print(f"     - {no_icon} pickups keep their vanilla map icon (no ItemCustom slot)")
+
+    # Enable the five AP loading-tip slots by default.
+    from worlds.metroid_bread.patcher.dread_carousel_tip_patches import build_carousel_tip_text_patches, carousel_tip_text_patches_enabled
+
+    if carousel_tip_text_patches_enabled():
+        tip_patches = build_carousel_tip_text_patches()
+        patcher_data["text_patches"] = merge_text_patches(
+            patcher_data.get("text_patches"), tip_patches
+        )
+        print(
+            f"[OK] Carousel tip text_patches: {len(tip_patches)} keys "
+            f"(TIP_000–TIP_004 AP POOL4 markers; {_carousel_tip_env_hint()})"
+        )
+    else:
+        print("[INFO] Carousel tip text_patches skipped (disabled)")
+
+    # Replace example title text with AP branding and the real seed ID.
+    title = apply_company_title_screen(patcher_data, seed_id=seed_name)
+    print(f"[OK] Title screen: {title.replace(chr(10), ' / ')}")
+
+    # Add upgrade menu rows only when ODR 2.19 or newer supports them.
+    apply_upgrade_menu_flags(patcher_data)
+
+    # Remove any remaining fields unsupported by installed ODR.
+    removed = sanitize_patcher_for_odr(patcher_data)
+    if removed:
+        print(
+            f"[INFO] Stripped unsupported patcher keys for ODR schema: "
+            f"{', '.join(removed)}"
+        )
+
+    print("[NOTE] Prefer: py -3.11 dread_direct_patch.py --slot ... --player ...")
+
+    return patcher_data
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python ap_to_patcher.py <slot.json> [output_file]")
+        print("Or use the full pipeline: python dread_direct_patch.py --slot ... --player ...")
+        sys.exit(1)
+
+    slot_path = Path(sys.argv[1])
+    slot = load_slot_file(slot_path)
+    our_player_name = str(slot.get("player_name") or "DreadPlayer")
+    output_file = (
+        Path(sys.argv[2]) if len(sys.argv) > 2 else slot_path.parent / f"AP_{our_player_name}_patcher.json"
+    )
+
+    print("[INFO] Loading template patcher.json...")
+    with open(_ROOT / "data" / "patcher" / "sample_patcher_WORKING.json", encoding="utf-8") as f:
+        template = json.load(f)
+
+    patcher_data = create_patcher_json(slot, template, slot_dir=slot_path.parent)
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(patcher_data, f, indent=2)
+
+    from worlds.metroid_bread.tracker.dread_map_icon_labels import build_map_icon_keys_for_patcher, write_map_icon_keys
+
+    keys_path = output_file.with_name(
+        output_file.name.replace("_patcher.json", "_map_icon_keys.json")
+        if output_file.name.endswith("_patcher.json")
+        else "map_icon_keys.json"
+    )
+    if keys_path == output_file:
+        keys_path = output_file.parent / "map_icon_keys.json"
+    keys = build_map_icon_keys_for_patcher(
+        patcher_data, sprite_by_pickup_index=last_map_icon_sprites()
+    )
+    write_map_icon_keys(keys_path, keys)
+
+    print(f"\n[OK] Created: {output_file}")
+    print(
+        f"[OK] Created: {keys_path} "
+        f"({keys.get('custom_icon_count', 0)} MAP_ICON_ItemCustom* keys)"
+    )
+    print("Apply with dread_direct_patch.py (recommended) or:")
+    print(f"  py -3.11 -m open_dread_rando --input-json {output_file} --input-path <base_rom> --output-path <ryujinx_mod>")
+
+
+if __name__ == "__main__":
+    main()

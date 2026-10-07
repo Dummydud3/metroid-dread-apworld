@@ -1,16 +1,16 @@
-# Keep dread-client-app Hub sources in the apworld for Launcher users,
-# but never ship npm/Electron install trees or build/cache junk.
-# Hub runs `npm install` on first launch when node_modules is missing.
+# Include the Hub source files in the apworld.
+# Leave out installed packages, builds, and caches.
+# Install npm packages when the Hub first starts.
 
-# npm / Electron (primary bloat — ~110MB compressed)
+# Installed npm and Electron files.
 node_modules/
 **/node_modules/
 
-# Nested git history (world may be its own repo)
+# Git history inside the world folder.
 .git/
 **/.git/
 
-# Local caches / outputs / logs
+# Local caches, output files, and logs.
 output/
 logs/
 *.log
@@ -20,80 +20,64 @@ logs/
 .vite/
 .cache/
 
-# Linux Hub client virtualenv (created at runtime; never ship)
+# The Linux client creates its Python environment at runtime.
 _metroid_bread_venv/
 **/_metroid_bread_venv/
 .venv/
 **/.venv/
 
-# Hub Setup Wizard portable Node/Python — must live under Archipelago
-# custom_worlds/, NOT inside the world package. A nested copy here bloated
-# the apworld to ~84MB (node.exe + CPython + .pdbs). Target ~2.5MB.
+# Keep portable Node and Python in Archipelago's custom_worlds folder.
+# Do not include them in the world package.
+# Including them made the package 84 MB instead of about 2.5 MB.
 custom_worlds/
 **/_metroid_bread_runtime/
 **/tools/node-*/
 **/tools/python-*/
 *.pdb
 
-# Electron / frontend build artifacts (if produced locally)
+# Local Electron builds.
 dread-client-app/dist/
 dread-client-app/out/
 dread-client-app/release/
 dread-client-app/.vite/
 
-# Editor / OS noise
+# Editor and operating system files.
 .idea/
 .vscode/
 *.swp
 Thumbs.db
 
-# ExeFS build backups — keep live subsdk9 + main.npdm only
+# Exclude build backups; keep subsdk9 and main.npdm.
 exlaunch/deploy/subsdk9.bak*
 exlaunch/deploy/*.bak*
 **/subsdk9.bak*
 
-# Local unit tests and Hub/node tests (not shipped)
-/local_tests/
+# Exclude local Python and Hub tests.
+/test/
 dread-client-app/test_*.js
 
-# Offline rebuild / fuzz / comment-shrink helpers
+# Exclude local tools for rebuilding and testing.
 /tools/
-/_gen_events.py
-/_shrink_comments.py
-/generate_rules.py
-/generate_rules_complete.py
-/generate_rules_smart.py
-/fill.py
-/reachability.py
-/verify_dread_remote_connection.py
-dread_scripts/gen_map_icon_actors.py
-dread_scripts/rebuild_map_icon_keys.py
-dread_scripts/build_ap_map_icon_atlas.py
 
-# Standalone Tk seed manager + old patcher GUI (Hub does this now)
-/DreadSeedManager.py
-/dread_patcher_gui.py
-/launch_gui.py
-/Launch_Seed_Manager.bat
-/Launch_Seed_Manager.sh
-/preset_generator.py
-/prime_config.py
-/prime_config_complete.json
-
-# Leftover HK experiment — patcher strips this on purpose
+# Exclude the old HK autosave experiment.
 dread_scripts/hk_autosave/
 
-# Docs and debug atlas dumps
+# Exclude docs and debug images.
 /docs/
 *.md
 CAUSE_OF_DEATH_MATRIX.md
 assets/*_preview.png
 assets/*_roundtrip.png
 
-# Unused PopTracker-era visualizer sheets (live map is world_layout + terrain)
+# Exclude old PopTracker map files.
 dread-client-app/visualizer/mapping.json
 dread-client-app/visualizer/images/
 
-# Machine-local Hub/patcher configs (paths, debug flags)
+# Exclude local Hub and patcher settings.
 /dread_client_ui_config.json
 /dread_direct_patch_config.json
+
+# Exclude the station warp debug backup.
+/_station_warp_bak/
+/archive/
+/assets/debug/

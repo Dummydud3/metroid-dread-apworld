@@ -8,16 +8,16 @@ const {
 assert.strictEqual(formatPythonCmd({ cmd: "py", prefixArgs: ["-3.11"] }), "py -3.11");
 assert.ok(pythonMissingError().includes("3.11–3.13"));
 
-// Python Install Manager: missing runtime (reported user code).
+// Test the Python Install Manager's missing-Python code.
 const pymanager = explainClientExit(2684354566, "");
 assert.ok(pymanager.includes("0xa0000006"), pymanager);
 assert.ok(/py install 3\.12/i.test(pymanager), pymanager);
 
-// Classic Windows py launcher.
+// Test the older Windows Python launcher.
 const classic = explainClientExit(103, "No suitable Python runtime found\n");
 assert.ok(/Python 3\.11/.test(classic), classic);
 
-// stderr wins for import errors; also hints at auto-install / requirements-client.txt.
+// Use stderr to identify missing imports and suggest client requirements.
 const missingWs = explainClientExit(
   1,
   "ModuleNotFoundError: No module named 'websockets'"
@@ -26,7 +26,7 @@ assert.ok(missingWs.includes("websockets"), missingWs);
 assert.ok(/requirements-client\.txt/i.test(missingWs), missingWs);
 assert.ok(/MetroidBread|metroid_bread_venv|local venv/i.test(missingWs), missingWs);
 
-// World-scan noise (bsdiff4) must not mask pkg_resources hang.
+// Report the pkg_resources prompt before unrelated world import errors.
 const pkgHang = explainClientExit(
   null,
   "ModuleNotFoundError: No module named 'bsdiff4'\npkg_resources not found, press enter to install it\n"
@@ -46,7 +46,7 @@ const urlArg = explainClientExit(
 );
 assert.ok(/handle_url_arg/i.test(urlArg), urlArg);
 
-// Generic: surface stderr tail.
+// Show the last stderr lines for other failures.
 const generic = explainClientExit(1, "line1\nTraceback...\nImportError: boom");
 assert.ok(generic.includes("ImportError: boom"), generic);
 

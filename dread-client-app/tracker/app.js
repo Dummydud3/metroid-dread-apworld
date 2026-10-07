@@ -88,7 +88,7 @@
 
   function filteredItemCodes(owned) {
     const pool = poolNameCounts();
-    // No pool yet (offline / old seed): show full catalog rows.
+    // Show all items when no item pool is available.
     if (!pool) {
       const all = [];
       for (const row of catalog.item_rows || []) {
@@ -176,7 +176,7 @@
   }
 
   function bossListSortKey(boss) {
-    // 0 = in-logic unbeaten (top), 1 = out-of-logic unbeaten, 2 = beaten (bottom)
+    // Sort reachable unbeaten bosses first and beaten bosses last.
     if (Boolean(boss.beaten)) return 2;
     if (Boolean(boss.in_logic)) return 0;
     return 1;
@@ -257,7 +257,7 @@
       ? (catalog.locations || []).slice()
       : (catalog.locations || []).filter((l) => l.region === activeRegion);
 
-    // In-logic unchecked first, then other unchecked, then checked.
+    // Show reachable unchecked items first, then other unchecked items, then checked items.
     locs = locs.slice().sort((a, b) => {
       const ac = bucketOf(a);
       const bc = bucketOf(b);
@@ -302,7 +302,7 @@
       mark.className = "mark";
       mark.textContent = isChecked ? "✓" : isLogic ? "●" : "";
       const label = document.createElement("span");
-      // Drop leading "Region - " for readability
+      // Remove the region prefix from the displayed name.
       const labelRegion = isAll ? loc.region : activeRegion;
       const short = String(loc.name).replace(
         new RegExp(`^${escapeRegExp(labelRegion)}\\s*-\\s*`),

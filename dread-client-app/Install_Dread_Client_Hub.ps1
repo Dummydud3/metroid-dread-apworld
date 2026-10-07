@@ -1,8 +1,8 @@
 #Requires -Version 5.1
-<#
-.SYNOPSIS
-  Install Metroid Bread Client Hub shortcuts (Desktop + Start Menu) and ensure npm deps.
-#>
+<# .SYNOPSIS
+Install Hub shortcuts and required npm packages.
+
+ #>
 param(
   [switch]$Silent,
   [switch]$NoDesktop,
@@ -113,7 +113,7 @@ function Install-NpmDeps {
   Write-Host "Installing / verifying npm dependencies..."
   Push-Location $AppDir
   try {
-    # Prefer npm.cmd: bare `npm` resolves to npm.ps1, which fails under Restricted policy.
+    # Use npm.cmd because PowerShell may block npm.ps1.
     $npm = $null
     foreach ($name in @("npm.cmd", "npm.exe")) {
       $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -140,7 +140,7 @@ function Install-NpmDeps {
       )
     }
 
-    # Electron postinstall must run (downloads platform binary).
+    # Allow Electron to download its program files after installation.
     Remove-Item Env:ELECTRON_SKIP_BINARY_DOWNLOAD -ErrorAction SilentlyContinue
     $env:npm_config_ignore_scripts = "false"
 
@@ -200,7 +200,7 @@ function Install-NpmDeps {
       Invoke-ElectronInstallJs
     }
 
-    # Still broken: delete package and reinstall so postinstall can download the binary.
+    # Reinstall Electron if its program files are still missing.
     if (-not (Test-ElectronHealthy)) {
       $electronPkg = Join-Path $AppDir "node_modules\electron"
       Write-Host "Electron still incomplete; deleting node_modules\electron and reinstalling..."
@@ -261,7 +261,7 @@ function Install-Hub {
       -Description "Metroid Bread Archipelago Client Hub"
     Write-Host "Start Menu shortcut: $($paths.StartMenuLnk)"
 
-    # Uninstall entry in the same Start Menu folder
+    # Add an uninstall shortcut in the same Start Menu folder.
     $uninstallPs1 = Join-Path $AppDir "Install_Dread_Client_Hub.ps1"
     New-Shortcut -LinkPath $paths.UninstallLnk -TargetPath "powershell.exe" `
       -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$uninstallPs1`" -Uninstall" `
@@ -270,7 +270,7 @@ function Install-Hub {
     Write-Host "Start Menu uninstall: $($paths.UninstallLnk)"
   }
 
-  # Remember install location for uninstall / repair
+  # Save the install path for repairs and uninstalling.
   $metaDir = Join-Path $env:LOCALAPPDATA "DreadClientHub"
   New-Item -ItemType Directory -Path $metaDir -Force | Out-Null
   @{

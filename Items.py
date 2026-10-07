@@ -14,12 +14,12 @@ class MetroidBreadItem(Item):
     game: str = "Metroid Bread"
 
 
-# Base ID for Metroid Bread items - using 84000 as it's not used by other worlds
+# Use 84000 as the base item ID to avoid other worlds' IDs.
 base_id = 84000
 
-# Major progression items
+# Main progression items.
 item_table: Dict[str, ItemData] = {
-    # Beams
+    # Beam items.
     "Wide Beam": ItemData(base_id + 0, ItemClassification.progression),
     "Plasma Beam": ItemData(base_id + 1, ItemClassification.progression),
     "Wave Beam": ItemData(base_id + 2, ItemClassification.progression),
@@ -29,36 +29,36 @@ item_table: Dict[str, ItemData] = {
     "Progressive Charge Beam": ItemData(base_id + 6, ItemClassification.progression, 2),
     "Grapple Beam": ItemData(base_id + 7, ItemClassification.progression),
     
-    # Missiles
+    # Missile items.
     "Missile Launcher": ItemData(base_id + 10, ItemClassification.progression),
     "Super Missile": ItemData(base_id + 11, ItemClassification.progression),
     "Ice Missile": ItemData(base_id + 12, ItemClassification.progression),
     "Progressive Missiles": ItemData(base_id + 13, ItemClassification.progression, 2),
     "Storm Missile": ItemData(base_id + 14, ItemClassification.progression),
     
-    # EMMI weapons
+    # Weapons gained from EMMIs.
     "Omega Cannon": ItemData(base_id + 15, ItemClassification.progression),
     "Omega Stream Beam": ItemData(base_id + 16, ItemClassification.progression),
     
-    # Aeion abilities
+    # Aeion ability items.
     "Phantom Cloak": ItemData(base_id + 20, ItemClassification.progression),
-    # Main ability (vanilla / require-main modes). Progressive alias when upgrades unlock.
+    # Main Flash Shift item, or its progressive alias when upgrades unlock it.
     "Flash Shift": ItemData(base_id + 21, ItemClassification.progression),
     "Pulse Radar": ItemData(base_id + 22, ItemClassification.progression),
     
-    # Suits
+    # Suit items.
     "Varia Suit": ItemData(base_id + 30, ItemClassification.progression),
     "Gravity Suit": ItemData(base_id + 31, ItemClassification.progression),
     "Progressive Suit": ItemData(base_id + 32, ItemClassification.progression, 2),
     
-    # Morph Ball items
+    # Morph Ball ability items.
     "Morph Ball": ItemData(base_id + 40, ItemClassification.progression),
     "Bomb": ItemData(base_id + 41, ItemClassification.progression),
     "Cross Bomb": ItemData(base_id + 42, ItemClassification.progression),
     "Progressive Bombs": ItemData(base_id + 43, ItemClassification.progression, 2),
     "Power Bomb": ItemData(base_id + 44, ItemClassification.progression),
     
-    # Movement items
+    # Movement ability items.
     "Slide": ItemData(base_id + 50, ItemClassification.progression),
     "Spider Magnet": ItemData(base_id + 51, ItemClassification.progression),
     "Speed Booster": ItemData(base_id + 52, ItemClassification.progression),
@@ -67,35 +67,35 @@ item_table: Dict[str, ItemData] = {
     "Progressive Spin": ItemData(base_id + 55, ItemClassification.progression, 2),
     "Screw Attack": ItemData(base_id + 56, ItemClassification.progression),
     
-    # Energy upgrades
+    # Energy upgrade items.
     "Energy Tank": ItemData(base_id + 60, ItemClassification.useful, 8),
     "Energy Part": ItemData(base_id + 61, ItemClassification.useful, 16),
     
-    # Speed Booster upgrade
+    # Speed Booster upgrade item.
     "Speed Booster Upgrade": ItemData(base_id + 70, ItemClassification.useful, 4),
     
-    # Ammo expansions
+    # Ammo capacity items.
     "Missile Tank": ItemData(base_id + 100, ItemClassification.filler, 35),
     "Missile+ Tank": ItemData(base_id + 101, ItemClassification.useful, 10),
     "Power Bomb Tank": ItemData(base_id + 102, ItemClassification.filler, 12),
-    # Flash Shift Upgrade: chain ammo filler (like Missile Tank). When Require Main is
+    # Flash Shift Upgrades add chain ammo, like Missile Tanks add missiles.
     "Flash Shift Upgrade": ItemData(base_id + 103, ItemClassification.filler, 5),
     
-    # DNA (for DNA Hunt goal)
+    # DNA artifact items.
     "Metroid DNA": ItemData(base_id + 200, ItemClassification.progression_skip_balancing, 12),
     
-    # Victory event
+    # Victory event item.
     "Raven Beak Defeated": ItemData(None, ItemClassification.progression),
 }
 
-# Merge Randovania story/world events (locked placements, not in item pool)
+# Add fixed RDV story events outside the shuffled item pool.
 try:
     from .Events import event_item_table
     item_table.update(event_item_table)
 except ImportError:
     pass
 
-# Item name groups for player convenience
+# Item groups players can refer to in settings.
 item_name_groups: Dict[str, set[str]] = {
     "Beams": {
         "Wide Beam", "Plasma Beam", "Wave Beam", "Progressive Beam",
@@ -125,14 +125,14 @@ item_name_groups: Dict[str, set[str]] = {
     "Expansions": {
         "Missile Tank", "Missile+ Tank", "Power Bomb Tank", "Flash Shift Upgrade",
     },
-    # !hint DNA / !hint Metroid DNA → next uncollected Metroid DNA location
+    # !hint DNA or !hint Metroid DNA finds the next unchecked DNA location.
     "DNA": {
         "Metroid DNA",
     },
     "Metroid DNA": {
         "Metroid DNA",
     },
-    "Events": set(),  # filled below from event_item_table when available
+    "Events": set(),  # Fill this from the event item table when available.
 }
 
 try:
@@ -141,5 +141,5 @@ try:
 except ImportError:
     pass
 
-# Lookup table for reverse mapping
+# Find item names by ID.
 lookup_id_to_name: Dict[int, str] = {data.id: item_name for item_name, data in item_table.items()}

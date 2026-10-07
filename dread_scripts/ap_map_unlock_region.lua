@@ -1,4 +1,4 @@
--- World-map region unlock smoke (AreaBox probe + OdrMap.UnlockWorldRegion).
+-- Test unlocking a world-map region with its bounds.
 if not RL then RL = {} end
 
 RL.MapRegionToScenario = RL.MapRegionToScenario or {
@@ -13,7 +13,7 @@ RL.MapRegionToScenario = RL.MapRegionToScenario or {
   ["Itorash"] = "s090_skybase",
 }
 
--- Compact AreaBox AABBs (gridDef inset cell_size 100). Prefer DoFile table when present.
+-- Use the generated bounds table when available.
 RL.ScenarioAreaBox = RL.ScenarioAreaBox or {
   ["s010_cave"] = {-27700.0, -9900.0, 33700.0, 11000.0},
   ["s020_magma"] = {-20300.0, -8300.0, 19500.0, 9600.0},

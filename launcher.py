@@ -2,20 +2,20 @@
 
 from worlds.LauncherComponents import Component, components, Type, launch_subprocess
 
-# Register icon
-from .icon_setup import *
+# Register the app icon.
+from worlds.metroid_bread.hub.icon_setup import *
 
 
 def run_hub_or_client(*args):
     """Entry point for multiprocessing spawn — must stay at module level (picklable)."""
     try:
-        from .hub_launcher import launch_hub_or_fallback
+        from worlds.metroid_bread.hub.hub_launcher import launch_hub_or_fallback
 
         launch_hub_or_fallback(args, wait=True)
     except Exception as exc:
-        # launch_hub_or_fallback already MessageBoxes most paths; this catches
+        # Show unexpected errors not already handled by the Hub launcher.
         try:
-            from .hub_launcher import LAUNCH_NEED_DEPS_HINT, show_user_error
+            from worlds.metroid_bread.hub.hub_launcher import LAUNCH_NEED_DEPS_HINT, show_user_error
 
             show_user_error(
                 "Metroid Bread Client",
@@ -33,7 +33,7 @@ def launch_metroid_bread_client(*args):
     launch_subprocess(run_hub_or_client, name="Metroid Bread Client Hub", args=args)
 
 
-# Register the Metroid Bread client component
+# Register the Metroid Bread client with the launcher.
 components.append(
     Component(
         display_name="Metroid Bread Client",

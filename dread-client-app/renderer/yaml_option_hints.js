@@ -1,4 +1,4 @@
-/* * */
+
 (function (global) {
   "use strict";
 
@@ -50,6 +50,7 @@
     "missile_tanks": "Number of Missile Tanks (+2 missiles each) in the item pool.",
     "movement_tricks": "Non-obvious movement which can't easily be classified using other tricks. Players may be expected to perform precise jumps and other niche movement optimizations.",
     "nerf_power_bombs": "Power Bomb Limitations (RDV / ODR): Power Bombs no longer open Charge Beam doors or destroy Enkys. Generator logic follows the same restriction.",
+    "skip_item_popups": "Skip the popup that plays when you pick up an item. The item is granted immediately, and its collection line is shown on the bottom-right received-item bar with the other messages. Off: the normal acquisition dialogue still plays.",
     "power_bomb_tank_ammo": "Power Bombs granted by each Power Bomb Tank pickup.",
     "power_bomb_tanks": "Number of Power Bomb Tanks (+1 power bomb each) in the item pool.",
     "progressive_beams": "If enabled, individual beam upgrades (Wide, Plasma, Wave) are replaced with Progressive Beams.",

@@ -7,10 +7,7 @@ from Options import (
     ItemsAccessibility,
 )
 
-from .DoorRando import (
-    DEFAULT_CHANGE_DOORS_TO,
-    DEFAULT_DOORS_TO_CHANGE,
-)
+from worlds.metroid_bread.logic.DoorRando import DEFAULT_CHANGE_DOORS_TO, DEFAULT_DOORS_TO_CHANGE
 
 
 class MetroidBreadAccessibility(ItemsAccessibility):
@@ -23,7 +20,7 @@ LIGHT_REGIONS = (
 )
 
 
-# ===== TRICK/GLITCH OPTIONS =====
+# Trick and glitch options.
 
 class TrickDifficulty(Choice):
     """Base class for trick difficulty levels (Randovania LayoutTrickLevel names)."""
@@ -33,7 +30,7 @@ class TrickDifficulty(Choice):
     option_advanced = 3
     option_expert = 4
     option_ludicrous = 5
-    # Back-compat with older Hub / Seed Manager YAML wording
+    # Accept older Hub and Seed Manager YAML names.
     alias_easy = 2
     alias_medium = 3
     alias_hard = 4
@@ -171,7 +168,7 @@ class ClimbSlopedSurfaces(TrickDifficulty):
     display_name = "Climb Sloped Surfaces"
 
 
-# ===== DNA / GOAL OPTIONS =====
+# DNA and goal options.
 
 class GameGoal(Choice):
     """How to complete your Metroid Bread slot."""
@@ -213,7 +210,7 @@ class HintAllDNA(DefaultOnToggle):
     display_name = "Hint All Metroid DNA"
 
 
-# ===== DOOR / TRANSPORT =====
+# Door and transport options.
 
 class DoorLockRando(Choice):
     """Randomize the weapon needed to open eligible doors. Both sides of a door"""
@@ -273,7 +270,7 @@ class StartWithPulseRadar(DefaultOnToggle):
     display_name = "Start With Pulse Radar"
 
 
-# ===== COSMETICS / COMBAT =====
+# Appearance and combat options.
 
 class ShowBossLifebar(DefaultOnToggle):
     display_name = "Show Boss Lifebar"
@@ -351,6 +348,14 @@ class NerfPowerBombs(Toggle):
     display_name = "Nerf Power Bombs"
 
 
+class SkipItemPopups(Toggle):
+    """Skip the item-get dialogue. The item is granted immediately and its
+    collection line is queued on the bottom-right received-item bar (YAML
+    ``skip_item_popups``). Off: the normal acquisition popup still plays.
+    """
+    display_name = "Skip Item Acquisition Popups"
+
+
 class DisabledLights(OptionSet):
     """Regions whose light actors are mass-deleted (darker rooms)."""
     display_name = "Disabled Lights"
@@ -419,7 +424,7 @@ class XStartsReleased(Toggle):
     display_name = "X Starts Released"
 
 
-# ===== AMMO / ENERGY YIELDS =====
+# Ammo and energy amounts.
 
 class EnergyPerTank(Range):
     display_name = "Energy Per Tank"
@@ -504,7 +509,7 @@ class FlashShiftUpgradeRequiresMainItem(DefaultOnToggle):
     display_name = "Require Main Item"
 
 
-# ===== ITEM POOL OPTIONS =====
+# Item pool options.
 
 class EnergyTanks(Range):
     """Number of Energy Tanks in the item pool."""
@@ -546,7 +551,7 @@ class PowerBombTanks(Range):
     default = 12
 
 
-# ===== PROGRESSIVE ITEM OPTIONS =====
+# Progressive item options.
 
 class ProgressiveBeams(Toggle):
     """If enabled, individual beam upgrades (Wide, Plasma, Wave) are replaced with Progressive Beams."""
@@ -584,11 +589,11 @@ class ProgressiveSpin(Toggle):
     default = 1
 
 
-# ===== LOGIC OPTIONS =====
+# Logic settings.
 
 def _build_starting_location_option():
     """Choice: default (Artaria Intro), random_save_station (any RDV-valid start),"""
-    from .starting_locations import load_starting_locations
+    from worlds.metroid_bread.logic.starting_locations import load_starting_locations
 
     starts = load_starting_locations()
     attrs = {
@@ -641,29 +646,29 @@ class StartingKitItems(Range):
 @dataclass
 class MetroidBreadOptions(PerGameCommonOptions):
     """Complete options for Metroid Bread with all tricks and glitches"""
-    # Victory implies 90% clearance (100% for one_hundred_percent; all bosses
+    # Require 90% access before victory, or all checks for 100%.
     accessibility: MetroidBreadAccessibility
     start_inventory_from_pool: StartInventoryPool
     death_link: DeathLink
 
-    # Goal + DNA gate
+    # Goal and DNA requirement.
     game_goal: GameGoal
     required_dna: RequiredDNA
     dna_placement: DNAPlacement
     hint_all_dna: HintAllDNA
 
-    # Door / transport
+    # Door and transport settings.
     door_lock_rando: DoorLockRando
     randovania_door_rando: RandovaniaDoorRando
     doors_to_change: DoorsToChange
     change_doors_to: ChangeDoorsTo
     transport_rando: TransportRando
 
-    # Misc pool / start
+    # Item pool and starting settings.
     include_boss_pickups: IncludeBossPickups
     start_with_pulse_radar: StartWithPulseRadar
 
-    # Cosmetics / combat
+    # Appearance and combat settings.
     show_boss_lifebar: ShowBossLifebar
     show_enemy_life: ShowEnemyLife
     show_enemy_damage: ShowEnemyDamage
@@ -677,20 +682,21 @@ class MetroidBreadOptions(PerGameCommonOptions):
     room_name_display: RoomNameDisplay
     raven_beak_damage_table: RavenBeakDamageTable
     nerf_power_bombs: NerfPowerBombs
+    skip_item_popups: SkipItemPopups
     disabled_lights: DisabledLights
     x_starts_released: XStartsReleased
     station_map_warp: StationMapWarp
     warp_requirement: StationWarpRequirement
     warp_reach: StationWarpReach
 
-    # Item pool counts
+    # Item pool counts.
     energy_tanks: EnergyTanks
     energy_parts: EnergyParts
     missile_tanks: MissileTanks
     missile_plus_tanks: MissilePlusTanks
     power_bomb_tanks: PowerBombTanks
 
-    # Ammo / energy yields
+    # Ammo and energy amounts.
     energy_per_tank: EnergyPerTank
     starting_missiles: StartingMissiles
     starting_power_bombs: StartingPowerBombs
@@ -704,7 +710,7 @@ class MetroidBreadOptions(PerGameCommonOptions):
     flash_shift_included_ammo: FlashShiftIncludedAmmo
     flash_shift_upgrade_requires_main_item: FlashShiftUpgradeRequiresMainItem
 
-    # Progressive options
+    # Progressive item settings.
     progressive_beams: ProgressiveBeams
     progressive_charge: ProgressiveCharge
     progressive_missiles: ProgressiveMissiles
@@ -712,13 +718,13 @@ class MetroidBreadOptions(PerGameCommonOptions):
     progressive_suit: ProgressiveSuit
     progressive_spin: ProgressiveSpin
 
-    # Logic options
+    # Logic settings.
     starting_location: StartingLocation
     starting_kit_items: StartingKitItems
     early_morph_ball: EarlyMorphBall
     dangerous_logic: DangerousLogic
 
-    # Trick/Glitch options
+    # Trick and glitch settings.
     knowledge_tricks: KnowledgeTricks
     movement_tricks: MovementTricks
     combat_tricks: CombatTricks
@@ -747,7 +753,7 @@ class MetroidBreadOptions(PerGameCommonOptions):
     climb_sloped_surfaces: ClimbSlopedSurfaces
 
 
-# Option groups for better organization on the website
+# Group options on the website.
 metroid_bread_option_groups = [
     OptionGroup("Goal & DNA", [
         GameGoal,

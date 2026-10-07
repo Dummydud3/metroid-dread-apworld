@@ -1,4 +1,4 @@
--- ApElunArrivalGate: keep Elun's arrival seal (ev_gatesealed_second) open on load.
+-- Keep Elun's arrival gate open when the scenario loads.
 
 ApElunArrivalGate = ApElunArrivalGate or {
   did_install = false,
@@ -46,7 +46,7 @@ function ApElunArrivalGate.EnsureWrapped()
   log("wrapped CheckGatesOpened (ForceOpen ev_gatesealed_second)")
 end
 
--- - After any scenario init: wrap Elun gates if that table exists, then open now
+-- Wrap Elun's gate handlers after scenario setup, then open the gate.
 function ApElunArrivalGate.OnScenarioReady()
   pcall(ApElunArrivalGate.EnsureWrapped)
   if type(s060_quarantine) == "table" and s060_quarantine._ap_arrival_gate_wrapped then
@@ -68,11 +68,11 @@ function ApElunArrivalGate.Install()
 
   ApElunArrivalGate.did_install = true
 
-  -- Elun InitFromBlackboard calls Scenario.InitFromBlackboard *then*
+  -- Elun loads its saved state after Scenario.InitFromBlackboard.
   local orig_init = Scenario.InitFromBlackboard
   Scenario.InitFromBlackboard = function(...)
     orig_init(...)
-    -- Between Scenario.InitFromBlackboard and Elun's CheckGatesOpened call.
+    -- Open the gate before Elun checks whether its gates should be open.
     pcall(ApElunArrivalGate.EnsureWrapped)
   end
 
@@ -84,7 +84,7 @@ function ApElunArrivalGate.Install()
     end
   end
 
-  -- Fallback: first INGAME ticks if Elun was already loaded before Install.
+  -- Also handle Elun already being loaded when this script starts.
   if type(Scenario.CheckDebugInputs) == "function" then
     local orig_debug = Scenario.CheckDebugInputs
     local ticks = 0

@@ -1,32 +1,8 @@
--- ApStationWarp: pause-map warp to the Save / Map / Network station the cursor has locked onto.
---
--- YAML off leaves Init.bStationMapWarp unset and this file is not loaded.
--- The pause map snaps the cursor onto an icon and shows that icon's label.
--- A station lock is that snap: the cursor sits on a catalog station.
--- A still does normal pause-map actions, including world-map navigation and markers.
--- The marker list is allowed to open. BlockMarkerOpen is parked behind
--- ApStationWarp.block_marker if that needs to come back.
--- Do not touch that dialog during script load, and do not index its getters or
--- setters. Those reads null-deref and kill the game before the first popup.
--- Y on a locked station opens the warp prompt only while the pause map is on
--- screen (mapmenucomposition Enabled and Visible), and does not also cycle
--- highlights. Y during gameplay does nothing here. Y off a station still
--- highlights icons.
--- Init.sStationWarpRequirement is "visited" or "visible". Missing means visited.
--- Visited only warps to a station already used. An unused station shows
--- "You haven't saved here yet" (A closes it). Visible warps to any locked
--- catalog station that has a spawn point, including one never used. A station
--- with no spawn keeps that unused notice instead of LoadScenario.
--- Init.sStationWarpReach is "local" or "global". Missing means global, which
--- is the lock this script already did: the map header can name another region,
--- and the warp uses that catalog entry's scenario and start point. Local
--- ignores a station whose scenario is not the current one, even if the cursor
--- distance matches. A real warp asks whether to go there (A confirms, B cancels).
--- Hover reads the pause-map cursor. On 1.0.0 that cursor is the vec2 at
--- minimap-manager + 0x38, then + 0x560. vViewPos is the HUD minimap and stays
--- at the origin while this cursor moves. 2.1.0 keeps that path only when the
--- floats still look like world coordinates; otherwise the cursor is resolved
--- once, while the map is centered on Samus.
+-- Press Y on a selected pause-map station to ask about warping.
+-- A confirms and B cancels; other map controls keep their normal behavior.
+-- Default to visited stations and global reach; read both settings from Init.
+-- Never warp without a spawn point or open this prompt during gameplay.
+-- Read the map cursor only after startup; early dialog reads can crash.
 
 ApStationWarp = ApStationWarp or {
   did_install = false,
@@ -36,16 +12,16 @@ ApStationWarp = ApStationWarp or {
   a_was = false,
   b_was = false,
   y_was = false,
-  -- false: the vanilla marker list opens. true: force it closed again.
+  -- False allows the marker list; true closes it again.
   block_marker = false,
   seen_start = nil,
   seen_scenario = nil,
   did_probe = false,
   level_id = "c10_samus",
   snap_radius = 1500,
-  -- Magnetic snap sits about 150 units off the icon. Same-kind stations are ~6400 apart.
+  -- The snapped cursor can be 150 units from the icon; stations are much farther apart.
   lock_radius = 800,
-  -- 1.0.0 CMinimapManager: pointer at +0x38, cursor vec2 at +0x560.
+  -- On 1.0.0, follow the minimap manager pointer at 0x38, then cursor offset 0x560.
   view_ptr_off = 0x38,
   view_xy_off = 0x560,
 }
@@ -57,9 +33,10 @@ ApStationWarp.view_ptr_off = 0x38
 ApStationWarp.view_xy_off = 0x560
 
 local BB_KEY = "AP_VisitedStations"
+local BB_USED_PREFIX = "AP_StationUsed_"
 local MSG_KEY = "GUI_AP_STATION_WARP"
 
--- Same-kind stations in one region are at least ~6400 units apart.
+-- Stations of the same kind are at least about 6,400 units apart.
 local KIND_NOUN = {
   save = "save station",
   map = "map station",
@@ -84,7 +61,7 @@ local SAVE_PLATFORM_CHARCLASSES = {
   weightactivatedplatform_map = true,
 }
 
--- scenario, kind, usable, plate, x, y, region, area
+-- Station fields: scenario, kind, usable, plate, x, y, region, area.
 local CATALOG = {
   { "s010_cave", "map", "PRP_CV_MapStation001", "PRP_CV_MapStation001_WeightPlate", -13150, -2100, "Artaria", "Map Station" },
   { "s010_cave", "nav", "PRP_CV_AccessPoint001", "PRP_CV_AccessPoint001_WeightPlate", 7850, -7400, "Artaria", "Navigation Station South" },
@@ -166,7 +143,7 @@ local function inputs(...)
   return ok and held == true
 end
 
--- Lua 5.1 numbers are float32. Button bits stop at 2^23, which is exact.
+-- Lua 5.1 can store button bits through 2^23 exactly.
 local function bor32(a, b)
   a = math.floor(tonumber(a) or 0)
   b = math.floor(tonumber(b) or 0)
@@ -204,10 +181,9 @@ local function btest(mask, bit)
   return math.floor(mask / bit) % 2 >= 1
 end
 
--- Input.CheckInputs calls IsDebugPadButtonPressed() with no name. That path
--- only sees the debug keyboard. A name other than L1/L2/R1/R2/CROSS/TRIANGLE/SQUARE
--- falls into the exefs stub that ORs the debug pad with the controller the
--- pause map actually uses. Face A is bit 0, B is bit 1 (same as Input.buttons).
+-- The ODR patch replaces this debug input reader with an Npad reader.
+-- Support controller slots 1 through 8 and handheld mode.
+-- The reader ignores its arguments; A is bit 0, B bit 1, and Y bit 3.
 local function pad_mask()
   local mask = 0
   if not (Game and Game.IsDebugPadButtonPressed) then
@@ -219,7 +195,6 @@ local function pad_mask()
     end
   end
   acc(pcall(Game.IsDebugPadButtonPressed))
-  acc(pcall(Game.IsDebugPadButtonPressed, "PAD"))
   return mask
 end
 
@@ -307,12 +282,24 @@ function ApStationWarp.LoadVisited()
   if not ps or not Blackboard or not Blackboard.GetProp then
     return
   end
+  -- Read only complete station names from older saves.
+  -- The engine may have cut off names past its 256-character string limit.
   local blob = Blackboard.GetProp(ps, BB_KEY)
-  if type(blob) ~= "string" or blob == "" then
-    return
+  if type(blob) == "string" then
+    for token in string.gmatch(blob, "[^;]+") do
+      if ApStationWarp.by_actor[token] then
+        ApStationWarp.visited[token] = true
+      end
+    end
   end
-  for token in string.gmatch(blob, "[^;]+") do
-    ApStationWarp.visited[token] = true
+  for _, entry in ipairs(ApStationWarp.stations or {}) do
+    local usable = entry.scenario .. "|" .. entry.usable
+    local plate = entry.scenario .. "|" .. entry.plate
+    local stored = Blackboard.GetProp(ps, BB_USED_PREFIX .. usable)
+    if stored == true or ApStationWarp.visited[usable] or ApStationWarp.visited[plate] then
+      ApStationWarp.visited[usable] = true
+      ApStationWarp.visited[plate] = true
+    end
   end
 end
 
@@ -321,14 +308,22 @@ function ApStationWarp.SaveVisited()
   if not ps or not Blackboard or not Blackboard.SetProp then
     return
   end
-  local parts = {}
-  for key, on in pairs(ApStationWarp.visited or {}) do
-    if on and type(key) == "string" then
-      parts[#parts + 1] = key
+  -- Save one true/false flag per station instead of one growing name list.
+  -- The saved string has a fixed size; pcall cannot catch writes past it.
+  -- Use actor names to keep station keys stable.
+  -- Reordering or adding stations will not change those keys.
+  local saved = true
+  for _, entry in ipairs(ApStationWarp.stations or {}) do
+    local usable = entry.scenario .. "|" .. entry.usable
+    local plate = entry.scenario .. "|" .. entry.plate
+    if ApStationWarp.visited[usable] or ApStationWarp.visited[plate] then
+      local ok = pcall(Blackboard.SetProp, ps, BB_USED_PREFIX .. usable, "b", true)
+      saved = saved and ok
     end
   end
-  table.sort(parts)
-  pcall(Blackboard.SetProp, ps, BB_KEY, "s", table.concat(parts, ";"))
+  if saved then
+    pcall(Blackboard.SetProp, ps, BB_KEY, "s", "")
+  end
 end
 
 local function remember(scenario, actor)
@@ -412,7 +407,7 @@ function ApStationWarp.Reach()
   if reach == "local" then
     return "local"
   end
-  -- Unset matches the lock below: the pause-map header can name another region.
+  -- Default to allowing a station in another map region.
   return "global"
 end
 
@@ -433,8 +428,8 @@ function ApStationWarp.HasSpawn(entry)
     and type(entry.plate) == "string" and entry.plate ~= ""
 end
 
--- Visible: any locked catalog station that has a spawn. Visited: used only.
--- No spawn never becomes a LoadScenario target.
+-- Visible allows any station with a spawn; visited allows used stations only.
+-- Never warp to a station without a spawn point.
 function ApStationWarp.OfferWarp(entry)
   if not ApStationWarp.ReachAllows(entry) then
     return false
@@ -478,7 +473,7 @@ function ApStationWarp.WarpTo(entry)
     log("warp refused")
     return false
   end
-  -- Catalog scenario and plate. Never substitute the scenario Samus is in.
+  -- Use the selected station's scenario and plate, not Samus's current scenario.
   local scenario = entry.scenario
   local plate = entry.plate
   log(string.format(
@@ -501,8 +496,8 @@ function ApStationWarp_OnAccept()
   if ApStationWarp.HideBox then
     ApStationWarp.HideBox()
   end
-  -- Close animation finishes, then the warp runs.
-  -- The unused notice leaves pending nil, so this close does not LoadScenario.
+  -- Finish closing the prompt before warping.
+  -- The unused-station notice has no pending warp.
   local entry = ApStationWarp.pending
   if entry ~= nil and not ApStationWarp.OfferWarp(entry) then
     entry = nil
@@ -510,8 +505,8 @@ function ApStationWarp_OnAccept()
   ApStationWarp._warp_entry = entry
   ApStationWarp.pending = nil
   ApStationWarp.prompt_open = false
-  -- Keep the pause map up while the close animation plays. A during that
-  -- window otherwise falls through and closes the map.
+  -- Keep the pause map open until the prompt closes.
+  -- Otherwise A can also close the map during the animation.
   ApStationWarp._hold_map = 30
   if ApStationWarp.HoldMapOpen then
     ApStationWarp.HoldMapOpen()
@@ -580,12 +575,12 @@ local function map_open()
   if root == nil then
     return false
   end
-  -- The map page's Visible flag stays true after you close the pause menu, and
-  -- the cursor stays on the last station. Enabled is what the game turns on
-  -- while that page is showing and off again in gameplay. Visible alone is why
-  -- Y after unpausing still opened the warp prompt.
-  -- The first ticks never call this. Reading Enabled during boot used to walk
-  -- the marker dialog and crash; that read stays behind the boot guard.
+  -- The map's Visible flag stays true after unpausing.
+  -- Use Enabled to tell whether the page is actually open.
+  -- Checking Visible alone would allow prompts during gameplay.
+  -- The old cursor position also remains after unpausing.
+  -- Skip these property reads during the first startup ticks.
+  -- Reading the dialog during boot can crash the game.
   return flag_on(root, "Enabled") and flag_on(root, "Visible")
 end
 
@@ -620,8 +615,8 @@ local function text_of(obj)
   if obj == nil then
     return nil
   end
-  -- CLabel publishes _Text_GetterFunction. Call that, not a guessed field.
-  -- Only used once the label is already visible, never during script load.
+  -- Read label text through _Text_GetterFunction.
+  -- Read it only when the label is visible, never during script loading.
   local value = getter(obj, "Text")
   if type(value) == "string" and value ~= "" then
     return value
@@ -767,8 +762,8 @@ local function player_xy()
   return tonumber(x), tonumber(y)
 end
 
--- Other game versions keep the cursor behind a different pointer. The map opens
--- centered on Samus, so the matching float pair is the cursor.
+-- Other game versions may store the cursor behind another pointer.
+-- Find the matching coordinates while the map is centered on Samus.
 local function discover_view()
   if not (OdrMap and OdrMap.ReadU64 and OdrMap.ReadFloatsAbs) then
     return false
@@ -827,10 +822,10 @@ local function read_gui_point(path, ptr_off, xy_off)
   return world_xy(rows[1], rows[2])
 end
 
--- 1.0.0 cursor at minimap-manager +0x38/+0x560. When that vec2 is NaN the
--- pause map still keeps a world point on the map composition (+0x10/+0x4C0).
--- Do not search for a pair near Samus: that latches the player blip and A
--- then places a marker on the station the player is actually hovering.
+-- Try the 1.0.0 cursor at offsets 0x38 and 0x560 first.
+-- If it is invalid, try the map's coordinates at 0x10 and 0x4C0.
+-- Do not search near Samus; that can select the player icon instead.
+-- Use the station the player is actually pointing at.
 local function view_points()
   local points = {}
   local function add(x, y)
@@ -867,10 +862,10 @@ local function shown_scenario(header_text)
   return current_scenario(), false
 end
 
--- The pause map magnetically locks the cursor onto the icon under it.
--- That lock, not the visited-station list, is the highlighted station.
--- Local reach drops the lock when that icon's scenario is not the current one,
--- even if this cursor distance matched it.
+-- The pause map snaps the cursor to the icon under it.
+-- Use that selection, not the list of visited stations.
+-- In local mode, require the selected station's scenario to match.
+-- Distance alone does not make a station valid.
 local function nearest_locked(scenario, x, y)
   if not scenario or x == nil or y == nil then
     return nil, nil
@@ -908,9 +903,9 @@ local function marker_dialog()
   return display_object(MARKER_DIALOG)
 end
 
--- Parked while the marker list is allowed to open. Turn block_marker on to
--- call this again. No property reads: indexing a getter or setter on this
--- dialog null-derefs during startup.
+-- Use this only when block_marker is enabled.
+-- Do not read this dialog's getter or setter properties.
+-- Those reads can crash during startup.
 function ApStationWarp.BlockMarkerOpen()
   local dlg = marker_dialog()
   if dlg and GUI and GUI.SetProperties then
@@ -926,8 +921,8 @@ local function play_ui_sound(name)
   if string.sub(path, 1, 7) ~= "system/" then
     path = "system/snd/presets/hud/" .. path
   end
-  -- Same call the pause menus use. This build wants volume, a second level,
-  -- a loop flag, and one more number after the preset path.
+  -- Use the same sound call as the pause menu.
+  -- Pass the required volume, level, loop flag, and final number.
   if Game.PlayGUISound then
     local ok = pcall(Game.PlayGUISound, path, 1, 1, false, 1)
     if ok then
@@ -939,12 +934,12 @@ local function play_ui_sound(name)
   end
 end
 
--- popupcomposition OnEnter / OnExit, played in 15 frames.
--- The panel draws out horizontally, then opens vertically. Close is the reverse.
--- Text stays hidden until the window is fully open.
--- Scale 1 is ignored by SetProperties, so the open pose uses 0.999.
+-- Play the popup's open and close animations over 15 frames.
+-- Open horizontally then vertically; close in the reverse order.
+-- Show text after the window has fully opened.
+-- Use scale 0.999 because SetProperties ignores 1.
 local POPUP_FRAMES = 15
--- Tick is called about 1.5 times per displayed frame. 0.7s at 60fps is ~63 calls.
+-- Tick runs about 1.5 times per frame; 0.7 seconds is about 63 calls.
 local B_LOCK_TICKS = 63
 local POPUP_OPEN_X = { { 0, 0.01 }, { 7, 0.999 }, { POPUP_FRAMES, 0.999 } }
 local POPUP_OPEN_Y = { { 0, 0.01 }, { 7, 0.01 }, { POPUP_FRAMES, 0.999 } }
@@ -987,11 +982,11 @@ local function popup_obj(path)
   return display_object(path)
 end
 
--- popupcomposition is also the save-station question.
--- The label text getter stays "" even while a sentence is on screen, so a
--- snapshot of it is blank and writing that snapshot back clears the save box.
--- When the warp prompt is fully down, put this sentence back and open the
--- panel. The close pose leaves the panel at scale 0.01 on a white background.
+-- The save-station question shares popupcomposition.
+-- Its text getter returns empty even while text is visible.
+-- Restoring that empty text would clear the save box.
+-- Restore the save question after the warp prompt closes.
+-- Reopen the panel because closing leaves it nearly invisible.
 local SAVE_POPUP_TEXT = "Save your progress?|Hold "
   .. string.char(225, 160, 134)
   .. " and "
@@ -1084,9 +1079,9 @@ function ApStationWarp.AdvancePopupAnim()
   if anim == nil then
     return
   end
-  -- GuiTick and the debug-input hook both call Tick, about 1.5 times per
-  -- displayed frame. Hold each authored frame for 1.5 ticks so the 15-frame
-  -- open and close last about a quarter of a second.
+  -- Both GuiTick and the input hook call Tick.
+  -- Hold each animation frame for 1.5 ticks.
+  -- This keeps each 15-frame animation near a quarter second.
   anim.acc = (anim.acc or 0) + 1
   if anim.acc < 1.5 then
     return
@@ -1125,8 +1120,8 @@ function ApStationWarp.ShowNativePopup(text)
   local press = display_object("popupcomposition.Panel.PressAText")
   if press then
     pcall(GUI.SetProperties, press, { Visible = false })
-    -- #GUI_AP_STATION_OK is "OK" with the same A-button logo as ACCEPT.
-    -- A plain "OK" draws the word with no button icon.
+    -- GUI_AP_STATION_OK includes the same A-button icon as ACCEPT.
+    -- Plain OK text has no button icon.
     pcall(GUI.SetLabelText, press, ApStationWarp._popup_ok and "#GUI_AP_STATION_OK" or "#GUI_GENERAL_LABEL_ACCEPT")
   end
   local cancel = display_object("popupcomposition.Panel.Option1Text")
@@ -1138,8 +1133,8 @@ function ApStationWarp.ShowNativePopup(text)
     pcall(GUI.SetProperties, opt2, { Visible = false, Enabled = false })
   end
   pcall(GUI.SetProperties, pop, { Enabled = true, Visible = true, Depth = 50 })
-  -- popupcomposition is shared with GUI.ShowMessage (the Archipelago start box).
-  -- Only a prompt we opened may be hidden later.
+  -- GUI.ShowMessage uses the same popup as this prompt.
+  -- Hide only prompts opened by this script.
   ApStationWarp._owns_popup = true
   ApStationWarp._popup_closing = 0
   ApStationWarp._anim = { kind = "open", frame = 0 }
@@ -1156,7 +1151,7 @@ function ApStationWarp.HideNativePopup(sound_name)
   pcall(GUI.SetProperties, pop, { Enabled = true, Visible = true, Depth = 50 })
   ApStationWarp._popup_closing = 0
   ApStationWarp._anim = { kind = "close", frame = 0 }
-  -- B closes the pause map. Ignore it for 0.7s from the start of this close.
+  -- Ignore B for 0.7 seconds after closing starts so the map stays open.
   ApStationWarp._b_lock_ticks = B_LOCK_TICKS
   ApStationWarp.ApplyPopupFrame("close", 0)
   play_ui_sound("hud_bigwindow_close")
@@ -1202,8 +1197,8 @@ function ApStationWarp.HideBox()
       box:Hide()
     end)
   end
-  -- Hide() can leave the fullscreen GUILib root enabled. That root sits on
-  -- the pause map and eats the stick, so a later A press only places a marker.
+  -- Hide can leave the full-screen GUI root enabled.
+  -- That root can block map controls and turn later A presses into markers.
   if box and box.root and GUI and GUI.SetProperties then
     pcall(GUI.SetProperties, box.root, { Enabled = false, Visible = false })
     if box.main then
@@ -1446,8 +1441,8 @@ local function longest_area_matches(text, scenario)
   return matches
 end
 
--- The pause map writes the snapped icon's name into Inspector-Label.
--- That label is the lock. Cursor coordinates are only a tiebreaker.
+-- Read the selected icon's name from Inspector-Label.
+-- Use cursor coordinates only to choose between matching labels.
 local function entry_from_inspector()
   local text = inspector_label()
   text = plain_label(text)
@@ -1568,7 +1563,7 @@ function ApStationWarp.OnMarkerCreated(arg)
   if entry == nil then
     return
   end
-  -- This A press is the one that tried to place the marker. Do not also accept.
+  -- Do not also confirm a warp with the A press that placed a marker.
   ApStationWarp.a_was = true
   log(string.format("marker-hover %s dist=%.0f", tostring(entry.area), dist or -1))
   open_prompt(entry)
@@ -1578,8 +1573,8 @@ function ApStationWarp.Tick()
   if not ApStationWarp.IsEnabled() then
     return
   end
-  -- Script load used to touch the marker dialog on the first tick and crash.
-  -- Leave those frames alone. The pause map is not open yet.
+  -- Avoid touching the marker dialog during startup.
+  -- Skip the first frames before the pause map is ready.
   ApStationWarp._boot_ticks = (ApStationWarp._boot_ticks or 0) + 1
   if ApStationWarp._boot_ticks < 90 then
     return
@@ -1607,14 +1602,14 @@ function ApStationWarp.Tick()
   end
   if not open then
     if ApStationWarp.prompt_open or ApStationWarp._anim ~= nil then
-      -- Opening popupcomposition can make the map page look closed for a tick.
-      -- Keep a warp box we opened. GUI.ShowMessage is left alone because we
-      -- do not own that popup.
+      -- Opening the popup can briefly make the map page seem closed.
+      -- Keep our own warp prompt open through that change.
+      -- Leave GUI.ShowMessage popups alone.
       ApStationWarp.HoldMapOpen()
       open = true
     else
-      -- B is still ignored for a short time after the warp prompt starts closing,
-      -- even if the map page flickers closed.
+      -- Keep ignoring B briefly after the prompt begins closing.
+      -- Do this even if the map page briefly seems closed.
       if b_lock and (btest(pad_mask(), 2) or inputs("B")) then
         if GUI and GUI.FlushInput then
           pcall(GUI.FlushInput)
@@ -1624,9 +1619,9 @@ function ApStationWarp.Tick()
         ApStationWarp._status = "b-lock"
         return
       end
-      -- The map page stays Visible, and the cursor stays on the last station,
-      -- after unpausing. Enabled is off in gameplay, so this branch runs and
-      -- Y must not open a prompt from that leftover lock.
+      -- Visible and the old cursor position remain after unpausing.
+      -- Enabled turns off during gameplay.
+      -- Do not let that old selection open a prompt with Y.
       if ApStationWarp._owns_popup and ApStationWarp.ForceHideNativePopup then
         ApStationWarp.ForceHideNativePopup()
       end
@@ -1644,7 +1639,7 @@ function ApStationWarp.Tick()
   end
 
   if ApStationWarp.prompt_open then
-    -- The save-station window stays up while the question is on screen.
+    -- Keep the save-station window open while its question is showing.
     local pop = display_object("popupcomposition")
     if pop and ApStationWarp._owns_popup and GUI and GUI.SetProperties then
       pcall(GUI.SetProperties, pop, { Enabled = true, Visible = true, Depth = 50 })
@@ -1676,7 +1671,7 @@ function ApStationWarp.Tick()
 
   local a_down = btest(mask, 1) or inputs("A")
   local b_down = btest(mask, 2) or inputs("B")
-  -- Switch Y is bit 3. SQUARE is the debug-pad name for that same face button.
+  -- Y is bit 3; the debug input name for it is SQUARE.
   local y_down = btest(mask, 8) or inputs("Y") or inputs("SQUARE")
   local a_pressed = a_down and not ApStationWarp.a_was
   local b_pressed = b_down and not ApStationWarp.b_was
@@ -1686,8 +1681,8 @@ function ApStationWarp.Tick()
   ApStationWarp.y_was = y_down
   local closing = ApStationWarp._anim ~= nil and ApStationWarp._anim.kind == "close"
   if closing then
-    -- The confirm press already started the close. Further A/B/Y must not
-    -- reach the pause map until that animation finishes.
+    -- After confirming, block more A, B, and Y presses from the map.
+    -- Wait until the prompt finishes closing.
     if GUI and GUI.FlushInput then
       pcall(GUI.FlushInput)
     end
@@ -1696,7 +1691,7 @@ function ApStationWarp.Tick()
     return
   end
   if b_lock and b_down then
-    -- 0.7s from the start of the close, not only while the animation plays.
+    -- Block presses for 0.7 seconds from the start of closing.
     if GUI and GUI.FlushInput then
       pcall(GUI.FlushInput)
     end
@@ -1706,7 +1701,7 @@ function ApStationWarp.Tick()
     return
   end
   if ApStationWarp.prompt_open then
-    -- Eat the press after we sample it so the pause map does not treat B as Close.
+    -- Consume B after reading it so the pause map cannot also close.
     if GUI and GUI.FlushInput then
       pcall(GUI.FlushInput)
     end
@@ -1723,10 +1718,10 @@ function ApStationWarp.Tick()
     end
     return
   end
-  -- A stays on world-map navigation and the marker list.
-  -- Y opens the warp prompt only while this pause map is actually on screen.
-  -- A station the cursor was sitting on stays in memory after unpausing, and
-  -- Y during gameplay must not turn that into a prompt.
+  -- Leave A for world-map navigation and markers.
+  -- Let Y open a warp prompt only on the open pause map.
+  -- The selected station stays in memory after unpausing.
+  -- Ignore it when Y is pressed during gameplay.
   local map_visible = false
   local ok_visible, visible_now = pcall(map_open)
   if ok_visible then
@@ -1735,6 +1730,7 @@ function ApStationWarp.Tick()
   if not map_visible or not y_pressed or entry == nil then
     if y_pressed and map_visible then
       ApStationWarp._status = "y-idle"
+      log("Y detected, no station lock: " .. tostring(inspector_label()) .. " pad=" .. tostring(mask))
     end
     return
   end
@@ -1826,7 +1822,7 @@ function ApStationWarp.Install()
 
   pcall(ApStationWarp.HookMarker)
   pcall(ApStationWarp.SyncSpawn)
-  log("Install complete (pause map A on a locked Save/Map/Network station)")
+  log("Install complete (pause map Y on a locked Save/Map/Network station)")
 end
 
 function ApStationWarp.HookMarker()

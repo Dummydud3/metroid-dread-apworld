@@ -132,7 +132,7 @@ h2 {
   justify-content: center;
   gap: 2px;
   transition: filter 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
-  /* Locked: greyscale + darkened (matches Randovania-style dimmed icons) */
+  /* Dim locked icons and remove their color. */
   filter: grayscale(1) brightness(0.45);
   opacity: 0.72;
 }

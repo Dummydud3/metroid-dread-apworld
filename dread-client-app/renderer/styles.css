@@ -525,7 +525,7 @@ button.ghost {
   flex: 1 1 auto;
 }
 
-/* Keep connect/patch usable: Log shares the Client view under every stage. */
+/* Show the log below each Client screen. */
 #view-client {
   display: flex;
   flex-direction: column;
@@ -755,7 +755,7 @@ button[hidden] {
   }
 }
 
-/* ---------- YAML validation panel ---------- */
+/* YAML error panel. */
 .yaml-validation {
   display: flex;
   gap: 12px;

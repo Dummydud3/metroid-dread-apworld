@@ -1,10 +1,10 @@
 @echo off
-REM Launch the Metroid Bread Client Hub (YAML editor + client / patcher)
+REM Start the Hub's YAML editor, client, and patcher.
 setlocal EnableExtensions
 cd /d "%~dp0"
 set "SKIP_REQUIREMENTS_UPDATE=1"
 
-REM Prefer npm.cmd so we never hit PowerShell's npm.ps1 under Restricted policy.
+REM Use npm.cmd to avoid PowerShell blocking npm.ps1.
 where npm.cmd >nul 2>&1
 if errorlevel 1 (
   where npm >nul 2>&1
@@ -25,7 +25,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem Electron 33 historically failed to install its binary on Node 24.16+ / 26.x
+rem Some Electron 33 installs failed on Node 24.16 and 26.
 for /f "usebackq delims=" %%A in (`node -p "process.versions.node.split('.')[0]" 2^>nul`) do set "NODE_MAJOR=%%A"
 if not defined NODE_MAJOR set "NODE_MAJOR=0"
 if %NODE_MAJOR% LSS 18 (
@@ -43,8 +43,8 @@ if %NODE_MAJOR% LSS 18 (
   exit /b 25
 )
 
-rem Ensure system Python has websockets / CommonClient deps before Hub spawns it.
-set "ENSURE_SCRIPT=%~dp0..\ensure_client_deps.py"
+rem Install websockets and the client requirements before starting the Hub.
+set "ENSURE_SCRIPT=%~dp0..\hub\ensure_client_deps.py"
 set "WORLD_DIR=%~dp0.."
 if not exist "%ENSURE_SCRIPT%" goto :npm_deps
 
@@ -88,11 +88,11 @@ exit /b 1
 :npm_deps
 echo.
 
-REM Electron postinstall must run (downloads binary). Clear blockers.
+REM Allow Electron's install script to download its program files.
 set "ELECTRON_SKIP_BINARY_DOWNLOAD="
 set "npm_config_ignore_scripts=false"
 
-REM Ensure project .npmrc allows Electron postinstall (create or repair).
+REM Create or repair .npmrc to allow Electron's install script.
 if not exist ".npmrc" goto :write_npmrc
 findstr /i /c:"ignore-scripts=true" ".npmrc" >nul 2>&1
 if not errorlevel 1 goto :write_npmrc
@@ -129,7 +129,7 @@ if not exist "node_modules\adm-zip" (
   call %NPM% install --no-ignore-scripts
 )
 
-REM Require path.txt + platform binary before npm start (mirrors electron/index.js).
+REM Check path.txt and the Electron program before starting npm.
 call :electron_healthy
 if not errorlevel 1 goto :start_hub
 
@@ -190,7 +190,7 @@ if not "%RC%"=="0" (
 exit /b %RC%
 
 :electron_healthy
-REM exit 0 = healthy, 1 = broken
+REM Exit code 0 means ready; 1 means repair is needed.
 if not exist "node_modules\electron\path.txt" exit /b 1
 if exist "node_modules\electron\dist\electron.exe" exit /b 0
 if exist "node_modules\electron\dist\electron" exit /b 0

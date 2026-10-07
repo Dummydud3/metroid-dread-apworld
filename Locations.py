@@ -28,7 +28,7 @@ class MetroidBreadLocation(Location):
 
 
 
-# All 149 pickup locations from Metroid Bread
+# Define all 149 pickup locations.
 
 location_table: Dict[str, LocationData] = {
 
@@ -334,7 +334,7 @@ location_table: Dict[str, LocationData] = {
 
 
 
-# Location name groups for player convenience
+# Location groups players can refer to in settings.
 
 location_name_groups: Dict[str, set[str]] = {
 
@@ -672,7 +672,7 @@ location_name_groups: Dict[str, set[str]] = {
 
 
 
-# Lookup table for reverse mapping
+# Find location names by ID.
 
 lookup_id_to_name: Dict[int, str] = {data.id: loc_name for loc_name, data in location_table.items()}
 

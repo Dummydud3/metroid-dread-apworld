@@ -1,4 +1,4 @@
-# Minimal packages for MetroidBreadClient + ap_core CommonClient / Utils
+# Packages needed by the client and bundled AP core.
 websockets>=13.0.1,<14
 colorama>=0.4.6
 PyYAML>=6.0.3
@@ -8,7 +8,7 @@ platformdirs>=4.5.0
 jellyfish>=1.2.1
 typing_extensions>=4.15.0
 schema>=0.7.8
-# CommonClient → ModuleUpdate needs pkg_resources; without it Hub hangs on "press enter".
+# Include pkg_resources so ModuleUpdate cannot block on console input.
 setuptools>=75,<81
-# Patcher engine (Randovania ODR). >=2.19 for DNA HUD / Samus-menu upgrade rows.
+# Use ODR 2.19 or newer for the DNA HUD and upgrade menu rows.
 open-dread-rando>=2.19

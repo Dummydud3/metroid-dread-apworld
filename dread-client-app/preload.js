@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld("dreadHub", {
   getConfig: () => ipcRenderer.invoke("get-config"),
   saveConfig: (partial) => ipcRenderer.invoke("save-config", partial),
   openLogsFolder: () => ipcRenderer.invoke("open-logs-folder"),
-  /** Tee a renderer Log line into INSTALL_ROOT/logs/metroid_bread_hub.log */
+  /* Save renderer log lines to metroid_bread_hub.log. */
   appendHubLog: (text) => ipcRenderer.invoke("append-hub-log", text),
   checkApworldUpdate: () => ipcRenderer.invoke("check-apworld-update"),
   installApworldUpdate: (opts) =>
@@ -21,14 +21,11 @@ contextBridge.exposeInMainWorld("dreadHub", {
   isRunning: () => ipcRenderer.invoke("is-running"),
   openTracker: () => ipcRenderer.invoke("open-tracker"),
   openVisualizer: () => ipcRenderer.invoke("open-visualizer"),
-  getPreparedSeed: () => ipcRenderer.invoke("get-prepared-seed"),
   runPatch: (opts) => ipcRenderer.invoke("run-patch", opts),
   cancelPatch: () => ipcRenderer.invoke("cancel-patch"),
   launchRyujinx: (opts) => ipcRenderer.invoke("launch-ryujinx", opts),
   pickFolder: (title) => ipcRenderer.invoke("pick-folder", title),
   pickFile: (opts) => ipcRenderer.invoke("pick-file", opts),
-  // Singleplayer dropzone: drag/drop or Browse a generated AP output .zip
-  loadSingleplayerZip: (zipPath) => ipcRenderer.invoke("load-singleplayer-zip", zipPath),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   loadYaml: (path) => ipcRenderer.invoke("load-yaml", path),
   saveYaml: (opts) => ipcRenderer.invoke("save-yaml", opts),
@@ -58,7 +55,7 @@ contextBridge.exposeInMainWorld("dreadHub", {
   },
 });
 
-// Back-compat alias used by older tracker code paths if needed.
+// Keep the old name for older tracker code.
 contextBridge.exposeInMainWorld("dreadClient", {
   getConfig: () => ipcRenderer.invoke("get-config"),
   openTracker: () => ipcRenderer.invoke("open-tracker"),

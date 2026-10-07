@@ -56,7 +56,7 @@ function RandomizerPowerup.MarkLocationCollected(locationIdentifier)
             RL.SendApLog("AP_CHECK: boss/EMMI marked " .. locationIdentifier .. " (pickup index " .. tostring(pickupIndex) .. ")")
         end
     end
-    -- Boss/EMMI death callbacks often run outside INGAME; push bitfield anyway.
+    -- Send pickup flags even when a boss callback runs outside INGAME.
     if RL and RL.GetCollectedIndicesAndSend then
         pcall(RL.GetCollectedIndicesAndSend)
         Game.AddSF(0.05, "RL.GetCollectedIndicesAndSend", "")
@@ -73,7 +73,7 @@ function RandomizerPowerup.IncrementInventoryIndex()
     Blackboard.SetProp(playerSection, propName, "f", currentIndex)
 end
 
--- Safe DNA HUD update when ODR custom_scenario is not present (fallback build).
+-- Update the DNA HUD safely when custom_scenario is unavailable.
 if not Scenario then Scenario = {} end
 if not Scenario.UpdateHudDnaCount then
     function Scenario.UpdateHudDnaCount()
@@ -139,11 +139,11 @@ function RandomizerPowerup.OnPickedUp(actor, resources)
     RandomizerPowerup.ApplyTunableChanges()
     RandomizerPowerup.UpdateWeapons()
     
-    -- Removed calls to functions that may not exist in Archipelago context
+    -- Skip helpers that may not exist in an AP build.
     
     RandomizerPowerup.IncrementInventoryIndex()
     
-    -- Call RL.UpdateRDVClient if it exists
+    -- Call RL.UpdateRDVClient only if it exists.
     if RL and RL.UpdateRDVClient then
         RL.UpdateRDVClient(false)
     end
@@ -152,7 +152,7 @@ function RandomizerPowerup.OnPickedUp(actor, resources)
 end
 
 function RandomizerPowerup.DisableInput()
-    -- items with unique inputs (Speed Booster, Phantom Cloak) require disabling and re-enabling inputs to work properly
+    -- Refresh controls so Speed Booster and Phantom Cloak work immediately.
     local oPlayer = Game.GetPlayer()
     if oPlayer ~= nil then
         oPlayer.INPUT:IgnoreInput(true, false, "PickupObtained")
@@ -186,9 +186,9 @@ function RandomizerPowerup.HandlePickupResources(progression)
         Game.LogWarn(0, data)
     end
 
-    -- For each progression stage, if the player does not have the FIRST item in that stage, the whole stage is granted
+    -- Grant a stage when its first item is missing.
     for _, resource_list in ipairs(progression) do
-        -- Check if we need to grant anything from this progression stage
+        -- Check whether this stage needs to be granted.
 
         if #resource_list > 0 then
             local current = RandomizerPowerup.GetItemAmount(resource_list[1].item_id)
@@ -204,14 +204,14 @@ function RandomizerPowerup.HandlePickupResources(progression)
             end
         end
 
-        -- Otherwise, loop to next progression stage (or fall out of loop)
+        -- Try the next stage if this one is already owned.
     end
 
-    return {} -- nothing granted after final stage of progression is reached
+    return {} -- Grant nothing after the last stage is owned.
 end
 
 function RandomizerPowerup.ChangeSuit()
-    -- ordered by priority
+    -- Check these in priority order.
     local suits = {
         {item = "ITEM_HYPER_SUIT", model = "Hyper"},
         {item = "ITEM_GRAVITY_SUIT", model = "Gravity"},
@@ -235,7 +235,7 @@ function RandomizerPowerup.Delayed_ChangeSuit(model)
         Game.AddPSF(0.1, RandomizerPowerup.Delayed_ChangeSuit, "s", model)
         return
     end
-    -- updating the model while VFX are active on the old model will cause a nullptr
+    -- Changing models while effects are active can crash the game.
     local model_updater = Game.GetPlayer().MODELUPDATER
     Game.LogWarn(0, "Updating suit to " .. model)
     model_updater.sModelAlias = model
@@ -243,12 +243,12 @@ end
 
 MAX_ENERGY = 1499
 function RandomizerPowerup.IncreaseEnergy(resource)
-    -- No resource, quit
+    -- Stop if there is no resource.
     if not resource then return end
 
     local item_id = resource.item_id
 
-    -- Not etank or epart, quit
+    -- Stop if this is not a tank or energy part.
     if item_id ~= "ITEM_ENERGY_TANKS" and item_id ~= "ITEM_LIFE_SHARDS" then return end
 
     local energy = Init.fEnergyPerTank
@@ -258,11 +258,11 @@ function RandomizerPowerup.IncreaseEnergy(resource)
         if Init.bImmediateEnergyParts then
             energy = Init.fEnergyPerPart
         elseif (shards_amount % 4) ~= 0 then
-            -- only change energy every 4 parts if not immediate but change internal amount
+            -- Update the item count now, but add energy only after four parts.
             Game.GetPlayer().LIFE.fLifeShards = shards_amount
             return
         end
-        -- remove all life shards as energy will be increased by following code
+        -- Remove part counts before the code below adds energy.
         RandomizerPowerup.SetItemAmount("ITEM_LIFE_SHARDS", 0)
         Game.GetPlayer().LIFE.fLifeShards = 0
     end
@@ -313,7 +313,7 @@ local function _ap_safe_update_hud_dna()
 end
 
 function RandomizerPowerup.GrantNextArtifact()
-    -- Grant the first unowned ITEM_RANDO_ARTIFACT_N (N <= required DNA).
+    -- Grant the first missing DNA artifact up to the required count.
     if not Init or not Init.iNumRequiredArtifacts or Init.iNumRequiredArtifacts == 0 then
         Game.LogWarn(0, "GrantNextArtifact: DNA gate disabled (iNumRequiredArtifacts=0)")
         return nil
@@ -346,7 +346,7 @@ function RandomizerPowerup.CheckArtifacts(resource)
 
     _ap_safe_update_hud_dna()
 
-    -- check for all artifact items, which are numbered. if all are collected, grant metroidnization
+    -- Grant Metroidnization once all numbered artifacts are owned.
     for i=1, Init.iNumRequiredArtifacts do
         if RandomizerPowerup.GetItemAmount("ITEM_RANDO_ARTIFACT_"..i) == 0 then return end
     end
@@ -362,11 +362,11 @@ end
 
 local tItemTunableHandlers = {
     ["ITEM_UPGRADE_FLASH_SHIFT_CHAIN"] = function(quantity)
-        -- # of chains after first - vanilla is 2. We set it to the number of items, and the "default" config starts with 2 items.
+        -- Set extra Flash Shift chains from the item count; vanilla starts with two.
         Scenario.SetTunableValue("CTunableAbilityGhostAura", "iChainDashMax", quantity)
     end,
     ["ITEM_UPGRADE_SPEED_BOOST_CHARGE"] = function(quantity)
-        -- Amount of time in seconds for SB to charge - vanilla is 1.5 seconds. Each upgrade reduces by 0.25...
+        -- Speed Booster normally charges in 1.5 seconds; each upgrade removes 0.25 seconds.
         local chargeTime = math.max(0.55, 1.5 - quantity * 0.25)
         Scenario.SetTunableValue("CTunableAbilitySpeedBooster", "fTimeToActivate", chargeTime)
     end
@@ -390,12 +390,12 @@ function RandomizerPowerup.UpdateWeapons()
     RandomizerPowerup.UpdateBeams()
     RandomizerPowerup.UpdateMissiles()
     
-    -- Force weapon refresh by cycling input
+    -- Toggle input to refresh the weapon.
     Game.AddSF(0.15, "RandomizerPowerup.RefreshWeaponDisplay", "")
 end
 
 function RandomizerPowerup.RefreshWeaponDisplay()
-    -- Force the game to refresh the weapon display
+    -- Refresh the weapon display.
     local oPlayer = Game.GetPlayer()
     if oPlayer == nil then
         return
@@ -403,12 +403,12 @@ function RandomizerPowerup.RefreshWeaponDisplay()
     
     Game.LogWarn(0, "Refreshing weapon display")
     
-    -- Disable input briefly
+    -- Disable input briefly.
     if oPlayer.INPUT then
         oPlayer.INPUT:IgnoreInput(true, false, "WeaponRefresh")
     end
     
-    -- Re-enable after a tiny delay
+    -- Enable input again after a short delay.
     Game.AddSF(0.05, "RandomizerPowerup._ReenableInputAfterWeaponRefresh", "")
 end
 
@@ -482,7 +482,7 @@ function RandomizerPowerup._UpdateBeams(beams)
         weapon_id = "ITEM_WEAPON_POWER_BEAM"
     end
     
-    -- Log which beam combination we're activating
+    -- Log the beam combination being enabled.
     Game.LogWarn(0, "Beam state updated to: " .. weapon_id)
     Game.LogWarn(0, "  Wide: " .. tostring(beams.wide) .. ", Plasma: " .. tostring(beams.plasma) .. ", Wave: " .. tostring(beams.wave))
     
@@ -490,7 +490,7 @@ function RandomizerPowerup._UpdateBeams(beams)
 end
 
 function RandomizerPowerup._UpdateMissiles(missiles)
-    -- don't give any missiles without launcher
+    -- Do not give missiles before the launcher is owned.
     if not missiles.missile then return nil end
 
     local ice_damage = 400
@@ -512,7 +512,7 @@ function RandomizerPowerup._UpdateMissiles(missiles)
     return "ITEM_WEAPON_MISSILE_LAUNCHER"
 end
 
--- Main PBs
+-- Main Power Bomb item.
 RandomizerPowerBomb = {}
 setmetatable(RandomizerPowerBomb, {__index = RandomizerPowerup})
 function RandomizerPowerBomb.OnPickedUp(actor, progression)
@@ -520,7 +520,7 @@ function RandomizerPowerBomb.OnPickedUp(actor, progression)
     RandomizerPowerup.OnPickedUp(actor, progression)
 end
 
--- Flash Shift: Require Main OFF → first chain unlock also grants Ghost Aura
+-- If Require Main is off, the first Flash Shift chain also unlocks Ghost Aura.
 AP_FLASH_SHIFT_REQUIRES_MAIN = AP_FLASH_SHIFT_REQUIRES_MAIN or false
 
 local function ap_flash_shift_requires_main()
@@ -550,17 +550,17 @@ if not RandomizerPowerup._APFlashUpgradeHooked then
     local _APIncreaseItemAmount = RandomizerPowerup.IncreaseItemAmount
     function RandomizerPowerup.IncreaseItemAmount(item_id, quantity, capacity)
         if item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and quantity and quantity > 0 then
-            -- Local pickups use RandomizerPowerup (ODR has no SPECIFIC_CLASSES
+            -- Use RandomizerPowerup for local pickups.
             ap_unlock_flash_shift_from_upgrade()
         end
         return _APIncreaseItemAmount(item_id, quantity, capacity)
     end
 end
 
--- Flash Shift
+-- Main Flash Shift item.
 RandomizerFlashShift = {}
 setmetatable(RandomizerFlashShift, {__index = RandomizerPowerup})
--- Flash Shift Upgrade (progressive stack) — not in stock ODR; required for AP remote grants.
+-- Add progressive Flash Shift Upgrades for remote AP grants.
 RandomizerFlashShiftUpgrade = {}
 setmetatable(RandomizerFlashShiftUpgrade, {__index = RandomizerPowerup})
 function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
@@ -583,7 +583,7 @@ function RandomizerFlashShift.OnPickedUp(actor, progression)
     for _, resource_list in ipairs(progression) do
         for _, resource in ipairs(resource_list) do
             if resource.item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and hasFlashShift and currentChains > 0 then
-                -- Duplicate Flash Shift main item only: do not stack more chains
+                -- Do not add chains for a duplicate main Flash Shift item.
                 resource.quantity = 0
             end
         end
@@ -615,7 +615,7 @@ function RandomizerPhantomCloak.OnPickedUp(actor, progression)
 end
 
 function RandomizerPhantomCloak.Deactivate()
-    -- prevent the pickup from trying to kill you
+    -- Keep collecting the pickup from killing the player.
     Game.GetPlayer().SPECIALENERGY:Fill()
 end
 
@@ -663,7 +663,7 @@ local function pick_up_beam(beam, actor, progression)
             table.insert(progression[1], 1, {item_id = to_grant, quantity = 1})
         end
     else
-        -- progressive beams
+        -- Progressive beam items.
         progression = {
             {
                 {item_id = "ITEM_WEAPON_SOLO_WIDE_BEAM", quantity = 1},
@@ -718,7 +718,7 @@ local function pick_up_missile(id, item, actor, progression)
             table.insert(progression[1], 1, {item_id = to_grant, quantity = 1})
         end
     else
-        -- progressive missiles
+        -- Progressive missile items.
         progression = {
             {
                 {item_id = "ITEM_WEAPON_SOLO_SUPER_MISSILE", quantity = 1},
@@ -753,4 +753,4 @@ function RandomizerIceMissile.OnPickedUp(actor, progression)
     return pick_up_missile("ice", "ITEM_WEAPON_ICE_MISSILE", actor, progression)
 end
 
--- DeathLink detection is installed by the AP client bootstrap (RL.InstallDeathHook /
+-- The AP client installs the DeathLink death handler.

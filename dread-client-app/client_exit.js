@@ -1,11 +1,11 @@
-/* * */
+
 
 function formatPythonCmd(launcher) {
   if (!launcher) return "(none)";
   return [launcher.cmd, ...(launcher.prefixArgs || [])].filter(Boolean).join(" ");
 }
 
-/** User-facing help when Hub cannot find a system Python 3.11–3.13. */
+/* Help users find Python 3.11 through 3.13. */
 function pythonMissingError() {
   return (
     "No usable Python 3.11–3.13 found for the Hub client.\n" +
@@ -19,7 +19,7 @@ function pythonMissingError() {
   );
 }
 
-/* * */
+
 function explainClientExit(code, stderrBuf) {
   const blob = String(stderrBuf || "");
   const unsigned = code == null ? null : code >>> 0;
@@ -30,7 +30,7 @@ function explainClientExit(code, stderrBuf) {
   if (/partially initialized module 'Options'/i.test(blob)) {
     return "Options.py import clash — Archipelago root / PYTHONPATH is wrong.";
   }
-  // ModuleUpdate interactive hang under Hub (no stdin) — not a random world import.
+  // Detect ModuleUpdate waiting for console input that the Hub cannot provide.
   if (/pkg_resources not found/i.test(blob)) {
     return (
       "Client blocked on missing pkg_resources (setuptools).\n" +
@@ -52,7 +52,7 @@ function explainClientExit(code, stderrBuf) {
     );
   }
 
-  // Prefer client-critical missing modules; ignore AP world-scan noise (bsdiff4, etc.).
+  // Report missing client packages before unrelated AP world imports.
   const worldScanNoise = new Set([
     "bsdiff4",
     "zilliandomizer",
@@ -79,7 +79,7 @@ function explainClientExit(code, stderrBuf) {
     );
   }
 
-  // Classic py.exe → 103; Python Install Manager (pymanager) → 0xA0000006.
+  // Missing Python exit codes: py.exe uses 103; pymanager uses 0xA0000006.
   const pyMissing =
     unsigned === 0xa0000006 ||
     unsigned === 103 ||

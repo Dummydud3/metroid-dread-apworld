@@ -34,7 +34,7 @@ def create_regions(multiworld: MultiWorld, player: int):
 
 
 
-    # Create one region per RDV area
+    # Create a region for each RDV area.
 
     area_regions = {}
 
@@ -52,7 +52,7 @@ def create_regions(multiworld: MultiWorld, player: int):
 
 
 
-    # Attach pickup locations (stable AP names / IDs)
+    # Add pickups with fixed AP names and IDs.
 
     for loc_name, loc_data in location_table.items():
 
@@ -66,11 +66,11 @@ def create_regions(multiworld: MultiWorld, player: int):
 
         else:
 
-            # Fallback: LocationData.region is the game region name
+            # Use the game region name if the detailed mapping is missing.
 
             parent_name = area_region_name(loc_data.region, loc_data.region)
 
-            # Prefer any area region under that game region
+            # Try any area within that game region.
 
             candidates = [n for n in area_regions if n.startswith(loc_data.region + "/")]
 
@@ -82,7 +82,7 @@ def create_regions(multiworld: MultiWorld, player: int):
 
         if parent is None:
 
-            # Last resort: create orphan under first Artaria area
+            # As a last resort, attach the location to the first Artaria area.
 
             parent = next(iter(area_regions.values()))
 
@@ -92,13 +92,13 @@ def create_regions(multiworld: MultiWorld, player: int):
 
 
 
-    # Attach locked event locations (one AP location per unique event item).
+    # Add one fixed event location per distinct event item.
 
-    # Events are filler classification: reachability is granted inside DreadLogic
+    # Treat events as filler; DreadLogic handles their reachability.
 
-    # BFS, so accessibility:items does not require every event node (including
+    # Item accessibility does not need every alternate event node.
 
-    # trick-only / self-gated alternates).
+    # This includes trick-only nodes and nodes gated by their own event.
 
     def _event_path_priority(ev) -> int:
 
@@ -144,7 +144,7 @@ def create_regions(multiworld: MultiWorld, player: int):
 
 
 
-    # Victory: locked event when Boss - Raven Beak node is reachable
+    # Place Victory at the reachable Raven Beak boss node.
 
     victory_parent = area_regions.get("Itorash/Raven Beak Arena")
 
@@ -156,13 +156,13 @@ def create_regions(multiworld: MultiWorld, player: int):
 
         victory_parent.locations.append(victory_location)
 
-        # Register alias for logic BFS
+        # Register the name used by the logic search.
 
         logic.pickup_nodes["Raven Beak"] = ("Itorash", "Raven Beak Arena", "Boss - Raven Beak")
 
 
 
-    # Menu -> starting area only (no free cross-region graph)
+    # Start logic from Menu and the selected starting area only.
 
     start = logic.starting_node
 
@@ -186,19 +186,19 @@ def create_regions(multiworld: MultiWorld, player: int):
 
 
 
-    # Connect every area region to Menu via a unreachable stub? No —
+    # AP still needs entrances to every area for its own reachability checks.
 
-    # AP requires parent_region.can_reach for locations. With only Menu->start,
+    # Without them, AP can reach only the starting region.
 
-    # other area regions are never reachable via AP entrances.
+    # Other location parents would remain unreachable.
 
-    #
+    
 
-    # Fix: connect Menu to ALL area regions with trivial entrances so AP's
+    # Connect Menu to every area with an always-open entrance.
 
-    # region sweep can reach every Location object; real gating is on
+    # This lets AP find each location object.
 
-    # location.access_rule via RDV BFS.
+    # Use the location's RDV access rule for the real item requirements.
 
     for name, region in area_regions.items():
 

@@ -28,7 +28,7 @@
         </nav>
       </header>
 
-      <!-- ========== YAML EDITOR ========== -->
+      <!-- YAML editor. -->
       <section id="view-yaml" class="view" hidden>
         <div class="panel">
           <div class="panel-head">
@@ -155,9 +155,9 @@
         </div>
       </section>
 
-      <!-- ========== CLIENT FLOW ========== -->
+      <!-- Client screens. -->
       <section id="view-client" class="view">
-        <!-- Step: Connect -->
+        <!-- Connect screen. -->
         <div id="stage-connect" class="stage">
           <section class="panel">
             <h2>Connect to Archipelago</h2>
@@ -188,28 +188,9 @@
             </div>
             <p class="hint status-msg" id="connect-status"></p>
           </section>
-
-          <!-- Visibility controlled by SHOW_SINGLEPLAYER_DROPZONE in app.js (currently hidden). -->
-          <section class="panel" id="singleplayer-panel">
-            <h2>Singleplayer</h2>
-            <p class="hint">
-              Playing solo? Skip the server — drop the Archipelago output .zip you generated for this seed.
-            </p>
-            <div
-              id="singleplayer-drop"
-              class="dropzone"
-              tabindex="0"
-              role="button"
-              aria-label="Select or drop your generated Archipelago output zip file"
-            >
-              <span class="dropzone-label">Click to select or drop your generated output .ZIP</span>
-              <span class="dropzone-sub">Accepts the .zip Archipelago generated when you created this seed.</span>
-            </div>
-            <p class="hint status-msg" id="singleplayer-status"></p>
-          </section>
         </div>
 
-        <!-- Step: Patch -->
+        <!-- Patch screen. -->
         <div id="stage-patch" class="stage" hidden>
           <section class="panel">
             <div class="panel-head">
@@ -217,7 +198,7 @@
               <span class="pill muted" id="patch-seed-pill">Seed: —</span>
             </div>
             <p class="hint" id="patch-hint">
-              Seed data comes from the Archipelago server (multiworld) or from the singleplayer .zip you dropped — no manual downloading needed.
+              Seed data comes from the room's slot data after you connect.
             </p>
 
             <label>
@@ -278,7 +259,7 @@
           </details>
         </div>
 
-        <!-- Step: Main client -->
+        <!-- Main client screen. -->
         <div id="stage-client" class="stage" hidden>
           <section class="panel status-panel">
             <div class="status-row">
@@ -355,8 +336,8 @@
           </section>
         </div>
 
-        <!-- Always on Client view so connect failures aren't trapped on a hidden
-             stage. Collapsed on connect/patch; open after connect (Play). -->
+        <!-- Keep the log visible on Client screens. Open it after connecting.
+ -->
         <details class="panel log-panel" id="main-log-wrap">
           <summary class="log-head">
             <h2>Log <span class="muted-inline" id="main-log-hint">(click to expand)</span></h2>

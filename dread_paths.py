@@ -28,7 +28,7 @@ def _is_frozen_ap_install(candidate: Path) -> bool:
         lib_zip = candidate / "lib" / "library.zip"
         if not lib_zip.is_file():
             return False
-        # Prefer a clear launcher/exe signal so random folders with a zip don't match.
+        # Look for an AP launcher, not just any folder containing a zip.
         markers = (
             "ArchipelagoLauncher.exe",
             "ArchipelagoGenerate.exe",
@@ -132,16 +132,16 @@ def resolve_ap_roots(world_dir: Optional[Path] = None) -> Tuple[Path, Path]:
         candidate = Path(raw).expanduser()
         if _is_source_ap_root(candidate):
             root = candidate.resolve()
-            # Env may point at bundled ap_core — keep Hub install (source or frozen).
+            # Keep the install path even if the import path points to ap_core.
             if root.name.lower() == AP_CORE_DIRNAME:
                 install = resolve_hub_install_root(base) or root
                 return root, install
-            # Explicit full AP tree: still prefer matching ap_core for imports.
+            # Prefer the matching bundled ap_core for imports.
             if core is not None:
                 return core, root
             return root, root
 
-    # Prefer bundled ap_core whenever present (Hub runtime + matching client API).
+    # Use bundled ap_core when it is available.
     if core is not None:
         install = resolve_hub_install_root(base)
         if install is None:
@@ -174,7 +174,7 @@ def resolve_ap_roots(world_dir: Optional[Path] = None) -> Tuple[Path, Path]:
     except Exception:
         pass
 
-    # Legacy layout: worlds/metroid_bread → repo root (wrong for runtime extracts).
+    # Older installs keep the AP root above worlds/metroid_bread.
     try:
         legacy = base.parents[1].resolve()
     except IndexError:
@@ -192,13 +192,13 @@ def resolve_ap_root(world_dir: Optional[Path] = None) -> Path:
 WORLD_DIR = Path(__file__).resolve().parent
 AP_ROOT, INSTALL_ROOT = resolve_ap_roots(WORLD_DIR)
 
-# Back-compat alias: older code used ROOT for the folder holding client scripts.
+# Keep ROOT for callers that still use the old name.
 ROOT = WORLD_DIR
 
 CONFIG_NAME = "dread_direct_patch_config.json"
 UI_CONFIG_NAME = "dread_client_ui_config.json"
 
-# Folder the packaging script writes the custom subsdk9 into, relative to AP_ROOT
+# Find the folder where the packager writes subsdk9.
 BUNDLED_EXLAUNCH_DEPLOY = Path("exlaunch") / "deploy"
 
 
@@ -248,7 +248,7 @@ def ensure_runtime_world_namespace() -> None:
     name = "worlds.metroid_bread"
     existing = sys.modules.get(name)
     if existing is not None:
-        # Repair incomplete synthetic packages left by older Hub builds.
+        # Repair packages left incomplete by older Hub builds.
         if getattr(existing, "__spec__", None) is None and getattr(
             existing, "__path__", None
         ):
@@ -261,7 +261,7 @@ def ensure_runtime_world_namespace() -> None:
         return
     except Exception:
         pass
-    # Ensure parent package exists (ap_core stub or real AP).
+    # Create the parent package if it is missing.
     try:
         import worlds  # noqa: F401
     except Exception:
@@ -278,7 +278,7 @@ def ensure_import_paths() -> None:
     """Put AP import root and WORLD_DIR on sys.path so client modules + AP core import."""
     global AP_ROOT, INSTALL_ROOT
     AP_ROOT, INSTALL_ROOT = resolve_ap_roots(WORLD_DIR)
-    # World first, then AP import root at 0 so AP wins for Options / CommonClient / worlds.
+    # Put the AP import path first so its core modules win.
     for path in (WORLD_DIR, AP_ROOT):
         text = str(path)
         if text in sys.path:
@@ -310,14 +310,14 @@ def load_patch_config(root: Optional[Path] = None) -> Dict[str, Any]:
     """Read dread_direct_patch_config.json; missing/broken config is empty."""
     path = config_file(root)
     if not path.is_file():
-        # Fall back to install root (pre-merge layout / older portable packages).
+        # Try the install root for older package layouts.
         legacy = INSTALL_ROOT / CONFIG_NAME
         if root is None and legacy.is_file():
             path = legacy
         else:
             return {}
     try:
-        # utf-8-sig: editors and PowerShell happily leave a BOM on this file.
+        # Accept the UTF-8 file marker left by some editors.
         data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return {}

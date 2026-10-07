@@ -1,4 +1,4 @@
--- ApLoadingTips: pin ForcedTooltip for Continue / New Game + /tip_force probe.
+-- Set loading tips for Continue, New Game, and /tip_force.
 
 ApLoadingTips = ApLoadingTips or {
   enabled = true,
@@ -10,23 +10,23 @@ ApLoadingTips = ApLoadingTips or {
   _fallback_loc = "#TIP_000_GENERAL_PARKOUR_000",
   _last_readback = "",
   _forced_writable = false,
-  _forced_dead = true, -- flipped false when Set readback sticks (OdrTip / future)
+  _forced_dead = true, -- Clear this when reading back the forced tip succeeds.
   _msg_path = "",
   _chrome_secs = 3.0,
   _pending_tip = nil,
-  _deathlink_tip = nil, -- TITLE||BODY; re-pin on checkpoint LoadGame after game-over
+  _deathlink_tip = nil, -- Store TITLE||BODY and restore it when loading after a death.
   _rng_seeded = false,
-  _checks_collected_seen = 0, -- watermark for secondary tip unlocks
-  _checks_collected_override = nil, -- optional Hub/debug override
+  _checks_collected_seen = 0, -- Highest number of unlocked extra tips.
+  _checks_collected_override = nil, -- Optional tip set by the Hub or debug tools.
 }
 
--- Early-connection tip (before Hub sets RL.APConnected).
+-- Show connection help before the Hub reports APConnected.
 ApLoadingTips.CONNECT_TIP = (
   "{c6}CONNECT CLIENT{c7}||Launch Metroid Bread Client, then press Connect Game "
   .. "while the game is open.{c0}"
 )
 
--- Max carousel tips OdrTip can hold at once (slots 0–4).
+-- OdrTip has five tip slots, numbered 0 through 4.
 ApLoadingTips.GENERIC_TIP_DISPLAY = 5
 
 
@@ -79,7 +79,7 @@ function ApLoadingTips.LoadTipPool()
   if type(ApTipPool) == "table" and #ApTipPool > 0 then
     return ApTipPool
   end
-  -- Fallback if romfs pool script missing (dev / old patch).
+  -- Use fallback tips if the romfs tip file is missing.
   return {
     ApLoadingTips.CONNECT_TIP,
   }
@@ -95,7 +95,7 @@ function ApLoadingTips.LoadSecondaryTipPool()
   return {}
 end
 
---- How many Location_Collected checks this save has (RL.Pickups bitfield props).
+-- Count collected checks from the saved pickup flags.
 function ApLoadingTips.CountCollectedChecks()
   local override = tonumber(ApLoadingTips._checks_collected_override)
   if override ~= nil and override >= 0 then
@@ -122,7 +122,7 @@ function ApLoadingTips.CountCollectedChecks()
       end
     end
   end
-  -- Keep a watermark so brief Pickups gaps after load do not shrink the pool.
+  -- Keep the highest count so loading cannot briefly remove tips.
   local prev = tonumber(ApLoadingTips._checks_collected_seen) or 0
   if n > prev then
     ApLoadingTips._checks_collected_seen = n
@@ -132,7 +132,7 @@ function ApLoadingTips.CountCollectedChecks()
   return n
 end
 
---- Always-on tips + one secondary tip per collected check (capped by secondary size).
+-- Add one extra tip per collected check, up to the number available.
 function ApLoadingTips.BuildActiveGenericPool()
   local base = ApLoadingTips.LoadTipPool()
   local secondary = ApLoadingTips.LoadSecondaryTipPool()
@@ -160,10 +160,10 @@ function ApLoadingTips.BuildActiveGenericPool()
   return active
 end
 
---- Watermark +1 when a check is marked collected (mid-session unlock without full recount).
+-- Increase the unlocked tip count when a check is collected.
 function ApLoadingTips.NotifyCheckCollected(locationIdentifier)
   local prev = tonumber(ApLoadingTips._checks_collected_seen) or 0
-  -- Prefer a fresh Pickups recount when Hub mapping is live.
+  -- Recount pickups when the Hub's item mapping is ready.
   local n = ApLoadingTips.CountCollectedChecks()
   if n <= prev then
     n = prev + 1
@@ -196,7 +196,7 @@ local function ap_seed_rng()
     end
   end
   math.randomseed(seed % 2147483646 + 1)
-  -- Warm up poorly seeded RNGs.
+  -- Discard a few random values before choosing tips.
   math.random()
   math.random()
   ApLoadingTips._rng_seeded = true
@@ -214,7 +214,7 @@ local function ap_shuffle_copy(list)
   return out
 end
 
---- Priority: early connect only (Death Link / death jokes use ArmDeathLinkTip).
+-- Use early connection tips here; death tips have their own handler.
 function ApLoadingTips.PrepareConnectTip(reason)
   if not odr_tip_live() or type(OdrTip.SetTipText) ~= "function" then
     return false
@@ -231,7 +231,7 @@ function ApLoadingTips.PrepareConnectTip(reason)
   return true
 end
 
---- Shuffle active generic pool (base + unlocked secondary) into OdrTip slots.
+-- Shuffle unlocked tips into the OdrTip slots.
 function ApLoadingTips.PrepareGenericCarousel(reason)
   if not odr_tip_live() or type(OdrTip.SetTipText) ~= "function" then
     return false
@@ -280,7 +280,7 @@ function ApLoadingTips.PrepareGenericCarousel(reason)
   return true
 end
 
---- ForcedTooltip diagnosis + optional pin. With OdrTip subsdk9, readback should stick.
+-- Check and set the forced tip; OdrTip should return the same value.
 function ApLoadingTips.ApplyForcedTooltip(want)
   want = want or ApLoadingTips._fallback_loc
   local odr = odr_tip_live()
@@ -333,7 +333,7 @@ function ApLoadingTips.ApplyForcedTooltip(want)
   return ApLoadingTips._last_readback or ""
 end
 
--- - Re-arm OdrTip ForceRefresh without changing carousel content.
+-- Refresh OdrTip without changing the tip list.
 function ApLoadingTips.ArmCarouselRefresh(reason)
   if not odr_tip_live() then
     return false
@@ -361,29 +361,29 @@ function ApLoadingTips.ArmCarouselRefresh(reason)
   return armed
 end
 
---- Pin tip id into OdrTip ForcedTooltip slot (no Show/Hide). Cheap; safe to call often.
+-- Set the forced tip without showing or hiding the loading screen.
 function ApLoadingTips.ForceNextTip(reason)
   if not ApLoadingTips.enabled then
     return false
   end
   reason = reason or "ForceNextTip"
 
-  -- Priority 1: Death Link / local-death joke tip (count=1) for game-over Continue.
+  -- Show the death tip first when continuing after a death.
   if ApLoadingTips._deathlink_tip ~= nil and ApLoadingTips._deathlink_tip ~= "" then
     pcall(ApLoadingTips.ApplyDeathLinkTipPin, reason)
-  -- Priority 2: early connection / New Game before Hub bootstrap.
+  -- Show connection help next if the Hub has not connected yet.
   elseif not ApLoadingTips.ClientConnected() then
     pcall(ApLoadingTips.PrepareConnectTip, reason)
-  -- Default: shuffle generic AP tips (warp / transport / normal loads).
+  -- Otherwise shuffle normal AP loading tips.
   else
     pcall(ApLoadingTips.PrepareGenericCarousel, reason)
   end
 
-  -- Without OdrTip, SetForcedTooltip is a stub — skip spam on Continue.
+  -- Skip repeated forced-tip calls when OdrTip is unavailable.
   if not odr_tip_live() and (ApLoadingTips._forced_dead or ApLoadingTips._forced_writable == false) then
     return false
   end
-  -- Stamp ForcedTooltip first (updates gForcedTip + LOADING), then re-arm
+  -- Set the forced tip before requesting a refresh.
   local got = ApLoadingTips.ApplyForcedTooltip(nil)
   if odr_tip_live() then
     pcall(ApLoadingTips.ArmCarouselRefresh, reason)
@@ -404,7 +404,7 @@ function ApLoadingTips.ForceNextTip(reason)
   return false
 end
 
---- Remember DeathLink tip text for LoadGame("checkpoint") / OnLoad re-pin.
+-- Remember the death tip for checkpoint loads.
 function ApLoadingTips.ArmDeathLinkTip(tip)
   tip = tip ~= nil and tostring(tip) or ""
   if tip == "" then
@@ -420,7 +420,7 @@ function ApLoadingTips.ClearDeathLinkTip()
   ApLoadingTips._deathlink_tip = nil
 end
 
---- Store tip 0 + count=1 again (OdrTip ArmCarouselRefresh) before ForceNextTip.
+-- Restore tip 0 and a count of one before forcing the next tip.
 function ApLoadingTips.ApplyDeathLinkTipPin(reason)
   local tip = ApLoadingTips._deathlink_tip
   if tip == nil or tip == "" then
@@ -443,7 +443,7 @@ function ApLoadingTips.ApplyDeathLinkTipPin(reason)
       .. " reason="
       .. tostring(reason or "?")
   )
-  -- One-shot: clear after the checkpoint load that consumes it.
+  -- Clear the saved tip after one checkpoint load.
   ApLoadingTips._deathlink_tip = nil
   return ok
 end
@@ -452,7 +452,7 @@ function ApLoadingTips.ClearArm()
   ApLoadingTips._armed = false
 end
 
---- Try to put unmistakable text on screen. #TIP_* alone is often invisible in ShowMessage.
+-- Try plain text because ShowMessage may not display TIP_* keys.
 function ApLoadingTips.ShowTipMessage(tip_loc)
   tip_loc = tip_loc or ApLoadingTips._fallback_loc
   if type(tip_loc) ~= "string" then
@@ -464,7 +464,7 @@ function ApLoadingTips.ShowTipMessage(tip_loc)
   end
   ApLoadingTips._msg_path = "none"
 
-  -- Unmistakable raw dialogue (localization keys like #TIP_* often no-op in ShowMessage).
+  -- Use visible plain text instead of a tip key.
   local raw = (
     "AP TIP FORCE|"
     .. "PARKOUR: vault over one-block terrain while running.|"
@@ -477,7 +477,7 @@ function ApLoadingTips.ShowTipMessage(tip_loc)
     return false
   end
 
-  -- 1) Raw 4-arg form used by EmmyAbilityObtained / ODR item popups.
+  -- Try the four-argument form used by item popups.
   local ok, err = pcall(GUI.ShowMessage, raw, true, "", false)
   log("ShowTipMessage raw4 ok=" .. tostring(ok) .. " err=" .. tostring(err))
   if ok then
@@ -485,7 +485,7 @@ function ApLoadingTips.ShowTipMessage(tip_loc)
     return true
   end
 
-  -- 2) Raw 3-arg (ap_warp style).
+  -- Try the three-argument form used by ap_warp.
   ok, err = pcall(GUI.ShowMessage, raw, true, "")
   log("ShowTipMessage raw3 ok=" .. tostring(ok) .. " err=" .. tostring(err))
   if ok then
@@ -493,15 +493,15 @@ function ApLoadingTips.ShowTipMessage(tip_loc)
     return true
   end
 
-  -- 3) Localized tip key (may be a silent no-op for TIP_* bank).
+  -- Try the tip key, though the text bank may not support it.
   ok, err = pcall(GUI.ShowMessage, keyed, true, "", false)
   log("ShowTipMessage key4 " .. keyed .. " ok=" .. tostring(ok) .. " err=" .. tostring(err))
   if ok then
     ApLoadingTips._msg_path = "ShowMessage-key4"
-    -- Still schedule HUD — key path often returns ok with nothing visible.
+    -- Also schedule a HUD message in case the key shows nothing.
   end
 
-  -- 4) HUD label toast on iconshudcomposition (death-counter style).
+  -- Show a short message on the icon HUD.
   local hud_ok = ApLoadingTips.ShowHudToast(
     "AP TIP: PARKOUR vault over 1-block terrain (" .. keyed .. ")"
   )
@@ -527,7 +527,7 @@ function ApLoadingTips.ShowHudToast(text)
     return false
   end
 
-  -- Reuse or create a simple label child.
+  -- Reuse the label or create one.
   local label = nil
   if type(hud.FindChild) == "function" then
     local ok_f, child = pcall(hud.FindChild, hud, "ApTipForceLabel")
@@ -592,7 +592,7 @@ function ApLoadingTips.ShowHudToast(text)
   if type(GUI.SetProperties) == "function" then
     pcall(GUI.SetProperties, label, { Visible = true, Enabled = true })
   end
-  -- Auto-clear after a few seconds.
+  -- Clear the label after a few seconds.
   if Game and Game.AddSF then
     pcall(Game.AddSF, 6.0, "ApLoadingTips.ClearHudToast", "")
   end
@@ -613,7 +613,7 @@ function ApLoadingTips.ClearHudToast()
   end
 end
 
---- Deferred CHADO flash — MUST NOT run inside Remote Lua EXEC (blocks reply → TimeoutError).
+-- Run CHADO later so it cannot block a Remote Lua reply.
 function ApLoadingTips.ProbeChromeShow()
   local seconds = tonumber(ApLoadingTips._chrome_secs) or 3.0
   local show_status = "skipped-chrome"
@@ -655,7 +655,7 @@ function ApLoadingTips.ProbeChromeShow()
   return show_status
 end
 
--- - Fast probe: diagnose Forced, schedule visible message + chrome, return NOW.
+-- Check the tip, schedule the message, and return immediately.
 function ApLoadingTips.ProbeShow(tip_id, seconds, also_message)
   tip_id = tip_id or ApLoadingTips._fallback_loc
   seconds = tonumber(seconds) or 3.0
@@ -687,7 +687,7 @@ function ApLoadingTips.ProbeShow(tip_id, seconds, also_message)
         log("ProbeShow AddSF msg err=" .. tostring(err_sf))
       end
     else
-      -- Last resort (may block EXEC): call directly.
+      -- Call directly only if scheduling fails; it may block EXEC.
       local okm = ApLoadingTips.ShowTipMessage(tip_id)
       msg = okm and "inline" or "inline-fail"
     end
@@ -742,7 +742,7 @@ function ApLoadingTips.ProbeHide()
   ApLoadingTips.ProbeHideNative()
 end
 
---- Pin-only Game.* wrap: SetForcedTooltip then call original (no Show/Hide thrash).
+-- Set the forced tip before calling the original game function.
 local function wrap_game_fn(name, reason)
   if type(Game) ~= "table" or type(Game[name]) ~= "function" then
     return false
@@ -771,7 +771,7 @@ local function wrap_on_load_scenario()
   local orig = guicallbacks.OnLoadScenarioRequest
   ApLoadingTips._orig["OnLoadScenarioRequest"] = orig
   guicallbacks.OnLoadScenarioRequest = function(...)
-    -- Show loading chrome first, then pin/ForceRefresh. Pre-Show TipRefresh
+    -- Show the loading screen before refreshing its tip.
     orig(...)
     pcall(ApLoadingTips.ForceNextTip, "OnLoadScenarioRequest")
   end
@@ -779,7 +779,7 @@ local function wrap_on_load_scenario()
   return true
 end
 
---- Restore any previously installed wraps (Show/Hide thrashers from older scripts + pin wraps).
+-- Remove older wrappers before installing these.
 function ApLoadingTips.UninstallLoadWraps()
   local restored = 0
   if type(loadingscreen) == "table" then
@@ -827,7 +827,7 @@ function ApLoadingTips.UninstallLoadWraps()
   return restored
 end
 
--- - Runtime tip caption override (OdrTip 0.5.0 GetLocalized side table).
+-- Override the tip caption with OdrTip 0.5.0 or newer.
 function ApLoadingTips.SetTipText(indexOrKey, text)
   if type(OdrTip) ~= "table" then
     log("SetTipText: OdrTip missing")
@@ -856,7 +856,7 @@ function ApLoadingTips.SetTipText(indexOrKey, text)
   return ok and true or false, reason
 end
 
---- Read current tip override (OdrTip GetTipText). Returns text, key|reason.
+-- Read tip text and its key or failure reason.
 function ApLoadingTips.GetTipText(indexOrKey)
   if type(OdrTip) ~= "table" or type(OdrTip.GetTipText) ~= "function" then
     return nil, "no-odrtip"
@@ -864,7 +864,7 @@ function ApLoadingTips.GetTipText(indexOrKey)
   return OdrTip.GetTipText(indexOrKey)
 end
 
---- Carousel display order: order[i] = tip id 0–4 for slot i (permutation).
+-- Choose the display order of tip IDs 0 through 4.
 function ApLoadingTips.SetTipOrder(order)
   if type(OdrTip) ~= "table" or type(OdrTip.SetTipOrder) ~= "function" then
     log("SetTipOrder: OdrTip.SetTipOrder missing ver=" .. tostring(OdrTip and OdrTip.Version))
@@ -900,7 +900,7 @@ function ApLoadingTips.GetTipOrder()
   return OdrTip.GetTipOrder()
 end
 
---- How many ordered tips the carousel holds (1–5). Composes with SetTipOrder.
+-- Set the number of displayed tips from one to five.
 function ApLoadingTips.SetTipCount(n)
   if type(OdrTip) ~= "table" or type(OdrTip.SetTipCount) ~= "function" then
     log("SetTipCount: OdrTip.SetTipCount missing ver=" .. tostring(OdrTip and OdrTip.Version))
@@ -925,7 +925,7 @@ function ApLoadingTips.GetTipCount()
   return OdrTip.GetTipCount()
 end
 
---- Remote Lua helper: RL.SetTipText / GetTipText / SetTipOrder / SetTipCount when RL exists.
+-- Add tip helpers to RL when it exists.
 function ApLoadingTips.InstallRemoteTipHelper()
   if type(RL) ~= "table" then
     return false
@@ -955,7 +955,7 @@ function ApLoadingTips.InstallRemoteTipHelper()
 end
 
 function ApLoadingTips.Install()
-  -- Strip any Show/Hide / old wraps, then install pin-only load hooks.
+  -- Remove old wrappers and add the new loading hooks.
   local restored = ApLoadingTips.UninstallLoadWraps()
   ApLoadingTips.did_install = true
   ApLoadingTips.wrap_count = 0
@@ -972,7 +972,7 @@ function ApLoadingTips.Install()
   wrap_game_fn("LoadProfile", "LoadProfile")
   wrap_on_load_scenario()
 
-  -- Early pin so OdrTip slot is filled before first Continue SetLoadingMode.
+  -- Fill the forced-tip slot before Continue starts loading.
   local pinned = false
   if odr_tip_live() then
     pinned = ApLoadingTips.ForceNextTip("Install")

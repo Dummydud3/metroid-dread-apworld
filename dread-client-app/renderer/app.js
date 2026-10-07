@@ -48,7 +48,7 @@
     includedDefault: 2,
   };
 
-  // Defaults match Options.py (DefaultOnToggle vs Toggle).
+  // Match the defaults in Options.py.
   const COSMETICS = [
     ["show_boss_lifebar", "Show Boss Lifebar", true],
     ["show_enemy_life", "Show Enemy Life", false],
@@ -58,6 +58,7 @@
     ["enable_death_counter", "Death Counter", true],
     ["show_dna_in_hud", "Show DNA In HUD", true],
     ["nerf_power_bombs", "Nerf Power Bombs", false],
+    ["skip_item_popups", "Skip Item Acquisition Popups", false],
     ["x_starts_released", "X Starts Released", false],
     ["station_map_warp", "Pause Map Station Warp", false],
   ];
@@ -153,7 +154,7 @@
     "itorash",
   ];
 
-  // Align with Options.py valid_keys (RDV change_from / Phase-2 change_to).
+  // Use the door names accepted by Options.py and RDV.
   const DOORS_TO_CHANGE_KEYS = [
     "Access Open",
     "Charge Beam Door",
@@ -188,7 +189,7 @@
 
   const DEFAULT_CHANGE_DOORS_TO = new Set(CHANGE_DOORS_TO_KEYS);
 
-  // RDV LayoutTrickLevel names + per-trick used levels from Dread header.json.
+  // Use the trick names and levels from Dread's header.json.
   const TRICK_LEVEL_LABEL = {
     disabled: "Disabled",
     beginner: "Beginner",
@@ -204,7 +205,7 @@
     hard: "expert",
   };
 
-  // [key, label, default, allowedLevels]
+  // Each entry contains a key, label, default, and allowed levels.
   const TRICKS = [
     ["combat_tricks", "Combat", "beginner", ["disabled", "beginner", "intermediate", "advanced", "expert", "ludicrous"]],
     ["knowledge_tricks", "Knowledge", "disabled", ["disabled", "beginner", "intermediate", "advanced"]],
@@ -243,10 +244,8 @@
     connecting: false,
     roomId: "",
     seedName: "",
-    spoilerPath: "",
-    zipPath: "",
+    slotPath: "",
     playerName: "",
-    singleplayer: false,
     patched: false,
     waitingServerSpoiler: false,
     serverSpoilerWaiter: null,
@@ -254,11 +253,11 @@
     unsubStatus: null,
     unsubPatchLog: null,
     unsubPatchProgress: null,
-    // Last loaded / saved Metroid Bread YAML block (preserves unknown keys).
+    // Keep unknown settings in the last loaded YAML block.
     yamlLoadedDread: null,
-    // Hub Log: false = hide @@APLOG@@debug@@ / .log-debug lines (default).
+    // Hide debug log lines by default.
     debugLogs: false,
-    // Patch output layout: ryujinx | atmosphere
+    // Output layouts: ryujinx or atmosphere.
     modCompatibility: "ryujinx",
     ryujinxOutputPath: "",
     atmosphereOutputPath: "",
@@ -269,7 +268,7 @@
   function normalizeTrickLevel(raw, allowed, fallback) {
     let v = String(raw == null ? "" : raw).toLowerCase();
     if (LEGACY_TRICK_LEVEL[v]) v = LEGACY_TRICK_LEVEL[v];
-    // Old Hub "expert" meant max (5 / Ludicrous) when that option existed as top.
+    // Treat the old expert setting as level 5, Ludicrous.
     if (v === "expert" && allowed && !allowed.includes("expert") && allowed.includes("ludicrous")) {
       v = "ludicrous";
     }
@@ -292,7 +291,7 @@
     return false;
   }
 
-  /** Prefer option-specific hint (key::selectedValue) when a select is in the same label. */
+  /* Use help for the selected option value when available. */
   function resolveYamlHint(hintKey, anchor, labelText) {
     const map = window.YAML_OPTION_HINTS || {};
     const lab = anchor?.closest?.("label");
@@ -391,7 +390,7 @@
     const pad = 8;
     let left = rect.left;
     let top = rect.bottom + 6;
-    // Measure after attach
+    // Measure after adding the element.
     const pw = pop.offsetWidth;
     const ph = pop.offsetHeight;
     if (left + pw > window.innerWidth - pad) left = Math.max(pad, window.innerWidth - pw - pad);
@@ -533,7 +532,7 @@
       lab.appendChild(input);
       lab.appendChild(span);
       const hintKey = `${key}::${val}`;
-      // Only per-value hints (setKey::Value). Skip set-level fallback so groups
+      // Use help for each selected value instead of the whole set.
       if (yamlHintText(hintKey)) {
         lab.appendChild(makeInfoButton(hintKey, val));
       }
@@ -548,14 +547,14 @@
   }
 
   function writeOptionSet(key, values) {
-    if (values == null) return; // keep form defaults from buildYamlForm
+    if (values == null) return; // Keep the defaults from buildYamlForm.
     const set = new Set(Array.isArray(values) ? values : []);
     document.querySelectorAll(`[data-yaml-set="${key}"]`).forEach((el) => {
       el.checked = set.has(el.value);
     });
   }
 
-  /* ---------- Menu / views ---------- */
+  /* Menus and views. */
 
   function setView(view) {
     state.view = view;
@@ -581,12 +580,12 @@
     $("stage-connect").hidden = stage !== "connect";
     $("stage-patch").hidden = stage !== "patch";
     $("stage-client").hidden = stage !== "client";
-    // Patch stage already has its own collapsed log — hide the shared Connect log.
+    // Hide the shared log when the patch screen shows its own log.
     const mainLog = $("main-log-wrap");
     if (mainLog) {
       mainLog.hidden = stage === "patch";
     }
-    // Connect/patch: keep Log minimized so the form stays primary.
+    // Keep the log closed while connecting or patching.
     if (stage !== "patch") {
       setMainLogExpanded(stage === "client");
     }
@@ -611,7 +610,7 @@
     btn.addEventListener("click", () => setView(btn.dataset.view));
   });
 
-  /* ---------- Logging ---------- */
+  /* Log display. */
 
   function isLogPinnedToBottom(el, slackPx = 64) {
     return el.scrollHeight - el.scrollTop - el.clientHeight <= slackPx;
@@ -661,7 +660,7 @@
       el.appendChild(line);
     }
     scrollLogIfPinned(el, pin);
-    // Persist renderer-originated main Log lines (RoomInfo / connect UI).
+    // Save main log lines created by the renderer.
     if (persist && (!target || target === $("log")) && hub.appendHubLog) {
       hub.appendHubLog(cleaned.endsWith("\n") ? cleaned : `${cleaned}\n`).catch(() => {});
     }
@@ -685,9 +684,9 @@
     }
     const text = payload.text || "";
     const level = payload.level === "debug" ? "debug" : "normal";
-    // Main process already tees these into metroid_bread_hub.log.
+    // The main process already saves these log lines.
     appendPlainLine(text, null, level, { persist: false });
-    // Volume modal still ingests AP_VOL even when Debug logs is off.
+    // Read AP_VOL reports even when debug logs are hidden.
     ingestVolumeLog(text);
   }
 
@@ -741,120 +740,11 @@
     return blob.includes("password");
   }
 
-  /* ---------- Singleplayer zip dropzone ---------- */
-  // Set true to show the Singleplayer ZIP dropzone on the connect screen again.
-  const SHOW_SINGLEPLAYER_DROPZONE = false;
-
-  function pathBasename(p) {
-    if (!p) return "";
-    const parts = String(p).split(/[/\\]/);
-    return parts[parts.length - 1] || p;
-  }
-
-  function setSingleplayerStatus(msg, isError) {
-    const el = $("singleplayer-status");
-    if (!el) return;
-    el.textContent = msg || "";
-    el.style.color = isError ? "var(--danger)" : "var(--muted)";
-  }
-
-  async function handleSingleplayerZip(zipPath) {
-    if (!zipPath) return;
-    if (!/\.zip$/i.test(zipPath)) {
-      setSingleplayerStatus("Please choose a .zip file (Archipelago generated output).", true);
-      return;
-    }
-    if (state.running || state.connecting) {
-      setSingleplayerStatus("Disconnect from the server first to use a singleplayer zip.", true);
-      return;
-    }
-
-    setSingleplayerStatus(`Reading ${pathBasename(zipPath)}…`);
-    const result = await hub.loadSingleplayerZip(zipPath);
-    if (!result || !result.ok) {
-      setSingleplayerStatus((result && result.error) || "Could not read that zip.", true);
-      return;
-    }
-
-    // Same downstream state the AP-server path fills in via onApConnected(),
-    state.singleplayer = true;
-    state.spoilerPath = result.spoilerPath || "";
-    state.zipPath = result.zipPath || "";
-    state.seedName = result.gameName || state.seedName;
-    state.playerName = result.suggestedPlayer || $("slot").value.trim() || "DreadPlayer";
-    if (result.suggestedPlayer) $("slot").value = result.suggestedPlayer;
-
-    const playerNote = result.soloDread
-      ? " (solo)"
-      : result.suggestedPlayer
-        ? ` · player ${result.suggestedPlayer}`
-        : "";
-    setSingleplayerStatus(`Loaded ${pathBasename(zipPath)}${playerNote}`);
-    appendPlainLine(`[app] Singleplayer seed loaded from ${zipPath}${playerNote}\n`);
-
-    $("patch-seed-pill").textContent = `Seed: ${state.seedName || "from zip"}`;
-    $("patch-hint").textContent =
-      "Loaded from your singleplayer output .zip — no Archipelago server needed. Confirm paths and patch.";
-    $("btn-patch").disabled = false;
-    // No server to re-download from in singleplayer mode.
-    $("btn-redownload").hidden = true;
-    setStage("patch");
-  }
-
-  const singleplayerDrop = $("singleplayer-drop");
-  const singleplayerPanel = singleplayerDrop && singleplayerDrop.closest("section.panel");
-  if (!SHOW_SINGLEPLAYER_DROPZONE) {
-    if (singleplayerPanel) singleplayerPanel.hidden = true;
-  } else if (singleplayerDrop) {
-    singleplayerDrop.addEventListener("click", async () => {
-      const p = await hub.pickFile({
-        title: "Select your generated Archipelago output (.zip)",
-        filters: [
-          { name: "Archipelago Output", extensions: ["zip"] },
-          { name: "All Files", extensions: ["*"] },
-        ],
-      });
-      if (p) handleSingleplayerZip(p);
-    });
-    singleplayerDrop.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        singleplayerDrop.click();
-      }
-    });
-    ["dragenter", "dragover"].forEach((evt) =>
-      singleplayerDrop.addEventListener(evt, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        singleplayerDrop.classList.add("is-dragover");
-      })
-    );
-    ["dragleave", "dragend"].forEach((evt) =>
-      singleplayerDrop.addEventListener(evt, (e) => {
-        e.preventDefault();
-        singleplayerDrop.classList.remove("is-dragover");
-      })
-    );
-    singleplayerDrop.addEventListener("drop", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      singleplayerDrop.classList.remove("is-dragover");
-      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (!file) return;
-      const filePath = hub.getPathForFile(file);
-      if (!filePath) {
-        setSingleplayerStatus("Could not resolve dropped file path.", true);
-        return;
-      }
-      handleSingleplayerZip(filePath);
-    });
-  }
-
-  // Prevent Electron's default "navigate to dropped file" behavior anywhere
+  // Stop dropped files from replacing the app page.
   window.addEventListener("dragover", (e) => e.preventDefault());
   window.addEventListener("drop", (e) => e.preventDefault());
 
-  /* ---------- YAML editor ---------- */
+  /* YAML editor. */
 
   async function loadStartingLocationOptions() {
     const sel = $("yaml-start");
@@ -864,7 +754,7 @@
       if (!res.ok) return;
       const starts = await res.json();
       for (const s of starts) {
-        if (s.default) continue; // covered by "default"
+        if (s.default) continue; // Included in the default option.
         const opt = document.createElement("option");
         opt.value = s.key;
         opt.textContent = s.label;
@@ -872,7 +762,7 @@
       }
       sel.dataset.startsLoaded = "1";
     } catch (_) {
-      /* optional catalog */
+      /* The list is optional. */
     }
   }
 
@@ -1015,7 +905,7 @@
         });
         const reqWrap = requireEl?.closest("label");
         if (reqWrap) reqWrap.style.opacity = vanilla ? "0.45" : "";
-        // Vanilla Flash Shift always ships with 2 included dashes (locked).
+        // Vanilla Flash Shift includes two fixed dashes.
         const includedWrap = $("yaml-flash-included-wrap");
         const includedInp = includedWrap?.querySelector("input");
         if (vanilla) {
@@ -1096,7 +986,7 @@
       tricks.appendChild(lab);
     }
 
-    // Reverse Grapple: Options.py Toggle (RDV only uses Beginner).
+    // Reverse Grapple is an on/off option; RDV calls it Beginner.
     appendCheck(tricks, "reverse_grapple_block", "Reverse Grapple Block", { span: true });
 
     const syncDnaDeps = () => {
@@ -1146,7 +1036,7 @@
     const dread = (config && config["Metroid Bread"]) || {};
     $("yaml-name").value = config.name || "DreadPlayer";
 
-    // Migrate legacy Hub DNA keys → required_dna.
+    // Convert old DNA settings to required_dna.
     if (dread.required_dna == null && dread.game_goal === "dna_hunt") {
       const pct = Number(dread.dna_required);
       const count = Number(dread.dna_count);
@@ -1155,7 +1045,7 @@
       else dread.required_dna = 8;
       dread.game_goal = "defeat_raven_beak";
     }
-    // Drop retired DNA-hunt goal; keep defeat / 100%.
+    // Remove the old DNA-hunt goal; keep Raven Beak and 100%.
     if (dread.game_goal === "dna_hunt") dread.game_goal = "defeat_raven_beak";
 
     document.querySelectorAll("[data-yaml]").forEach((el) => {
@@ -1219,7 +1109,7 @@
       ...(state.yamlLoadedDread || {}),
       progression_balancing: 50,
     };
-    // Drop retired Hub-only DNA-hunt keys; keep game_goal (defeat / 100%).
+    // Remove old Hub DNA-hunt fields; keep game_goal.
     if (dread.game_goal === "dna_hunt") dread.game_goal = "defeat_raven_beak";
     delete dread.dna_count;
     delete dread.dna_required;
@@ -1236,12 +1126,12 @@
     dread.change_doors_to = readOptionSet("change_doors_to");
     dread.disabled_lights = readOptionSet("disabled_lights");
 
-    // Vanilla Flash Shift always uses 2 included chain dashes.
+    // Vanilla Flash Shift includes two chain dashes.
     if (dread[FLASH_SHIFT.vanillaKey]) {
       dread[FLASH_SHIFT.includedKey] = FLASH_SHIFT.includedDefault;
     }
 
-    // When door rando is off, keep sets for round-trip but generator ignores them.
+    // Keep door sets when door randomization is off so saving does not lose them.
     state.yamlLoadedDread = { ...dread };
     return {
       name: $("yaml-name").value.trim() || "DreadPlayer",
@@ -1350,7 +1240,7 @@
   }
 
   function startKitHighlightKeys(result) {
-    // Only paint Starting location / Starting Items when that field caused the
+    // Highlight the start or starting items only when that field caused the error.
     if (!result) return [];
     const title = String(result.title || "");
     const keys = [];
@@ -1422,7 +1312,7 @@
         altEl.textContent = "";
       }
     }
-    // Clear start/kit paints; applyYamlProbeHighlights re-adds only when responsible.
+    // Clear old start highlights before showing the current check result.
     ["yaml-start-field", "yaml-kit-field"].forEach((id) => {
       const field = $(id);
       if (!field) return;
@@ -1440,7 +1330,7 @@
 
   function scheduleYamlValidation({ immediate = false } = {}) {
     if (!hub.probeYamlStartSphere0) return;
-    // Invalidate any in-flight probe / pending debounce immediately so edits
+    // Cancel pending checks as soon as settings change.
     if (yamlProbeTimer) {
       clearTimeout(yamlProbeTimer);
       yamlProbeTimer = null;
@@ -1543,11 +1433,11 @@
       return;
     }
     $("yaml-status").textContent = `Saved ${result.path}`;
-    // Convenience: prefill client slot name
+    // Fill in the client's slot name.
     $("slot").value = config.name;
   });
 
-  /* ---------- Client status ---------- */
+  /* Client status. */
 
   function setPill(el, on) {
     el.dataset.state = on ? "on" : "off";
@@ -1578,7 +1468,7 @@
       return;
     }
     if (st.type === "ap_error" || st.type === "password_required") {
-      // Show the log when connect fails — panel is minimized on the connect screen.
+      // Open the log when connecting fails.
       setMainLogExpanded(true);
       appendPlainLine(`[app] ${st.error || "Archipelago error"}`);
       if (st.detail) appendPlainLine(String(st.detail));
@@ -1588,7 +1478,7 @@
         appendPlainLine(`[app] Server errors: ${list}`);
       }
       if (state.connecting || state.running || st.type === "password_required") {
-        // Kill the Python process so the next Connect is not a silent no-op.
+        // Stop the old Python process so Connect can start a new one.
         hub.stopClient().catch(() => {});
         if (isPasswordGateError(st)) {
           promptForRoomPassword(
@@ -1609,7 +1499,7 @@
       return;
     }
     if (st.type === "ap_disconnect") {
-      // Mid-session drop — log loudly but leave autoreconnect / process alone.
+      // Log a dropped connection but let the client reconnect.
       appendPlainLine(`[app] Archipelago disconnected: ${st.error || "connection lost"}`);
       if (st.detail) appendPlainLine(String(st.detail));
       if (st.exception) appendPlainLine(`[app] Exception: ${st.exception}`);
@@ -1683,7 +1573,7 @@
       setPill($("pill-ap"), false);
       setPill($("pill-game"), false);
       $("btn-connect").disabled = false;
-      // Client crash/exit used to leave the label stuck on "Connecting…".
+      // Clear Connecting when the client exits or crashes.
       if (wasConnecting) {
         setMainLogExpanded(true);
         const msg =
@@ -1712,7 +1602,7 @@
         resolve(value);
       };
       state.serverSpoilerWaiter = { resolve: finish };
-      setTimeout(() => finish({ error: "Timed out waiting for server placements." }), timeoutMs);
+      setTimeout(() => finish({ error: "Timed out waiting for slot data." }), timeoutMs);
     });
   }
 
@@ -1731,18 +1621,16 @@
 
     state.waitingServerSpoiler = true;
     state.running = true;
-    setConnectStatus("Connected. Asking Archipelago for seed placements…");
-    appendPlainLine(
-      "[app] Archipelago connected — downloading patch data from the server (no local spoiler needed)."
-    );
+    setConnectStatus("Connected. Saving slot data for the patcher…");
+    appendPlainLine("[app] Archipelago connected — patch data comes from slot data.");
 
     const serverResult = await (state._earlyServerSpoilerPromise || waitForServerSpoiler());
     state._earlyServerSpoilerPromise = null;
     state.waitingServerSpoiler = false;
     state.connecting = false;
 
-    if (serverResult && serverResult.spoiler_path) {
-      state.spoilerPath = serverResult.spoiler_path;
+    if (serverResult && serverResult.slot_path) {
+      state.slotPath = serverResult.slot_path;
       state.playerName = $("slot").value.trim();
       $("patch-seed-pill").textContent = `Seed: ${state.seedName || "from server"}`;
       $("patch-hint").textContent =
@@ -1759,7 +1647,7 @@
 
     const err = (serverResult && serverResult.error) || "Server did not return seed data.";
     appendPlainLine(`[app] ${err}`);
-    state.spoilerPath = "";
+    state.slotPath = "";
     state.playerName = $("slot").value.trim();
     $("patch-seed-pill").textContent = `Seed: ${state.seedName || "download failed"}`;
     $("patch-hint").textContent =
@@ -1787,13 +1675,13 @@
     const raw = $("server").value.trim();
     if (!raw) return;
 
-    // Text Client paste: optional ws(s):// + slot:password@host:port, or plain host:port.
+    // Accept Text Client connection text or a plain host and port.
     const parsed =
       typeof hub.parseConnectServer === "function"
         ? hub.parseConnectServer(raw)
         : null;
     if (!parsed) {
-      // Preload unavailable — keep prior archipelago:// / ws(s):// only behavior.
+      // Without preload helpers, accept only the existing URL forms.
       const roomMatch = raw.match(/\/room\/([A-Za-z0-9_-]+)/i);
       if (roomMatch) state.roomId = roomMatch[1];
       if (!/^archipelago:\/\//i.test(raw) && !/^wss?:\/\//i.test(raw)) return;
@@ -1807,7 +1695,7 @@
         const room = u.searchParams.get("room");
         if (room) state.roomId = room;
       } catch (_) {
-        /* ignore */
+        /* Leave invalid connection text for the user to correct. */
       }
       return;
     }
@@ -1815,21 +1703,21 @@
     if (parsed.room) state.roomId = parsed.room;
     if (parsed.server) $("server").value = parsed.server;
     if (parsed.hasUserinfo) {
-      // Always prefer userinfo from the server string when present.
+      // Use account details from the server text first.
       if (parsed.slot) $("slot").value = parsed.slot;
       $("password").value = normalizeUriPassword(parsed.password);
     }
   }
 
   async function gateOnRoomInfo(server, password) {
-    // RoomInfo.password is the only reliable pre-Connect signal (WebHost API has none).
+    // Read RoomInfo to find out whether a password is required.
     setConnectStatus("Checking room…");
     appendPlainLine(`[app] RoomInfo probe starting for ${server}`);
     let room;
     try {
       room = await hub.probeRoomInfo(server);
     } catch (err) {
-      // Probe failed — fall through to normal Connect (Python client still handles auth).
+      // Try normal Connect if the initial server check fails.
       appendPlainLine(`[app] RoomInfo probe threw: ${err && err.stack ? err.stack : err}`);
       appendPlainLine("[app] Continuing to Connect — Python client will report the real failure.");
       return { action: "connect", password: normalizeUriPassword(password) };
@@ -1868,7 +1756,7 @@
 
   async function connect() {
     if (state.connecting) return;
-    // Prior attempt may still own the Python process (password error, timeout, etc.).
+    // Stop any Python process left by the previous connection attempt.
     if (state.running) {
       appendPlainLine("[app] Stopping previous client before Connect…");
       await hub.stopClient();
@@ -1886,7 +1774,7 @@
       return;
     }
 
-    // Normalize URI "None"/empty before any Connect decision.
+    // Treat None and empty URL passwords as no password.
     $("password").value = normalizeUriPassword($("password").value);
     const hasPassword = Boolean(normalizeUriPassword($("password").value));
     appendPlainLine(
@@ -1897,8 +1785,7 @@
 
     state.connecting = true;
     state.patched = false;
-    state.singleplayer = false;
-    state.waitingServerSpoiler = false;
+        state.waitingServerSpoiler = false;
     $("btn-redownload").hidden = false;
     $("btn-connect").disabled = true;
 
@@ -1912,7 +1799,7 @@
       return;
     }
 
-    // Arm waiter before the Python client starts so we never miss patch_files_ready.
+    // Start waiting before launching Python so patch_files_ready cannot be missed.
     const earlyWait = waitForServerSpoiler(50000);
     setConnectStatus("Connecting…");
     appendPlainLine("[app] Spawning Metroid Bread Python client…");
@@ -1923,14 +1810,14 @@
     state.unsubStatus = hub.onStatus((st) => applyStatus(st));
 
     const result = await hub.startClient({
-      // Bare host:port (or URI) — Hub/CommonClient use ws:// first like Text Client.
+      // Try ws:// first, like Text Client and CommonClient.
       server,
       slot,
       password: gate.password,
       dreadIp: $("dread-ip").value.trim() || "127.0.0.1",
       autoConnectDread: false,
     });
-    // Stash for onApConnected — it will await the same promise.
+    // Save the same pending request for onApConnected.
     state._earlyServerSpoilerPromise = earlyWait;
 
     if (!result.ok) {
@@ -1952,7 +1839,7 @@
     state.running = true;
     appendPlainLine("[app] Python client running — waiting for Archipelago handshake…");
 
-    // Safety timeout if AP never confirms — clear stuck Connecting and free Connect.
+    // Reset Connect if the server never confirms the connection.
     const connectGeneration = (state._connectGeneration =
       (state._connectGeneration || 0) + 1);
     setTimeout(() => {
@@ -1983,16 +1870,15 @@
     state.connecting = false;
     state.apConnected = false;
     state.gameConnected = false;
-    state.spoilerPath = "";
-    state.singleplayer = false;
-    setPill($("pill-ap"), false);
+    state.slotPath = "";
+        setPill($("pill-ap"), false);
     setPill($("pill-game"), false);
     $("btn-connect").disabled = false;
     setStage("connect");
     appendPlainLine("[app] Disconnected.");
   }
 
-  /* ---------- Patch stage ---------- */
+  /* Patch screen. */
 
   function bindPatchLog() {
     if (state.unsubPatchLog) state.unsubPatchLog();
@@ -2088,7 +1974,7 @@
       $("patch-log-wrap").open = true;
       return;
     }
-    if (!state.spoilerPath) {
+    if (!state.slotPath) {
       appendPlainLine("No seed data from the server yet. Use Re-download seed.", $("patch-log"));
       $("patch-log-wrap").open = true;
       return;
@@ -2109,7 +1995,7 @@
     }
 
     const result = await hub.runPatch({
-      spoilerPath: state.spoilerPath,
+      slotPath: state.slotPath,
       baseRomPath: $("base-rom").value.trim(),
       outputPath,
       playerName: state.playerName || $("slot").value.trim(),
@@ -2134,7 +2020,7 @@
     setStage("client");
   }
 
-  /* ---------- Set Volume modal ---------- */
+  /* Volume window. */
 
   const VOLUME_CHANNELS = [
     { id: "vol-master", channel: "master", prop: "fMainVolume" },
@@ -2294,13 +2180,13 @@
     if (e.key === "Escape" && volumeModalOpen) closeVolumeModal();
   });
 
-  /* ---------- Main client actions ---------- */
+  /* Main client actions. */
 
   $("btn-connect").addEventListener("click", () => connect());
   $("btn-disconnect").addEventListener("click", () => disconnect());
   $("server").addEventListener("change", fillFromServerField);
   $("server").addEventListener("blur", fillFromServerField);
-  // After RoomInfo password gate focuses the field, Enter should retry Connect.
+  // Retry Connect when Enter is pressed in the password field.
   $("password").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -2355,8 +2241,8 @@
     const serverResult = await wait;
     $("btn-redownload").disabled = false;
 
-    if (serverResult && serverResult.spoiler_path) {
-      state.spoilerPath = serverResult.spoiler_path;
+    if (serverResult && serverResult.slot_path) {
+      state.slotPath = serverResult.slot_path;
       $("patch-seed-pill").textContent = `Seed: ${state.seedName || "from server"}`;
       $("patch-hint").textContent =
         "Seed data downloaded from the Archipelago server. Confirm paths and patch.";
@@ -2448,7 +2334,7 @@
   $("btn-clear-log").addEventListener("click", () => {
     $("log").textContent = "";
   });
-  // Keep summary actions from toggling the <details>; sync hint on manual open/close.
+  // Keep summary buttons from opening or closing the details panel.
   const mainLogActions = $("main-log-actions");
   if (mainLogActions) {
     mainLogActions.addEventListener("click", (e) => e.stopPropagation());
@@ -2497,7 +2383,7 @@
     $("cmd").value = "";
   });
 
-  /* ---------- Boot ---------- */
+  /* App startup. */
 
   async function boot() {
     buildYamlForm();
@@ -2523,7 +2409,7 @@
     applyDebugLogsPreference(Boolean(cfg.debug_logs));
     if (cfg.room_id) state.roomId = cfg.room_id;
 
-    // Launcher may leave a full archipelago:// URI in the server field.
+    // The launcher may pass a full archipelago:// URL as the server.
     if (/^archipelago:\/\//i.test($("server").value.trim())) {
       fillFromServerField();
     }
@@ -2550,7 +2436,7 @@
 
     setView("client");
 
-    // archipelago:// launch: probe RoomInfo → Connect (or wait for password) → patcher.
+    // Read RoomInfo, connect or ask for a password, then patch.
     const shouldAutoConnect =
       !state.running &&
       Boolean(cfg.auto_connect_ap) &&
@@ -2559,7 +2445,7 @@
     if (shouldAutoConnect) {
       appendPlainLine("[app] Launcher URI detected — checking room, then connecting…");
       setConnectStatus("Connecting from Archipelago link…");
-      // One-shot: clear so a manual reopen does not reconnect unexpectedly.
+      // Clear the launch request so opening the UI again cannot reconnect.
       hub
         .saveConfig({ auto_connect_ap: false, launcher_uri: cfg.launcher_uri || "" })
         .catch(() => {});

@@ -1,4 +1,4 @@
--- Metroid Bread loading tip pools (TITLE||BODY).
+-- Loading tip lists in TITLE||BODY format.
 
 ApTipPool = {
   "{c6}DNA COUNTER{c7}||Metroid DNA fills the HUD DNA counter toward your Required DNA goal. Network Stations can hint DNA locations when that option is on.{c0}",
@@ -8,7 +8,7 @@ ApTipPool = {
   "{c6}MAP TRACKER{c7}||Your map is constantly updating to show you new areas you can reach, and checks you can collect.{c0}",
 }
 
--- Unlocked one-per-collected-check into the active generic pool (ordered).
+-- Unlock one extra tip per collected check, in list order.
 ApTipPoolSecondary = {
   "{c6}CHARGE BEAM{c7}||Charge Beam opens Charge doors and charges shots. If you don't have this item by now, I'm so sorry for you.{c0}",
   "{c6}MORPH BALL{c7}||Why can't Metroid crawl?{c0}",

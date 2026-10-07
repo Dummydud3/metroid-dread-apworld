@@ -1,13 +1,6 @@
--- Floor current energy at 1 when a scenario starts and when a save snapshot is taken.
---
--- DeathLink writes ITEM_CURRENT_LIFE and LIFE.fCurrentLife to 0. A save station,
--- teleportal, tram, or elevator does not run the death sequence, so the arrival
--- and the save copy that 0 into the checkpoint / save slot. Continue then spawns
--- at 0 HP.
---
--- Same rule as dread_client_bridge.persist_life_floor: write 1 only when every
--- readable copy is already below 1. One healthy copy is left alone so a real
--- hit in progress is not pulled down to 1.
+-- Keep health at least 1 on arrival and while saving.
+-- DeathLink can otherwise leave a checkpoint with zero health.
+-- Raise health only if every readable value is below 1.
 
 ApMinLife = ApMinLife or {}
 ApMinLife.FLOOR = 1
@@ -17,7 +10,7 @@ local function log_floor(reason, lowest)
   if RL == nil or type(RL.SendApLog) ~= "function" then
     return
   end
-  -- AP_LIFE is not a normal Hub prefix; classify_dread_game_log keeps it debug-only.
+  -- Keep AP_LIFE logs hidden unless debug logging is on.
   pcall(
     RL.SendApLog,
     "AP_LIFE: floor "
@@ -75,7 +68,7 @@ function ApMinLife.ReadCopies()
   return copies
 end
 
--- True when every readable copy was below FLOOR and is now FLOOR.
+-- True when all readable health values needed raising to FLOOR.
 function ApMinLife.Clamp(reason)
   local copies = ApMinLife.ReadCopies()
   if #copies == 0 then
@@ -200,8 +193,8 @@ function ApMinLife.InControl()
 end
 
 function ApMinLife.BeginEnterGuard()
-  -- Arrival cinematics (elevator / tram / teleportal / door fade) keep control
-  -- disabled after OnLoad. Cap the guard so a later in-room DeathLink still kills.
+  -- Arrival cutscenes keep controls disabled after loading.
+  -- Limit the guard so a later DeathLink can still kill the player.
   ApMinLife._enterTicks = 80
 end
 
@@ -289,7 +282,7 @@ local function wrap_save(name)
       return orig(...)
     end
     local kind = select(1, ...)
-    -- Snapshot reads the live stores. Floor first so the slot cannot persist 0.
+    -- Raise health before saving so the snapshot cannot store zero.
     local raised = ApMinLife.Clamp("pre-" .. name)
     local r1, r2, r3, r4 = orig(...)
     if ApMinLife.Clamp("post-" .. name) then
@@ -328,9 +321,9 @@ local function wrap_scenario(name, before, after, begin_guard)
 end
 
 function ApMinLife._PollBody()
-  -- While the cinematic or save is in progress, keep the live stores at >= 1
-  -- so a snapshot taken during the animation cannot copy 0. Rewrite the slot
-  -- only after that ends, when StartPoint is the arrival spawn.
+  -- Keep health at least 1 during saving and arrival cutscenes.
+  -- This prevents a snapshot from storing zero during the animation.
+  -- Update the save slot after the arrival point is set.
   if ApMinLife.Protecting() then
     ApMinLife.Clamp("protect")
     return

@@ -1,6 +1,6 @@
--- Archipelago overrides appended after open-dread-rando's generated randomizer_powerup.
+-- Add AP changes after ODR's generated powerup script.
 
--- All Bosses: DNA CheckArtifacts must not unlock Itorash; the AP client grants
+-- For All Bosses, let the AP client unlock Itorash after checking bosses.
 AP_ALL_BOSSES_GATE = AP_ALL_BOSSES_GATE or false
 
 local function ap_all_bosses_gate()
@@ -10,7 +10,7 @@ local function ap_all_bosses_gate()
     return AP_ALL_BOSSES_GATE and true or false
 end
 
--- HUD DNA refresh must never abort a grant. ODR's UpdateHudDnaCount throws when
+-- Keep DNA HUD errors from stopping an item grant.
 local function ap_ensure_hud_dna_wrapped()
     if not Scenario or type(Scenario.UpdateHudDnaCount) ~= "function" then
         return
@@ -79,7 +79,7 @@ function RandomizerPowerup.CheckArtifacts(resource)
     RandomizerPowerup.SetItemAmount("ITEM_METROIDNIZATION", 1)
 end
 
--- Remote AP DNA (format_dna_receive_lua / /give). Stock ODR has no GrantNextArtifact;
+-- Add the GrantNextArtifact helper used by remote DNA grants.
 function RandomizerPowerup.GrantNextArtifact()
     if not Init or not Init.iNumRequiredArtifacts or Init.iNumRequiredArtifacts == 0 then
         Game.LogWarn(0, "GrantNextArtifact: DNA gate disabled (iNumRequiredArtifacts=0)")
@@ -111,7 +111,7 @@ function RandomizerPowerup.MarkLocationCollected(locationIdentifier)
         pcall(ApLoadingTips.NotifyCheckCollected, locationIdentifier)
     end
 
-    -- Boss/EMMI wrappers call this with scenario_callback keys (actor is nil in OnPickedUp).
+    -- Use callback names for boss pickups when no actor is provided.
     local pickupIndex = nil
     if RL and RL.BossPickupIndexByLocation then
         pickupIndex = RL.BossPickupIndexByLocation[locationIdentifier]
@@ -131,7 +131,7 @@ function RandomizerPowerup.MarkLocationCollected(locationIdentifier)
         RL.SendApLog(msg)
     end
 
-    -- Boss/EMMI death callbacks often run outside INGAME; push bitfield immediately
+    -- Send pickup flags even when boss callbacks run outside INGAME.
     if RL and RL.GetCollectedIndicesAndSend then
         pcall(RL.GetCollectedIndicesAndSend)
         Game.AddSF(0.05, "RL.GetCollectedIndicesAndSend", "")
@@ -140,7 +140,7 @@ function RandomizerPowerup.MarkLocationCollected(locationIdentifier)
     end
 end
 
--- Progressive Flash Shift Upgrade: unlock Ghost Aura on first pickup when
+-- Unlock Ghost Aura on the first progressive Flash Shift Upgrade when needed.
 AP_FLASH_SHIFT_REQUIRES_MAIN = AP_FLASH_SHIFT_REQUIRES_MAIN or false
 
 local function ap_flash_shift_requires_main()
@@ -159,20 +159,20 @@ local function ap_unlock_flash_shift_from_upgrade()
     end
     RandomizerPowerup.SetItemAmount("ITEM_GHOST_AURA", 1)
     Game.LogWarn(0, "Flash Shift Upgrade unlocked Flash Shift (ITEM_GHOST_AURA)")
-    -- Ability items need an input refresh or the new move can stay dead until reload.
+    -- Refresh controls so new abilities work without reloading.
     if RandomizerPowerup.DisableInput then
         RandomizerPowerup.DisableInput()
     end
     return true
 end
 
--- Mirror of randomizer_powerup.lua Flash Shift Upgrade (progressive first = ability + chains).
+-- Match the local progressive Flash Shift grant behavior.
 if not RandomizerPowerup._APFlashUpgradeHooked then
     RandomizerPowerup._APFlashUpgradeHooked = true
     local _APIncreaseItemAmount = RandomizerPowerup.IncreaseItemAmount
     function RandomizerPowerup.IncreaseItemAmount(item_id, quantity, capacity)
         if item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and quantity and quantity > 0 then
-            -- Local pickups use RandomizerPowerup (ODR has no SPECIFIC_CLASSES
+            -- Local pickups use RandomizerPowerup rather than SPECIFIC_CLASSES.
             ap_unlock_flash_shift_from_upgrade()
         end
         return _APIncreaseItemAmount(item_id, quantity, capacity)
@@ -192,7 +192,7 @@ function RandomizerFlashShiftUpgrade.OnPickedUp(actor, progression)
     RandomizerPowerup.OnPickedUp(actor, progression)
 end
 
--- Main Flash Shift: do not strip chains when inventory still has 0
+-- Keep existing Flash Shift chains while the inventory is still updating.
 function RandomizerFlashShift.OnPickedUp(actor, progression)
     progression = progression or {{{item_id = "ITEM_UPGRADE_FLASH_SHIFT_CHAIN", quantity = 0}}}
 
@@ -202,7 +202,7 @@ function RandomizerFlashShift.OnPickedUp(actor, progression)
     for _, resource_list in ipairs(progression) do
         for _, resource in ipairs(resource_list) do
             if resource.item_id == "ITEM_UPGRADE_FLASH_SHIFT_CHAIN" and hasFlashShift and currentChains > 0 then
-                -- Duplicate Flash Shift main item only: do not stack more chains
+                -- Do not add more chains for a duplicate main Flash Shift item.
                 resource.quantity = 0
             end
         end

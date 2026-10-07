@@ -7,7 +7,7 @@ local TIPS = {
   ROOT .. ".Content.Navigation.ListComposition.Menucontrols-Recenter",
   ROOT .. ".Content.Navigation.ListComposition.Menucontrols-FastMode",
 }
--- Chrome and the hints on the right stay vanilla. Only the four tip strings change.
+-- Keep the map layout and right-side hints; change only the four tip strings.
 local SHOW = {
   ROOT .. ".Content.Navigation",
   ROOT .. ".Content.Navigation.ListComposition",
@@ -80,7 +80,7 @@ local function read_view()
       end
     end
   end
-  -- Map opens centered on Samus. Use that until the cursor vec2 is live.
+  -- Use Samus's position until the map cursor is ready.
   return player_xy()
 end
 
@@ -99,10 +99,10 @@ local function show_obj(path)
 end
 
 local function tip_scale(text)
-  -- Vanilla labels are about 21 characters wide. Longer packed lines shrink
-  -- so they stay inside the tip frame instead of drawing over the map.
+  -- Shrink lines longer than the usual 21-character label width.
+  -- Keep the text inside the tip box.
   local n = #(text or "")
-  -- Exactly 1 is ignored by SetProperties, so a shrunk line would stay shrunk.
+  -- SetProperties ignores scale 1, so use a value just below it.
   if n <= 21 then return 0.999 end
   local scale = 21 / n
   if scale < 0.65 then scale = 0.65 end
@@ -115,7 +115,7 @@ local function set_text(path, text, scale)
   text = text or ""
   if scale == nil or scale == 1 then scale = 0.999 end
   ApMapLogic._last = ApMapLogic._last or {}
-  -- The label keeps its last glyphs until it is hidden and shown again.
+  -- Hide and show the label to refresh its text.
   if ApMapLogic._last[path] ~= text then
     pcall(GUI.SetProperties, obj, { Visible = false })
     if GUI.SetLabelText then pcall(GUI.SetLabelText, obj, text) end

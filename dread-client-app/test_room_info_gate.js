@@ -1,4 +1,4 @@
-/* * */
+
 
 "use strict";
 
@@ -99,7 +99,7 @@ test("buildWsCandidates prefers ws then wss (matches CommonClient)", () => {
     "wss://archipelago.gg:34841",
     "ws://archipelago.gg:34841",
   ]);
-  // Userinfo must not remain in probe URLs (would look like a bad host).
+  // Remove account details from the URL before checking the server.
   const pasted = buildWsCandidates("DreadPlayer:None@archipelago.gg:45441");
   assert.deepStrictEqual(pasted, [
     "ws://archipelago.gg:45441",
