@@ -34,7 +34,7 @@ ApTipPoolSecondary = {
   "{c6}BOSS CHECKS{c7}||Bosses and EMMI's can be checks if you enable it. Especially fun for the All Bosses game goal.{c0}",
   "{c6}TRANSPORTS{c7}||What kind of Chozo infrastructure doesn't include elevator music?{c0}",
   "{c6}DOOR RANDO{c7}||Door randomization changes the kinds of locks that are put on doors.{c0}",
-  "{c6}OUT OF LOGIC{c7}||Only naighty people get this tooltip. You went out of logic. I can smell it. Go back where you belong, punk.{c0}",
+  "{c6}OUT OF LOGIC{c7}||Only naughty people get this tooltip. You went out of logic. I can smell it. Go back where you belong, punk.{c0}",
   "{c6}ENERGY TANKS{c7}||If some bosses don't seem to be in logic, you might need more health. Stop being a sweat.{c0}",
   "{c6}STORM MISSILES{c7}||Please stop overlooking this ability, it does so much damage.{c0}",
   "{c6}ICE MISSILES{c7}||American law enforement is equipped with Ice Missiles by voice command, telling suspects to freeze.{c0}",
