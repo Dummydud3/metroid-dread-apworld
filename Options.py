@@ -629,12 +629,6 @@ class EarlyMorphBall(Toggle):
     default = 0
 
 
-class DangerousLogic(Toggle):
-    """Off: a check is only in logic if it is reachable AND you can leave back toward the start (or otherwise escape). On: reachable is enough, even if the room softlocks you."""
-    display_name = "Dangerous Logic"
-    default = 0
-
-
 class StartingKitItems(Range):
     """Max progression items the generator may precollect as a Start Kit so the"""
     display_name = "Starting Items"
@@ -722,7 +716,6 @@ class MetroidBreadOptions(PerGameCommonOptions):
     starting_location: StartingLocation
     starting_kit_items: StartingKitItems
     early_morph_ball: EarlyMorphBall
-    dangerous_logic: DangerousLogic
 
     # Trick and glitch settings.
     knowledge_tricks: KnowledgeTricks
@@ -825,9 +818,6 @@ metroid_bread_option_groups = [
         ProgressiveBombs,
         ProgressiveSuit,
         ProgressiveSpin,
-    ]),
-    OptionGroup("Logic", [
-        DangerousLogic,
     ]),
     OptionGroup("Basic Tricks", [
         KnowledgeTricks,

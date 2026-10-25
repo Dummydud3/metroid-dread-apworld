@@ -3011,7 +3011,7 @@ def persist_life_floor(
 
 
 def ap_min_life_install_lua() -> str:
-    """Inline ``ap_min_life.lua`` so a reconnect floors HP before the next boot.
+    """Inline disabled min-life code to neutralize old hooks on reconnect.
 
     RemoteLua on 2.1.0 accepts 4096 bytes per statement. One ``pcall(function()``
     around the whole file is a single statement (~10k) and the connect aborts.
@@ -3067,9 +3067,8 @@ def format_deathlink_kill_lua(
 ) -> str:
     """Force a player death the same way ODR updates energy in randomizer_powerup.lua.
 
-    A save-station / transport cinematic does not die from this 0. ApMinLife
-    floors scenario entry and the save snapshot at 1 HP. Do not floor here,
-    or a normal DeathLink would never kill.
+    A save-station / transport cinematic may not die from this 0. The min-life
+    save workaround is disabled since i cannot get it to work for the life of me.
     """
     message = death_message if death_message is not None else deathlink_display_message(source)
     popup_lit = _lua_escape_sq(message)

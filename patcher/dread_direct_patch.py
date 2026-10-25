@@ -1376,8 +1376,8 @@ _AP_MIN_LIFE_MARKER = "-- AP_MIN_LIFE"
 _AP_MIN_LIFE_END = "-- AP_MIN_LIFE_END"
 _AP_MIN_LIFE_BOOTSTRAP = """
 -- AP_MIN_LIFE
--- Floor scenario entry and save snapshots at 1 HP. Loaded last so this
--- OnLoadScenarioFinished wrapper runs outside ApWarp / station warp.
+-- Min-life hooks are disabled after native save crashes. Loading the guarded
+-- script also neutralizes wrappers left by an older client connection.
 Game.DoFile("system/scripts/ap_min_life.lua")
 if ApMinLife and ApMinLife.Install then
     ApMinLife.Install()
@@ -1387,7 +1387,7 @@ end
 
 
 def install_ap_min_life_scripts(romfs: Path) -> None:
-    """Keep checkpoint / save-slot energy at least 1 after a cinematic DeathLink."""
+    """Ship disabled min-life code, including guards for older client wrappers."""
     src = dread_paths.dread_scripts_dir() / "ap_min_life.lua"
     if not src.is_file():
         log(f"[WARN] min-life skipped — missing {src}")
@@ -1407,7 +1407,7 @@ def install_ap_min_life_scripts(romfs: Path) -> None:
     # Later package reads will then include that call.
     _write_scenario_lc(romfs, text.encode("utf-8"), scenario_pkg)
     _register_system_script_asset(romfs, "ap_min_life", src.read_bytes())
-    log(f"[OK] min-life floors scenario entry and save slots ({src.stat().st_size} bytes)")
+    log("[OK] min-life save hooks disabled pending crash investigation")
 
 
 _AP_RECEIVED_HUD_MARKER = "-- AP_RECEIVED_HUD"
@@ -1783,8 +1783,7 @@ def finalize_mod(
     # Put the death-only counter in the DNA row without reading Ryujinx properties.
     fix_death_counter_hud_position(romfs)
 
-    # Prevent save and transport checkpoints from storing zero health.
-    # Install this last so its loading hook runs outside the others.
+    # Keep min-life hooks disabled, including on a repatched mod.
     install_ap_min_life_scripts(romfs)
     install_ap_received_hud(romfs)
 

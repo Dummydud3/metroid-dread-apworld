@@ -1,8 +1,10 @@
--- Keep health at least 1 on arrival and while saving.
+-- Disabled experimental health floor on arrival and while saving.
 -- DeathLink can otherwise leave a checkpoint with zero health.
 -- Raise health only if every readable value is below 1.
 
 ApMinLife = ApMinLife or {}
+
+ApMinLife.ENABLED = false
 ApMinLife.FLOOR = 1
 ApMinLife._orig = ApMinLife._orig or {}
 
@@ -70,6 +72,9 @@ end
 
 -- True when all readable health values needed raising to FLOOR.
 function ApMinLife.Clamp(reason)
+  if not ApMinLife.ENABLED then
+    return false
+  end
   local copies = ApMinLife.ReadCopies()
   if #copies == 0 then
     return false
@@ -222,6 +227,9 @@ function ApMinLife.Protecting()
 end
 
 function ApMinLife.RewriteSlots(include_savedata)
+  if not ApMinLife.ENABLED then
+    return false
+  end
   if ApMinLife._rewriting then
     return false
   end
@@ -334,6 +342,9 @@ function ApMinLife._PollBody()
 end
 
 function ApMinLife.Poll()
+  if not ApMinLife.ENABLED then
+    return
+  end
   pcall(function()
     local mode = nil
     if Game ~= nil and type(Game.GetCurrentGameModeID) == "function" then
@@ -350,6 +361,12 @@ function ApMinLife.Poll()
 end
 
 function ApMinLife.Install()
+  if not ApMinLife.ENABLED then
+    ApMinLife._needsPersist = false
+    ApMinLife._persistSavedata = false
+    ApMinLife._enterTicks = 0
+    return
+  end
   if not ApMinLife._installed then
     ApMinLife._installed = true
     wrap_scenario("InitScenario", true, true, true)

@@ -68,7 +68,6 @@ _OPTION_DEFAULTS: Dict[str, int] = {
     "door_lock_rando": 0,
     "transport_rando": 0,
     "nerf_power_bombs": 0,
-    "dangerous_logic": 0,
     "game_goal": 0,  # Use Raven Beak without the 100% location filter.
     "include_boss_pickups": 1,  # Enabled by default.
     "start_with_pulse_radar": 1,  # Enabled by default.

@@ -209,14 +209,14 @@ class DreadLogic:
             artaria_starts[0] if artaria_starts else (starts[0] if starts else ("Artaria", "Intro Room", "Start Point"))
         )
 
-        # Save reachable nodes for each inventory and logic setting.
+        # Save reachable nodes for each inventory.
+        # The bool is the pause-map catalog search, which skips the escape check.
         self._reachable_cache: Dict[Tuple[FrozenSet[str], bool], Set[NodeId]] = {}
         # Build requirement checks once instead of repeatedly reading their dictionaries.
         self._compiled: Dict[int, Any] = {}
         self._trick_levels: Dict[str, int] = {}
         self._panel_inv_cache: Dict[FrozenSet[str], FrozenSet[str]] = {}
         self._link_cache: Dict[Tuple[FrozenSet[str], bool], Tuple[Dict[NodeId, list], Dict[NodeId, list]]] = {}
-        self._dangerous_cached: Optional[bool] = None
         # Store each node's targets and requirements.
         self._adj: Dict[NodeId, list] = {}
         self._rev_adj: Optional[Dict[NodeId, list]] = None
@@ -249,26 +249,6 @@ class DreadLogic:
         self._compile_requirements()
         self._rev_adj = None
         self._negated_event_items = self._scan_negated_event_items()
-
-    def dangerous_logic_enabled(self) -> bool:
-        """True when reachable rooms may be required even if the player cannot leave."""
-        cached = self._dangerous_cached
-        if cached is not None:
-            return cached
-        try:
-            opt = getattr(self.world.options, "dangerous_logic", None)
-        except Exception:
-            self._dangerous_cached = False
-            return False
-        if opt is None:
-            self._dangerous_cached = False
-            return False
-        try:
-            enabled = int(opt.value) > 0
-        except Exception:
-            enabled = bool(getattr(opt, "value", False))
-        self._dangerous_cached = enabled
-        return enabled
 
     def _scan_negated_event_items(self) -> FrozenSet[str]:
         """Event items used as ``negate`` requirements (a collect can close a path)."""
@@ -1135,20 +1115,23 @@ class DreadLogic:
         collect_events: bool = True,
         exclude_auto_events: Optional[AbstractSet[str]] = None,
     ) -> Set[NodeId]:
-        """BFS from start, optionally granting event items as their nodes become reachable."""
+        """BFS from start, optionally granting event items as their nodes become reachable.
+
+        A check counts only when the player can reach it and leave. The pause-map
+        catalog search skips that escape check.
+        """
         start = start or self.starting_node
         exclude = frozenset(exclude_auto_events or ())
-        dangerous = self.dangerous_logic_enabled()
         # Save results only for the default search with all events enabled.
         # The ignore-tricks setting stays fixed during each search.
         # Clear saved results when that setting changes.
-        # Keep dangerous-logic results separate from normal results.
         cache_ok = (
             collect_events
             and not exclude
             and start == self.starting_node
         )
-        cache_key = (inventory, dangerous, bool(getattr(self, "_catalog_fast", False)))
+        catalog_fast = bool(getattr(self, "_catalog_fast", False))
+        cache_key = (inventory, catalog_fast)
         if cache_ok and cache_key in self._reachable_cache:
             return self._reachable_cache[cache_key]
 
@@ -1157,7 +1140,7 @@ class DreadLogic:
 
         # The pause-map list needs many searches.
         # Skip escape checks there, but keep them for item placement.
-        if not dangerous and not getattr(self, "_catalog_fast", False):
+        if not catalog_fast:
             reachable = self._reachable_with_escape(inventory, start, exclude)
             if cache_ok:
                 self._reachable_cache[cache_key] = reachable

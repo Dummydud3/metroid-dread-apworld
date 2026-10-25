@@ -128,9 +128,7 @@ class RandovaniaLogicParser:
                             target_area = default_conn["area"]
                             target_node = default_conn["node"]
                             
-                            # Read the door's requirement.
-                            dock_weakness = node_data.get("default_dock_weakness")
-                            requirement = self._get_dock_weakness_requirement(dock_weakness)
+                            requirement = self._dock_open_requirement(node_data)
                             
                             connections.append((
                                 region_name, area_name, node_name,
@@ -169,13 +167,7 @@ class RandovaniaLogicParser:
                 target_area = default_conn.get("area")
                 target_node = default_conn.get("node")
                 
-                # Use RDV's custom opening requirements before the normal ones.
-                override = node.get("override_default_open_requirement")
-                if override is not None:
-                    requirement = override
-                else:
-                    dock_weakness = node.get("default_dock_weakness", "Power Beam Door")
-                    requirement = self._get_dock_weakness_requirement(dock_weakness)
+                requirement = self._dock_open_requirement(node)
                 
                 connections.append((target_region, target_area, target_node, requirement))
         
@@ -204,6 +196,14 @@ class RandovaniaLogicParser:
         
         return starting_nodes
     
+    def _dock_open_requirement(self, node: Dict) -> Dict:
+        """Requirement to cross this dock in its current weakness."""
+        override = node.get("override_default_open_requirement")
+        if override is not None:
+            return override
+        weakness = node.get("default_dock_weakness", "Power Beam Door")
+        return self._get_dock_weakness_requirement(weakness)
+
     def _get_dock_weakness_requirement(self, weakness_name: Optional[str]) -> Dict:
         """Get the requirement for a dock weakness (door type)"""
         if not weakness_name or weakness_name == "Power Beam Door":

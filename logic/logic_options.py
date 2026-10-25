@@ -17,7 +17,6 @@ _EXTRA_LOGIC_OPTIONS = (
     "door_lock_rando",
     "randovania_door_rando",
     "transport_rando",
-    "dangerous_logic",
 )
 
 LOGIC_OPTION_NAMES: tuple[str, ...] = tuple(
@@ -70,7 +69,6 @@ _SPOILER_LABEL_TO_OPTION: Dict[str, str] = {
     "Starting Power Bombs": "starting_power_bombs",
     "Power Bomb Tank Ammo": "power_bomb_tank_ammo",
     "Nerf Power Bombs": "nerf_power_bombs",
-    "Dangerous Logic": "dangerous_logic",
     "Door Lock Randomizer": "door_lock_rando",
     "Randovania Door Rando Algorithm": "randovania_door_rando",
     "Transport Randomizer": "transport_rando",

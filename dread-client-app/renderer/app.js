@@ -925,12 +925,6 @@
       flash._syncFlashDeps = syncFlashDeps;
     }
 
-    const logicFlags = $("yaml-logic-flags");
-    if (logicFlags) {
-      logicFlags.innerHTML = "";
-      appendCheck(logicFlags, "dangerous_logic", "Dangerous Logic");
-    }
-
     const cosmetics = $("yaml-cosmetics");
     if (cosmetics) {
       cosmetics.innerHTML = "";
@@ -1028,7 +1022,6 @@
     if (key === "death_link") return false;
     if (key === "randovania_door_rando") return false;
     if (key === "reverse_grapple_block") return false;
-    if (key === "dangerous_logic") return false;
     return null;
   }
 
@@ -1199,7 +1192,6 @@
       missile_plus_tanks: numOpt("missile_plus_tanks", 10),
       power_bomb_tanks: numOpt("power_bomb_tanks", 12),
       nerf_power_bombs: Boolean(dread.nerf_power_bombs),
-      dangerous_logic: Boolean(dread.dangerous_logic),
       constant_heat_damage: numOpt("constant_heat_damage", 20),
       constant_cold_damage: numOpt("constant_cold_damage", 20),
       accessibility: String(dread.accessibility || "items").toLowerCase(),

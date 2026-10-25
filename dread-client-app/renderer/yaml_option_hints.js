@@ -15,7 +15,6 @@
     "cross_bomb_launch": "By sliding and morphing as the Cross Bomb is exploding, Samus gains a lot of horizontal momentum.",
     "cross_bomb_skip": "There are sets of crumble blocks that you must use Cross Bomb to roll across. All can be skipped with the right tools.",
     "damage_boost": "Most enemies will knock you away when Samus gets damaged. This can be used to get momentum over ledges.",
-    "dangerous_logic": "Off: a check is only in logic if it is reachable AND you can leave back toward the start (or otherwise escape). On: reachable is enough, even if the room softlocks you. The Dairon bomb upgrade room stays out of logic until you already have a way out (Bomb or Cross Bomb); the door locks behind you.",
     "death_link": "When you die, other Death Link players die too (and vice versa), if the room has Death Link enabled.",
     "diagonal_bomb_jump": "A special kind of bomb jump where you gain diagonal momentum from bombs that explode slightly to the side.",
     "diffusion_abuse": "Using Diffusion Beam in certain situations can bypass the usual requirements for some objects.",

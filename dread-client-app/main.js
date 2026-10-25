@@ -1601,7 +1601,6 @@ function defaultYamlConfig() {
       raven_beak_damage_table: "consistent_low",
       nerf_power_bombs: false,
       skip_item_popups: false,
-      dangerous_logic: false,
       disabled_lights: [],
       x_starts_released: false,
       station_map_warp: false,

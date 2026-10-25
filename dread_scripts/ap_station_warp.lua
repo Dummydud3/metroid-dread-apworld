@@ -469,26 +469,39 @@ function ApStationWarp.SyncSpawn()
 end
 
 function ApStationWarp.WarpTo(entry)
+  if ApStationWarp._warp_transition then
+    return false
+  end
   if not ApStationWarp.OfferWarp(entry) then
     log("warp refused")
     return false
   end
-  -- Use the selected station's scenario and plate, not Samus's current scenario.
-  local scenario = entry.scenario
-  local plate = entry.plate
-  log(string.format(
-    "warp %s / %s / %s",
-    tostring(scenario),
-    tostring(plate),
-    tostring(entry.area)
-  ))
-  ApStationWarp.seen_start = nil
-  ApStationWarp.seen_scenario = nil
-  local ok, err = pcall(Game.LoadScenario, ApStationWarp.level_id, scenario, plate, "", 1)
-  if not ok then
-    log("LoadScenario failed: " .. tostring(err))
+  if not Game or type(Game.AddGUISF) ~= "function"
+    or not GUI or type(GUI.GetDisplayObject) ~= "function"
+    or type(GUI.DispatchEvent) ~= "function" then
+    log("warp refused: cannot close pause menu")
     return false
   end
+  -- The confirmation animation finished. Release every hold before sending
+  -- the same GUI event as the Plus button.
+  ApStationWarp._warp_transition = true
+  ApStationWarp._depart_entry = entry
+  ApStationWarp._depart_ticks = 0
+  ApStationWarp._hold_map = 0
+  ApStationWarp._b_lock_ticks = 0
+  ApStationWarp.block_marker = false
+  if GUI and GUI.FlushInput then
+    pcall(GUI.FlushInput)
+  end
+  local ok, closed = pcall(ApStationWarp.ClosePauseMenu)
+  if not ok or not closed then
+    ApStationWarp._warp_transition = false
+    ApStationWarp._depart_entry = nil
+    log("pause-menu close failed: " .. tostring(closed))
+    return false
+  end
+  -- Give the menu a GUI frame to close before loading the destination.
+  Game.AddGUISF(0, "ApStationWarp.FinishWarp", "")
   return true
 end
 
@@ -507,6 +520,7 @@ function ApStationWarp_OnAccept()
   ApStationWarp.prompt_open = false
   -- Keep the pause map open until the prompt closes.
   -- Otherwise A can also close the map during the animation.
+  -- It makes perfect since in my head, I cannot understand why the pause menu doesn't close, idk what im missing here
   ApStationWarp._hold_map = 30
   if ApStationWarp.HoldMapOpen then
     ApStationWarp.HoldMapOpen()
@@ -584,7 +598,30 @@ local function map_open()
   return flag_on(root, "Enabled") and flag_on(root, "Visible")
 end
 
+function ApStationWarp.ClosePauseMenu()
+  -- Start toggles the page. Do not reopen it if it has already closed.
+  if not map_open() then
+    return true
+  end
+  local menu = display_object("IngameMenuRoot")
+  if menu == nil then
+    return false
+  end
+  if not GUI or type(GUI.DispatchEvent) ~= "function" then
+    return false
+  end
+  -- GUI event "Start" is event 33 (Plus). CIngameMenu::OnEvent dispatches it
+  -- through virtual slot 0x110 into the menu's state transition handler.
+  -- Let that handler close the page, play its animation, and release pause;
+  -- setting Enabled/Visible or changing the game mode bypasses those steps.
+  GUI.DispatchEvent(menu, "Start")
+  return true
+end
+
 function ApStationWarp.HoldMapOpen()
+  if ApStationWarp._warp_transition then
+    return
+  end
   if not (GUI and GUI.SetProperties) then
     return
   end
@@ -595,6 +632,42 @@ function ApStationWarp.HoldMapOpen()
   local menu = display_object("IngameMenuRoot")
   if menu then
     pcall(GUI.SetProperties, menu, { Enabled = true, Visible = true })
+  end
+end
+
+function ApStationWarp.FinishWarp()
+  local entry = ApStationWarp._depart_entry
+  if not ApStationWarp._warp_transition or entry == nil then
+    return
+  end
+  ApStationWarp._depart_ticks = (ApStationWarp._depart_ticks or 0) + 1
+  local closing = map_open()
+  if Game and type(Game.IsGamePaused) == "function" then
+    local ok, paused = pcall(Game.IsGamePaused)
+    closing = closing or not ok or paused
+  end
+  if Game and type(Game.GetCurrentGameModeID) == "function" then
+    local ok, mode = pcall(Game.GetCurrentGameModeID)
+    closing = closing or not ok or mode ~= "INGAME"
+  end
+  if closing then
+    if ApStationWarp._depart_ticks < 120 then
+      Game.AddGUISF(0, "ApStationWarp.FinishWarp", "")
+    else
+      ApStationWarp._depart_entry = nil
+      ApStationWarp._warp_transition = false
+      log("warp cancelled: pause map did not close")
+    end
+    return
+  end
+  ApStationWarp._depart_entry = nil
+  ApStationWarp.seen_start = nil
+  ApStationWarp.seen_scenario = nil
+  log(string.format("warp %s / %s / %s", entry.scenario, entry.plate, entry.area))
+  local ok, err = pcall(Game.LoadScenario, ApStationWarp.level_id, entry.scenario, entry.plate, "", 1)
+  if not ok then
+    ApStationWarp._warp_transition = false
+    log("LoadScenario failed: " .. tostring(err))
   end
 end
 
@@ -1570,6 +1643,9 @@ function ApStationWarp.OnMarkerCreated(arg)
 end
 
 function ApStationWarp.Tick()
+  if ApStationWarp._warp_transition then
+    return
+  end
   if not ApStationWarp.IsEnabled() then
     return
   end
@@ -1585,6 +1661,9 @@ function ApStationWarp.Tick()
   end
   if ApStationWarp.AdvancePopupAnim then
     ApStationWarp.AdvancePopupAnim()
+  end
+  if ApStationWarp._warp_transition then
+    return
   end
   pcall(ApStationWarp.SyncSpawn)
 
@@ -1808,6 +1887,8 @@ function ApStationWarp.Install()
     Scenario.OnLoadScenarioFinished = function(...)
       local result = orig_onload(...)
       ApStationWarp.prompt_open = false
+      ApStationWarp._warp_transition = false
+      ApStationWarp._depart_entry = nil
       ApStationWarp.pending = nil
       ApStationWarp.a_was = false
       ApStationWarp.b_was = false
